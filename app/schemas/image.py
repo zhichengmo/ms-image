@@ -3,6 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.imaging.object_store import MAX_IMAGE_BYTES
 from app.schemas.imaging_common import normalize_required_text, normalize_utc_datetime
 
 
@@ -12,6 +13,12 @@ IMAGE_ROLES = frozenset(
 IMAGE_KINDS = frozenset({"instance", "photo", "cine", "video", "wsi", "volume", "other"})
 FILE_FORMATS = frozenset({"dicom", "jpeg", "png", "mp4", "nifti", "tiff", "svs", "other"})
 UPLOAD_MODES = frozenset({"direct_put", "multipart", "internal_import"})
+QUALIFIED_UPLOAD_FORMATS = frozenset({"dicom", "jpeg", "png"})
+QUALIFIED_CONTENT_TYPES = {
+    "dicom": "application/dicom",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+}
 
 
 class ImageCreate(BaseModel):
@@ -119,6 +126,88 @@ class ImageUpdate(BaseModel):
     expected_state_version: int = Field(ge=0)
 
 
+class ImagePrepareUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    series_id: str = Field(min_length=1, max_length=64)
+    source_image_id: str | None = Field(default=None, max_length=128)
+    logical_image_key: str = Field(min_length=1, max_length=128)
+    source_manifest: list[dict[str, Any]] | None = None
+    sequence_no: int = Field(ge=1)
+    image_role: str = Field(min_length=1, max_length=32)
+    image_kind: str = Field(min_length=1, max_length=32)
+    metadata_schema_version: str = Field(min_length=1, max_length=64)
+    file_format: str = Field(min_length=1, max_length=32)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_size_bytes: int = Field(ge=1, le=MAX_IMAGE_BYTES)
+    declared_content_type: str = Field(min_length=1, max_length=128)
+    technical_metadata: dict[str, Any] | None = None
+
+    @field_validator("series_id", "logical_image_key", "metadata_schema_version")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("source_image_id")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("image_role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = normalize_required_text(value).lower()
+        if normalized not in IMAGE_ROLES:
+            raise ValueError("image_role_invalid")
+        return normalized
+
+    @field_validator("image_kind")
+    @classmethod
+    def validate_kind(cls, value: str) -> str:
+        normalized = normalize_required_text(value).lower()
+        if normalized not in IMAGE_KINDS:
+            raise ValueError("image_kind_invalid")
+        return normalized
+
+    @field_validator("file_format")
+    @classmethod
+    def validate_format(cls, value: str) -> str:
+        normalized = normalize_required_text(value).lower()
+        if normalized not in QUALIFIED_UPLOAD_FORMATS:
+            raise ValueError("image_format_not_qualified")
+        return normalized
+
+    @field_validator("declared_content_type")
+    @classmethod
+    def normalize_content_type(cls, value: str) -> str:
+        normalized = normalize_required_text(value).casefold()
+        return "image/jpeg" if normalized == "image/jpg" else normalized
+
+    @model_validator(mode="after")
+    def validate_prepare_contract(self):
+        if QUALIFIED_CONTENT_TYPES[self.file_format] != self.declared_content_type:
+            raise ValueError("image_format_content_type_mismatch")
+        if self.image_role == "original" and self.source_manifest:
+            raise ValueError("original_image_source_manifest_forbidden")
+        if self.image_role != "original" and not self.source_manifest:
+            raise ValueError("derived_image_source_manifest_required")
+        return self
+
+
+class ImageUploadTicket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image: "ImageResponse"
+    generation: int = Field(ge=1)
+    upload_mode: str
+    required_headers: dict[str, str]
+    expires_at: datetime
+    signed_url: str = Field(repr=False)
+
+
 class ImageAbortCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -179,9 +268,13 @@ __all__ = [
     "FILE_FORMATS",
     "IMAGE_KINDS",
     "IMAGE_ROLES",
+    "MAX_IMAGE_BYTES",
+    "QUALIFIED_UPLOAD_FORMATS",
     "UPLOAD_MODES",
     "ImageAbortCommand",
     "ImageCreate",
+    "ImagePrepareUploadRequest",
     "ImageResponse",
+    "ImageUploadTicket",
     "ImageUpdate",
 ]

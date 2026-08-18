@@ -3,13 +3,23 @@ import os
 import rsa
 import base64
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from fastapi import Depends, Header, HTTPException, status, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from typing import Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.async_db import get_async_session
+from app.core.async_db import get_async_session, get_explicit_transaction_session
+from app.core.imaging.object_store import (
+    OSSObjectStore,
+    ObjectStorageGateway,
+)
+
+if TYPE_CHECKING:
+    from app.service.image_service import ImageService
 
 
 auth_domain = os.getenv('AUTH_DOMAIN')
@@ -247,6 +257,25 @@ async def get_image_service(db=Depends(get_async_session)):
     from app.service.image_service import ImageService
 
     return ImageService(db)
+
+
+@dataclass(frozen=True)
+class ImageStorageDependencies:
+    db: AsyncSession
+    service: "ImageService"
+    gateway_factory: Callable[[], ObjectStorageGateway]
+
+
+async def get_image_storage_dependencies(
+    db: AsyncSession = Depends(get_explicit_transaction_session),
+) -> ImageStorageDependencies:
+    from app.service.image_service import ImageService
+
+    return ImageStorageDependencies(
+        db=db,
+        service=ImageService(db),
+        gateway_factory=OSSObjectStore,
+    )
 
 
 async def get_xray_run_service(

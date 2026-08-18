@@ -28,6 +28,8 @@
 | 2026-08-18 | Image ready 与 Series/Study revision 使用同一终态事务 | 禁止 Image 已 ready 但 manifest/revision 仍旧；Study CAS 冲突回滚 Image ready，再释放原 lease 安排重试 | `ImageService.complete_validation`；设计母文第 4.9、8.2 节；INV-55、INV-66 |
 | 2026-08-18 | ready 对象漂移首期按显式 Image ID 有界核查 | 当前表没有 durable scan cursor/next-check 字段；伪造全局前 N 条扫描会永久重复同一批对象。显式核查仍执行完整 Gateway 校验和原子 Study 失效，周期 inventory 留待有运行合同后实现 | `workers/imaging_worker/reconcile.py:verify_ready_image`；未授权迁移边界 |
 | 2026-08-18 | OSS HEAD 将 NoSuchKey/NotFound 归一为 `object_not_found` | 过期 upload reconcile 必须区分确定性对象缺失和可重试 HEAD/网络失败，且不能把 SDK 错误详情写入业务状态 | `app/core/imaging/object_store.py:head_object` |
+| 2026-08-18 | direct prepare 只对 `uploading` 同载荷重发 grant，`validating` 不重签 | complete 后重签 PUT 会允许客户端覆盖 Worker 正在校验的对象版本；相同 uploading 行可安全刷新 expiry，ready 必须走 replace | `ImageService.prepare_direct_upload` |
+| 2026-08-18 | 首期公开上传只资格化 DICOM/JPEG/PNG 且单对象不超过 64 MiB | 当前 Gateway 完整校验会在流式 hash 同时保留有界 bytes 供格式解析，尚无大型 CT/MRI/视频/WSI parser；传输协议实现不能冒充运行资格 | `ImagePrepareUploadRequest`；`MAX_IMAGE_BYTES`；当前范围合同 |
 
 ## 记录规则
 

@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.imaging.object_store import ObjectHead, ObjectValidation
+from app.core.imaging.object_store import OSSObjectStore, ObjectHead, ObjectValidation
 from app.crud.image import ImageDal
 from app.crud.outbox import OutboxDal
 from app.crud.series import SeriesDal
@@ -12,7 +12,7 @@ from app.crud.session import SessionDal
 from app.crud.study import StudyDal
 from app.models.image import Image
 from app.models.imaging_base import new_opaque_id
-from app.schemas.image import ImageCreate, ImageResponse
+from app.schemas.image import ImageCreate, ImagePrepareUploadRequest, ImageResponse
 from app.schemas.outbox import ValidateImageMessage
 from app.service.session_service import SessionAccessDeniedError, SessionNotFoundError
 from app.service.study_service import StudyService, StudyStateConflictError
@@ -161,6 +161,102 @@ class ImageService:
         return self._response(
             await self._owned_image(image_id=image_id, requester_id=requester_id)
         )
+
+    async def prepare_direct_upload(
+        self,
+        *,
+        payload: ImagePrepareUploadRequest,
+        requester_id: str,
+        storage_profile: str,
+        upload_expires_at: datetime,
+    ) -> ImageResponse:
+        profile = storage_profile.strip()
+        if not profile or len(profile) > 40:
+            raise ImageStateConflictError("image_storage_profile_invalid")
+        series = await self.series_dal.get_by_id(payload.series_id)
+        if series is None:
+            raise ImageNotFoundError("series_not_found")
+        study = await self.study_dal.get_by_id(series.study_id)
+        if study is None:
+            raise ImageNotFoundError("study_not_found")
+        session = await self._owned_session(
+            session_id=study.session_id, requester_id=requester_id
+        )
+        if session.status != "processing" or study.status == "invalid":
+            raise ImageStateConflictError("study_not_accepting_images")
+
+        try:
+            current_ready = await self.image_dal.get_ready_logical(
+                series_id=series.id,
+                logical_image_key=payload.logical_image_key,
+            )
+        except ValueError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        if current_ready is not None:
+            raise ImageStateConflictError("image_replace_required")
+        latest = await self.image_dal.get_latest_logical(
+            series_id=series.id,
+            logical_image_key=payload.logical_image_key,
+        )
+        if latest is not None and latest.status == "uploading":
+            self._assert_prepare_match(latest, payload, profile)
+            refreshed = await self.image_dal.refresh_upload_expiry(
+                image_id=latest.id,
+                expected_version=latest.state_version,
+                upload_expires_at=upload_expires_at,
+            )
+            if refreshed is None:
+                raise ImageStateConflictError("image_prepare_conflict")
+            return self._response(refreshed)
+        if latest is not None and latest.status == "validating":
+            raise ImageStateConflictError("image_validation_in_progress")
+
+        image_version_no = 1 if latest is None else latest.image_version_no + 1
+        image_id = new_opaque_id()
+        object_key = OSSObjectStore.new_image_object_key(
+            image_id=image_id,
+            generation=image_version_no,
+            file_format=payload.file_format,
+        )
+        values: dict[str, Any] = {
+            "id": image_id,
+            "series_id": series.id,
+            "source_image_id": payload.source_image_id,
+            "logical_image_key": payload.logical_image_key,
+            "image_version_no": image_version_no,
+            "supersedes_image_id": None,
+            "source_manifest_json": payload.source_manifest,
+            "sequence_no": payload.sequence_no,
+            "image_role": payload.image_role,
+            "image_kind": payload.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": profile,
+            "object_key": object_key,
+            "file_format": payload.file_format,
+            "upload_mode": "direct_put",
+            "upload_session_ref": None,
+            "expected_part_count": None,
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+            "status": "uploading",
+            "state_version": 0,
+            "validation_lease_generation": 0,
+            "validation_attempt_count": 0,
+            "upload_expires_at": upload_expires_at,
+        }
+        created = await self.image_dal.create_idempotent(values)
+        if created is not None:
+            return self._response(created)
+        latest = await self.image_dal.get_latest_logical(
+            series_id=series.id,
+            logical_image_key=payload.logical_image_key,
+        )
+        if latest is None or latest.status != "uploading":
+            raise ImageStateConflictError("image_prepare_race")
+        self._assert_prepare_match(latest, payload, profile)
+        return self._response(latest)
 
     async def abort_upload(
         self,
@@ -700,6 +796,32 @@ class ImageService:
             "file_format": payload.file_format,
             "upload_mode": payload.upload_mode,
             "expected_part_count": payload.expected_part_count,
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+        }
+        if any(getattr(image, field) != value for field, value in expected.items()):
+            raise ImageIdempotencyConflictError("image_idempotency_conflict")
+
+    @staticmethod
+    def _assert_prepare_match(
+        image: Image,
+        payload: ImagePrepareUploadRequest,
+        storage_profile: str,
+    ) -> None:
+        expected = {
+            "series_id": payload.series_id,
+            "source_image_id": payload.source_image_id,
+            "logical_image_key": payload.logical_image_key,
+            "source_manifest_json": payload.source_manifest,
+            "sequence_no": payload.sequence_no,
+            "image_role": payload.image_role,
+            "image_kind": payload.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": storage_profile,
+            "file_format": payload.file_format,
+            "upload_mode": "direct_put",
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,

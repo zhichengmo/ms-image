@@ -108,6 +108,10 @@
 | 2026-08-18 | P1C Image reconcile 状态行为 | `passed in memory` | fake session 覆盖 expired lease recovery、published event 重放、过期 upload accepted/missing 和指定 ready drift invalidated |
 | 2026-08-18 | P1C Image reconcile 事务边界 | `passed in memory` | fake Gateway 断言 upload HEAD 与 ready 完整校验时活动 DB TX 均为 0；状态更新使用新短事务 |
 | 2026-08-18 | P1C OSS missing 分类 | `passed in memory` | fake OSS `NoSuchKey` 被归一为稳定 `object_not_found`，未暴露 SDK 详情 |
+| 2026-08-18 | P1B direct prepare Python/OpenAPI | `passed` | compile/import 成功；新增 `POST /api/v1/images/prepare-upload`，应用路由从 36 增至 37，响应为 `GenericResponse[ImageUploadTicket]` |
+| 2026-08-18 | P1B direct prepare 事务边界 | `passed in memory` | fake DB/Gateway 断言 Service 创建行时 TX 活跃、生成 signed PUT grant 时 TX 为 0 |
+| 2026-08-18 | P1B direct prepare 幂等/owner | `passed in memory` | 服务端生成 `image/{image_id}/{version}/source.png`；同 uploading 载荷返回同 ID/key，载荷变化冲突，ready logical key 要求 replace |
+| 2026-08-18 | P1B direct prepare 安全门禁 | `passed in memory` | signed URL 从 repr 隐藏且无持久化字段；MP4 和超过 64 MiB 请求在 Schema 层 fail closed |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

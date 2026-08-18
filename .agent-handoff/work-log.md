@@ -135,3 +135,11 @@
 - OSS `NoSuchKey/NotFound` 统一映射为稳定 `object_not_found`；不将 SDK 错误详情写入状态。
 - ready 对象漂移使用显式 Image ID 做完整 Gateway 校验；确定性漂移将 Image 隔离并在同事务重算 Series/Study，Study CAS 冲突整体回滚。
 - 未创建迁移或测试脚本，未物理删除或自动认领对象，未访问真实 MySQL/OSS/RabbitMQ。
+
+## 2026-08-18 — P1B/P1C direct prepare API
+
+- 新增显式事务 Image storage dependency 和 `POST /api/v1/images/prepare-upload`；旧请求级事务依赖保持不变。
+- 外部请求不接受 object key、storage profile、owner、状态或 signed URL；Service 生成 Image ID、version/generation 和 `image/{id}/{version}` key。
+- DB 短事务提交 uploading Image 后才调用 Gateway 生成 direct PUT grant；签名失败保留可幂等重试的 uploading 事实。
+- 相同 uploading 载荷复用行并刷新 expiry；载荷漂移冲突，validating 不重签，ready logical key 必须使用 replace。
+- 首期仅允许 DICOM/JPEG/PNG 且不超过 64 MiB；未创建迁移或测试脚本，未访问真实 DB/OSS。

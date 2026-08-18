@@ -49,6 +49,23 @@ class ImageDal(DalBase):
         )
         return rows[0] if rows else None
 
+    async def get_ready_logical(
+        self, *, series_id: str, logical_image_key: str
+    ) -> Image | None:
+        rows = await self.get_datas(
+            page=1,
+            limit=2,
+            series_id=series_id,
+            logical_image_key=logical_image_key,
+            status="ready",
+            v_order="desc",
+            v_order_field="image_version_no",
+            v_return_objs=True,
+        )
+        if len(rows) > 1:
+            raise ValueError("image_current_version_conflict")
+        return rows[0] if rows else None
+
     async def list_for_series(self, series_id: str) -> list[Image]:
         return await self.get_datas(
             limit=0,
@@ -184,6 +201,29 @@ class ImageDal(DalBase):
         ):
             raise ValueError("image_validation_claim_readback_failed")
         return image
+
+    async def refresh_upload_expiry(
+        self,
+        *,
+        image_id: str,
+        expected_version: int,
+        upload_expires_at: datetime,
+    ) -> Image | None:
+        refreshed = await self.conditional_update(
+            v_where=[
+                self.model.id == image_id,
+                self.model.status == "uploading",
+                self.model.state_version == expected_version,
+            ],
+            data={"upload_expires_at": upload_expires_at},
+        )
+        if not refreshed:
+            return None
+        return await self.get_data(
+            data_id=image_id,
+            v_return_none=True,
+            v_expire_all=True,
+        )
 
     async def heartbeat_validation_lease(
         self,

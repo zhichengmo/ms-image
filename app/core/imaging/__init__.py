@@ -12,6 +12,7 @@ from .contracts import (
 )
 from .object_store import (
     ImageInspection,
+    MAX_IMAGE_BYTES,
     MultipartPart,
     OSSObjectStore,
     ObjectHead,
@@ -43,6 +44,7 @@ __all__ = [
     "ImageResolver",
     "ImageResolverError",
     "ImageInspection",
+    "MAX_IMAGE_BYTES",
     "MultipartPart",
     "OSSObjectStore",
     "ObjectHead",

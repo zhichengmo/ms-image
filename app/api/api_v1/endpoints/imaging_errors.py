@@ -2,6 +2,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.imaging.object_store import ObjectStoreError
 from app.schemas.base import GenericResponse
 from app.service.image_service import (
     ImageIdempotencyConflictError,
@@ -35,6 +36,8 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
     await db.rollback()
     if isinstance(exc, SQLAlchemyError):
         return _response(503, 5031, "服务依赖未就绪")
+    if isinstance(exc, ObjectStoreError):
+        return _response(503, 5032, "对象存储暂不可用")
     if isinstance(exc, SessionAccessDeniedError):
         return _response(404, 4041, "资源不存在")
     if isinstance(

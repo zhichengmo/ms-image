@@ -19,7 +19,7 @@ from app.core.config import Settings, settings
 
 
 _OBJECT_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$")
-_MAX_IMAGE_BYTES = 64 * 1024 * 1024
+MAX_IMAGE_BYTES = 64 * 1024 * 1024
 _MAX_IMAGE_DIMENSION = 16384
 _MAX_IMAGE_PIXELS = 100_000_000
 
@@ -203,7 +203,7 @@ class OSSObjectStore:
         validate_object_key(object_key)
         if not content:
             raise ObjectStoreError("object_content_empty")
-        if len(content) > _MAX_IMAGE_BYTES:
+        if len(content) > MAX_IMAGE_BYTES:
             raise ObjectStoreError("image_content_too_large")
         normalized_mime = mime_type.casefold().strip()
         if normalized_mime not in {
@@ -403,10 +403,10 @@ class OSSObjectStore:
             if getattr(result, "status", 500) >= 400:
                 raise ObjectStoreError("object_store_download_failed")
             declared_length = getattr(result, "content_length", None)
-            if isinstance(declared_length, int) and declared_length > _MAX_IMAGE_BYTES:
+            if isinstance(declared_length, int) and declared_length > MAX_IMAGE_BYTES:
                 raise ObjectStoreError("image_content_too_large")
-            content = result.read(_MAX_IMAGE_BYTES + 1)
-            if len(content) > _MAX_IMAGE_BYTES:
+            content = result.read(MAX_IMAGE_BYTES + 1)
+            if len(content) > MAX_IMAGE_BYTES:
                 raise ObjectStoreError("image_content_too_large")
             return content
 
@@ -439,7 +439,7 @@ class OSSObjectStore:
         before = await self.head_object(object_key=object_key)
         if expected_size_bytes is not None and before.size_bytes != expected_size_bytes:
             raise ObjectStoreError("object_size_mismatch")
-        if before.size_bytes > _MAX_IMAGE_BYTES:
+        if before.size_bytes > MAX_IMAGE_BYTES:
             raise ObjectStoreError("image_content_too_large")
         if expected_object_version_id and before.object_version_id != expected_object_version_id:
             raise ObjectStoreError("object_version_mismatch")
@@ -456,7 +456,7 @@ class OSSObjectStore:
                     break
                 digest.update(chunk)
                 content.extend(chunk)
-                if len(content) > _MAX_IMAGE_BYTES:
+                if len(content) > MAX_IMAGE_BYTES:
                     raise ObjectStoreError("image_content_too_large")
             headers = getattr(result, "headers", {}) or {}
             return bytes(content), digest.hexdigest(), _header(headers, "x-oss-version-id")
@@ -541,7 +541,7 @@ def _validate_file_format(file_format: str, mime_type: str) -> None:
 def inspect_image_bytes(content: bytes, declared_mime: str | None = None) -> ImageInspection:
     if not content:
         raise ObjectStoreError("image_content_empty")
-    if len(content) > _MAX_IMAGE_BYTES:
+    if len(content) > MAX_IMAGE_BYTES:
         raise ObjectStoreError("image_content_too_large")
     declared = (declared_mime or "").casefold().strip()
     if declared == "image/jpg":
