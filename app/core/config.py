@@ -196,6 +196,8 @@ class Settings(BaseSettings):
     OSS_BUCKET_NAME: str = ""
     OSS_UPLOAD_ENDPOINT: str = ""
     OSS_ENDPOINT: str = ""
+    OSS_STORAGE_PROFILE: str = "default"
+    OSS_SIGNED_URL_TTL_SECONDS: int = 300
 
     class Config:
         case_sensitive = True

@@ -78,6 +78,10 @@
 | 2026-08-18 | P1B ID 路由合同 | `passed` | 新目标 API 无路径参数；资源 ID 仅使用 `?id=` query 或 request body |
 | 2026-08-18 | P1B 认证与 DI | `passed` | 新 resource context 依赖已验证 JWT subject/scope，不要求目标表 tenant；API 仅注入 Service，旧 tenant XRay 路由保持不变 |
 | 2026-08-18 | P1B 不可用接口门禁 | `passed` | Gateway/Outbox 未到位前未注册 Image prepare/complete/replace 或 Study finalize，避免假闭环 |
+| 2026-08-18 | P1C Gateway 编译与兼容导入 | `passed` | `compileall app workers`、应用、`ObjectStorageGateway` 和旧 `OSSObjectStore` 导入成功；旧调用符号保留 |
+| 2026-08-18 | P1C Gateway namespace/安全合同 | `passed` | 新 key 为 `image/{image_id}/{generation}/source.{format}`；拒绝 URL/绝对/遍历 key，上传 URL 和 multipart session 不进入 repr |
+| 2026-08-18 | P1C Gateway 内存行为验证 | `passed` | fake OSS 下 direct PUT、HEAD、流式 SHA256/size、PNG 格式、version 和二次 HEAD 变化检测通过；未访问真实 OSS |
+| 2026-08-18 | P1C Gateway ETag 边界 | `passed` | ETag 仅用于 multipart manifest 和对象变化检测；完整 ObjectRef SHA256 来自服务端流式 bytes |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

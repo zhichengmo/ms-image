@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
+from typing import Protocol, Sequence
 
 import numpy as np
 import oss2
@@ -36,10 +37,110 @@ class ImageInspection:
     orientation: str | None = None
 
 
+@dataclass(frozen=True)
+class ObjectHead:
+    storage_profile: str
+    object_key: str
+    object_version_id: str | None
+    size_bytes: int
+    content_type: str | None
+    etag: str | None
+    kms_key_version: str | None
+
+
+@dataclass(frozen=True)
+class ObjectRef:
+    storage_profile: str
+    object_key: str
+    object_version_id: str | None
+    sha256: str
+    size_bytes: int
+    content_type: str
+    kms_key_version: str | None
+
+
+@dataclass(frozen=True)
+class UploadGrant:
+    storage_profile: str
+    object_key: str
+    upload_mode: str
+    expires_seconds: int
+    required_headers: dict[str, str]
+    signed_url: str = field(repr=False)
+    upload_session_ref: str | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class MultipartPart:
+    part_number: int
+    etag: str
+    size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class ObjectValidation:
+    object_ref: ObjectRef
+    inspection: ImageInspection
+
+
+class ObjectStorageGateway(Protocol):
+    storage_profile: str
+
+    async def prepare_direct_upload(
+        self, *, object_key: str, content_type: str, expires_seconds: int | None = None
+    ) -> UploadGrant: ...
+
+    async def initiate_multipart_upload(
+        self, *, object_key: str, content_type: str, expires_seconds: int | None = None
+    ) -> UploadGrant: ...
+
+    async def sign_multipart_parts(
+        self,
+        *,
+        object_key: str,
+        upload_session_ref: str,
+        part_numbers: Sequence[int],
+        expires_seconds: int | None = None,
+    ) -> dict[int, str]: ...
+
+    async def list_multipart_parts(
+        self, *, object_key: str, upload_session_ref: str
+    ) -> list[MultipartPart]: ...
+
+    async def complete_multipart_upload(
+        self,
+        *,
+        object_key: str,
+        upload_session_ref: str,
+        parts: Sequence[MultipartPart],
+    ) -> ObjectHead: ...
+
+    async def abort_multipart_upload(
+        self, *, object_key: str, upload_session_ref: str
+    ) -> None: ...
+
+    async def head_object(self, *, object_key: str) -> ObjectHead: ...
+
+    async def get_bytes(self, *, object_key: str) -> bytes: ...
+
+    async def delete_object(self, *, object_key: str) -> None: ...
+
+    async def validate_image_object(
+        self,
+        *,
+        object_key: str,
+        file_format: str,
+        declared_content_type: str | None,
+        expected_sha256: str | None,
+        expected_size_bytes: int | None,
+        expected_object_version_id: str | None = None,
+    ) -> ObjectValidation: ...
+
+
 def validate_object_key(object_key: str) -> str:
     if not isinstance(object_key, str) or not _OBJECT_KEY.fullmatch(object_key):
         raise ObjectStoreError("object_key_invalid")
-    if ".." in object_key.split("/"):
+    if object_key.startswith("/") or "://" in object_key or ".." in object_key.split("/"):
         raise ObjectStoreError("object_key_path_invalid")
     return object_key
 
@@ -50,10 +151,27 @@ class OSSObjectStore:
         self.access_key_secret = config.OSS_ACCESS_KEY_SECRET.strip()
         self.bucket_name = config.OSS_BUCKET_NAME.strip()
         self.endpoint = (config.OSS_ENDPOINT or config.OSS_UPLOAD_ENDPOINT).strip()
+        self.storage_profile = config.OSS_STORAGE_PROFILE.strip() or "default"
+        self.signed_url_ttl_seconds = int(config.OSS_SIGNED_URL_TTL_SECONDS)
         if not all((self.access_key_id, self.access_key_secret, self.bucket_name, self.endpoint)):
             raise ObjectStoreError("object_store_not_configured")
         self._auth = oss2.Auth(self.access_key_id, self.access_key_secret)
         self._bucket = oss2.Bucket(self._auth, self.endpoint, self.bucket_name)
+
+    @staticmethod
+    def new_image_object_key(
+        *, image_id: str, generation: int, file_format: str
+    ) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", image_id):
+            raise ObjectStoreError("image_id_invalid")
+        if generation < 1:
+            raise ObjectStoreError("image_generation_invalid")
+        suffix = file_format.strip().lower().lstrip(".")
+        if not re.fullmatch(r"[a-z0-9]{1,16}", suffix):
+            raise ObjectStoreError("image_format_invalid")
+        return validate_object_key(
+            f"image/{image_id}/{generation}/source.{suffix}"
+        )
 
     @staticmethod
     def new_object_key(
@@ -103,6 +221,175 @@ class OSSObjectStore:
 
         await asyncio.to_thread(_put)
 
+    def _ttl(self, value: int | None) -> int:
+        ttl = self.signed_url_ttl_seconds if value is None else int(value)
+        if ttl <= 0 or ttl > 900:
+            raise ObjectStoreError("object_signed_url_ttl_invalid")
+        return ttl
+
+    async def prepare_direct_upload(
+        self, *, object_key: str, content_type: str, expires_seconds: int | None = None
+    ) -> UploadGrant:
+        object_key = validate_object_key(object_key)
+        content_type = _normalize_content_type(content_type)
+        ttl = self._ttl(expires_seconds)
+        headers = {"Content-Type": content_type}
+        signed_url = await asyncio.to_thread(
+            self._bucket.sign_url,
+            "PUT",
+            object_key,
+            ttl,
+            headers,
+        )
+        return UploadGrant(
+            storage_profile=self.storage_profile,
+            object_key=object_key,
+            upload_mode="direct_put",
+            expires_seconds=ttl,
+            required_headers=headers,
+            signed_url=signed_url,
+        )
+
+    async def initiate_multipart_upload(
+        self, *, object_key: str, content_type: str, expires_seconds: int | None = None
+    ) -> UploadGrant:
+        object_key = validate_object_key(object_key)
+        content_type = _normalize_content_type(content_type)
+        ttl = self._ttl(expires_seconds)
+
+        def _initiate():
+            result = self._bucket.init_multipart_upload(
+                object_key, headers={"Content-Type": content_type}
+            )
+            upload_id = str(getattr(result, "upload_id", "") or "").strip()
+            if not upload_id:
+                raise ObjectStoreError("multipart_init_failed")
+            return upload_id
+
+        upload_id = await asyncio.to_thread(_initiate)
+        return UploadGrant(
+            storage_profile=self.storage_profile,
+            object_key=object_key,
+            upload_mode="multipart",
+            expires_seconds=ttl,
+            required_headers={"Content-Type": content_type},
+            signed_url="",
+            upload_session_ref=upload_id,
+        )
+
+    async def sign_multipart_parts(
+        self,
+        *,
+        object_key: str,
+        upload_session_ref: str,
+        part_numbers: Sequence[int],
+        expires_seconds: int | None = None,
+    ) -> dict[int, str]:
+        object_key = validate_object_key(object_key)
+        upload_id = _validate_upload_session_ref(upload_session_ref)
+        normalized_parts = sorted(set(int(number) for number in part_numbers))
+        if not normalized_parts or any(number < 1 or number > 10_000 for number in normalized_parts):
+            raise ObjectStoreError("multipart_part_number_invalid")
+        ttl = self._ttl(expires_seconds)
+        signed: dict[int, str] = {}
+        for part_number in normalized_parts:
+            signed[part_number] = await asyncio.to_thread(
+                self._bucket.sign_url,
+                "PUT",
+                object_key,
+                ttl,
+                None,
+                {"uploadId": upload_id, "partNumber": str(part_number)},
+            )
+        return signed
+
+    async def list_multipart_parts(
+        self, *, object_key: str, upload_session_ref: str
+    ) -> list[MultipartPart]:
+        object_key = validate_object_key(object_key)
+        upload_id = _validate_upload_session_ref(upload_session_ref)
+
+        def _list() -> list[MultipartPart]:
+            result = self._bucket.list_parts(object_key, upload_id)
+            return [
+                MultipartPart(
+                    part_number=int(part.part_number),
+                    etag=_normalize_etag(part.etag),
+                    size_bytes=int(getattr(part, "size", 0) or 0) or None,
+                )
+                for part in result.parts
+            ]
+
+        return await asyncio.to_thread(_list)
+
+    async def complete_multipart_upload(
+        self,
+        *,
+        object_key: str,
+        upload_session_ref: str,
+        parts: Sequence[MultipartPart],
+    ) -> ObjectHead:
+        object_key = validate_object_key(object_key)
+        upload_id = _validate_upload_session_ref(upload_session_ref)
+        requested = sorted(
+            (MultipartPart(int(p.part_number), _normalize_etag(p.etag), p.size_bytes) for p in parts),
+            key=lambda part: part.part_number,
+        )
+        if not requested or len({part.part_number for part in requested}) != len(requested):
+            raise ObjectStoreError("multipart_part_manifest_invalid")
+        actual = await self.list_multipart_parts(
+            object_key=object_key, upload_session_ref=upload_id
+        )
+        actual_pairs = [(part.part_number, part.etag) for part in actual]
+        if [(part.part_number, part.etag) for part in requested] != actual_pairs:
+            raise ObjectStoreError("multipart_part_manifest_mismatch")
+
+        def _complete() -> None:
+            result = self._bucket.complete_multipart_upload(
+                object_key,
+                upload_id,
+                [oss2.models.PartInfo(part.part_number, part.etag) for part in requested],
+            )
+            if getattr(result, "status", 500) >= 400:
+                raise ObjectStoreError("multipart_complete_failed")
+
+        await asyncio.to_thread(_complete)
+        return await self.head_object(object_key=object_key)
+
+    async def abort_multipart_upload(
+        self, *, object_key: str, upload_session_ref: str
+    ) -> None:
+        object_key = validate_object_key(object_key)
+        upload_id = _validate_upload_session_ref(upload_session_ref)
+        await asyncio.to_thread(
+            self._bucket.abort_multipart_upload, object_key, upload_id
+        )
+
+    async def head_object(self, *, object_key: str) -> ObjectHead:
+        object_key = validate_object_key(object_key)
+
+        def _head() -> ObjectHead:
+            result = self._bucket.get_object_meta(object_key)
+            if getattr(result, "status", 500) >= 400:
+                raise ObjectStoreError("object_store_head_failed")
+            size = int(getattr(result, "content_length", -1))
+            if size < 0:
+                raise ObjectStoreError("object_size_invalid")
+            headers = getattr(result, "headers", {}) or {}
+            return ObjectHead(
+                storage_profile=self.storage_profile,
+                object_key=object_key,
+                object_version_id=_header(headers, "x-oss-version-id"),
+                size_bytes=size,
+                content_type=(getattr(result, "content_type", None) or None),
+                etag=_normalize_optional_etag(getattr(result, "etag", None)),
+                kms_key_version=_header(
+                    headers, "x-oss-server-side-encryption-key-id"
+                ),
+            )
+
+        return await asyncio.to_thread(_head)
+
     async def get_bytes(self, *, object_key: str) -> bytes:
         validate_object_key(object_key)
 
@@ -123,11 +410,127 @@ class OSSObjectStore:
             raise ObjectStoreError("object_content_empty")
         return content
 
+    async def delete_object(self, *, object_key: str) -> None:
+        object_key = validate_object_key(object_key)
+
+        def _delete() -> None:
+            result = self._bucket.delete_object(object_key)
+            if getattr(result, "status", 500) >= 400:
+                raise ObjectStoreError("object_store_delete_failed")
+
+        await asyncio.to_thread(_delete)
+
+    async def validate_image_object(
+        self,
+        *,
+        object_key: str,
+        file_format: str,
+        declared_content_type: str | None,
+        expected_sha256: str | None,
+        expected_size_bytes: int | None,
+        expected_object_version_id: str | None = None,
+    ) -> ObjectValidation:
+        object_key = validate_object_key(object_key)
+        before = await self.head_object(object_key=object_key)
+        if expected_size_bytes is not None and before.size_bytes != expected_size_bytes:
+            raise ObjectStoreError("object_size_mismatch")
+        if before.size_bytes > _MAX_IMAGE_BYTES:
+            raise ObjectStoreError("image_content_too_large")
+        if expected_object_version_id and before.object_version_id != expected_object_version_id:
+            raise ObjectStoreError("object_version_mismatch")
+
+        def _stream() -> tuple[bytes, str, str | None]:
+            result = self._bucket.get_object(object_key)
+            if getattr(result, "status", 500) >= 400:
+                raise ObjectStoreError("object_store_download_failed")
+            digest = hashlib.sha256()
+            content = bytearray()
+            while True:
+                chunk = result.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                content.extend(chunk)
+                if len(content) > _MAX_IMAGE_BYTES:
+                    raise ObjectStoreError("image_content_too_large")
+            headers = getattr(result, "headers", {}) or {}
+            return bytes(content), digest.hexdigest(), _header(headers, "x-oss-version-id")
+
+        content, digest, read_version_id = await asyncio.to_thread(_stream)
+        if len(content) != before.size_bytes:
+            raise ObjectStoreError("object_size_changed")
+        if expected_sha256 and digest != expected_sha256:
+            raise ObjectStoreError("object_sha256_mismatch")
+        inspection = inspect_image_bytes(content, declared_content_type or before.content_type)
+        _validate_file_format(file_format, inspection.mime_type)
+        after = await self.head_object(object_key=object_key)
+        if (
+            before.size_bytes != after.size_bytes
+            or before.etag != after.etag
+            or before.object_version_id != after.object_version_id
+        ):
+            raise ObjectStoreError("object_changed_during_validation")
+        version_id = read_version_id or after.object_version_id
+        if expected_object_version_id and version_id != expected_object_version_id:
+            raise ObjectStoreError("object_version_mismatch")
+        return ObjectValidation(
+            object_ref=ObjectRef(
+                storage_profile=self.storage_profile,
+                object_key=object_key,
+                object_version_id=version_id,
+                sha256=digest,
+                size_bytes=len(content),
+                content_type=inspection.mime_type,
+                kms_key_version=after.kms_key_version,
+            ),
+            inspection=inspection,
+        )
+
     async def sign_download_url(self, *, object_key: str, expires_seconds: int = 300) -> str:
         validate_object_key(object_key)
-        if expires_seconds <= 0 or expires_seconds > 900:
-            raise ObjectStoreError("object_signed_url_ttl_invalid")
-        return await asyncio.to_thread(self._bucket.sign_url, "GET", object_key, expires_seconds)
+        ttl = self._ttl(expires_seconds)
+        return await asyncio.to_thread(self._bucket.sign_url, "GET", object_key, ttl)
+
+
+def _normalize_content_type(value: str) -> str:
+    normalized = value.strip().casefold()
+    if not normalized or len(normalized) > 128 or "/" not in normalized:
+        raise ObjectStoreError("object_content_type_invalid")
+    return normalized
+
+
+def _validate_upload_session_ref(value: str) -> str:
+    normalized = value.strip()
+    if not normalized or len(normalized) > 256 or any(char.isspace() for char in normalized):
+        raise ObjectStoreError("multipart_upload_session_invalid")
+    return normalized
+
+
+def _normalize_etag(value: str) -> str:
+    normalized = str(value or "").strip().strip('"')
+    if not normalized or len(normalized) > 128:
+        raise ObjectStoreError("multipart_etag_invalid")
+    return normalized
+
+
+def _normalize_optional_etag(value: str | None) -> str | None:
+    return _normalize_etag(value) if value else None
+
+
+def _header(headers: dict, name: str) -> str | None:
+    value = headers.get(name) or headers.get(name.title())
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _validate_file_format(file_format: str, mime_type: str) -> None:
+    expected = {
+        "dicom": "application/dicom",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+    }.get(file_format.strip().lower())
+    if expected is not None and mime_type != expected:
+        raise ObjectStoreError("image_format_mismatch")
 
 
 def inspect_image_bytes(content: bytes, declared_mime: str | None = None) -> ImageInspection:
@@ -250,8 +653,14 @@ def dicom_to_png(content: bytes) -> tuple[bytes, ImageInspection]:
 
 __all__ = [
     "ImageInspection",
+    "MultipartPart",
     "OSSObjectStore",
+    "ObjectHead",
+    "ObjectRef",
+    "ObjectStorageGateway",
     "ObjectStoreError",
+    "ObjectValidation",
+    "UploadGrant",
     "dicom_to_png",
     "inspect_image_bytes",
     "validate_object_key",

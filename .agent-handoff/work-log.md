@@ -32,6 +32,11 @@
   - 注册 Session create/get/complete/close/cancel、Study create/get、Series create、Image get/abort-upload。
   - 所有目标资源 ID 仅使用 query/body；endpoint 统一 `GenericResponse` 并将稳定 Service 错误映射为 404/409/503。
   - Gateway/Outbox 未实现前不暴露 prepare/complete/replace/finalize，防止客户端进入不可恢复状态。
+- P1C ObjectStorageGateway：
+  - 在现有 `app/core/imaging/object_store.py` 中定义唯一 Gateway Protocol 和 OSS 结构化实现，未增加平行存储服务。
+  - 新增 owner namespace、direct PUT、multipart init/sign/list/complete/abort、HEAD、受控读取/删除和完整对象校验。
+  - 完整校验执行 HEAD、流式 bytes hash/size/格式、二次 HEAD；ETag 不作为内容 hash。
+  - 旧 tenant-derived key/put/get/resolver 接口保留兼容；未访问真实 OSS。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

@@ -12,6 +12,7 @@
 - [ ] 实现 P1B：API、dependency injection（依赖注入）和 route registration（路由注册），资源 ID 只使用 query/body。
 - [x] P1B 非存储生命周期 API：Session/Study/Series/Image query/abort、resource auth、Service DI 和路由已注册；上传/replace/finalize 待 P1C。
 - [ ] 实现 P1C：在现有 OSS 实现上收敛 ObjectStorageGateway，并闭环 Image validate Outbox/Relay/Worker + reconcile/revision，不接医学 Provider。
+- [x] P1C ObjectStorageGateway：现有 OSS 实现已收敛唯一 Gateway，新 owner namespace 与 direct/multipart/完整校验合同完成。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。
 - [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。
 - [ ] P2 复用 P1C 的同一 Outbox/Relay，实现 Task + first Stage + Outbox 原子事务和零模型 replay。
