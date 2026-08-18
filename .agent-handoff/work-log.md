@@ -22,6 +22,11 @@
   - 新增唯一 `StudyService`，实现 owner 校验、Study/Series 双幂等、稳定 source ID、稳定 Series 排序和 Session processing CAS。
   - Study 当前 revision 头和 Series manifest 字段已建模；没有 ready Image 前禁止伪造 finalize/ready。
   - 抽取共享 schema UTC/text 规范化 helper；未新增 SeriesService、迁移或测试脚本。
+- P1A Image 垂直切片：
+  - 新增完整 `Image -> image_record` 字段、索引、唯一约束、Schema、`ImageDal` 和 `ImageService`。
+  - 实现 owner 链校验、对象键幂等、逻辑影像版本递增、并发版本冲突 fail closed、受控 upload abort。
+  - 原始/派生 lineage 和 direct/multipart 请求合同在 Schema 层拒绝非法组合。
+  - 未接 OSS、Outbox、Broker 或 Worker；Image complete/ready 明确保留给 P1C。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

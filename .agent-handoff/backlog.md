@@ -8,6 +8,7 @@
 - [ ] 实现 P1A：Session/Study/Series/Image 的 Model（数据模型） -> Schema（接口结构） -> DAL（数据访问层） -> Service（业务服务层）。
 - [x] P1A Session：Model/Schema/SessionDal/SessionService 已实现并完成静态合同验证。
 - [x] P1A Study+Series：双 Model/Schema/DAL 与单一 StudyService 已实现；revision/manifest ready 等待 Image 事实闭环。
+- [x] P1A Image：Model/Schema/ImageDal/ImageService 已实现；上传完成和 ready 状态等待 P1C 可靠性链。
 - [ ] 实现 P1B：API、dependency injection（依赖注入）和 route registration（路由注册），资源 ID 只使用 query/body。
 - [ ] 实现 P1C：在现有 OSS 实现上收敛 ObjectStorageGateway，并闭环 Image validate Outbox/Relay/Worker + reconcile/revision，不接医学 Provider。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。

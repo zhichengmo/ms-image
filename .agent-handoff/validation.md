@@ -70,6 +70,10 @@
 | 2026-08-18 | P1A Study+Series ORM/MySQL DDL 合同 | `passed` | 两表均为单列 opaque 主键、0 FK、0 Enum、0 tenant；唯一约束和索引按母文定义 |
 | 2026-08-18 | P1A Study 稳定 source ID | `passed` | 未提供上游 ID 时完整规范创建载荷生成稳定 ID；载荷变化会改变 ID，长度不超过 128 |
 | 2026-08-18 | P1A Study+Series 分层边界 | `passed` | 只有 `StudyService`；Service 无直接 SQL，Study/Series 分别使用对应 `DalBase` DAL |
+| 2026-08-18 | P1A Image Python 编译与应用导入 | `passed` | `compileall app workers`、应用和 `ImageService` 导入成功；路由数量保持 26 |
+| 2026-08-18 | P1A Image ORM/MySQL DDL 合同 | `passed` | `image_record` 43 列；单列 opaque 主键、0 FK、0 Enum、0 tenant；6 组目标索引与双唯一约束已定义 |
+| 2026-08-18 | P1A Image Schema 合同 | `passed` | direct/multipart 互斥字段、UTC expiry、original 无 source manifest、derived 必须有 lineage 均 fail closed |
+| 2026-08-18 | P1A Image 分层边界 | `passed` | Service 无直接 SQL；版本查询、创建与 CAS 均由 `ImageDal(DalBase)` 完成，未接 OSS/Broker |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
