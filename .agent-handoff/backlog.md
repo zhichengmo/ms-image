@@ -16,7 +16,7 @@
 - [x] P1C Image 事务性 Outbox：`outbox_record/OutboxDal` 与 `ValidateImageMessage` 已实现；Image `uploading -> validating` 和 `validate_image` 事件使用同一 DB 事务，重复事件执行 owner/version/hash 自校验。
 - [x] P1C Relay：短事务 claim/confirm，事务外 Broker 发布，支持 retry/dead-letter、过期 relay lease reconcile 和 Broker 已接受但 DB confirm 冲突的至少一次恢复。
 - [x] Relay 远端 SHA 门禁：实时确认 `origin/codex/ms-image-refactor` 与本地均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`。
-- [ ] P1C 基础：增加显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；不注册 Worker task。
+- [x] P1C 基础：已增加显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；未注册 Worker task。
 - [ ] P1C Image validation Worker：消费前复核 Outbox owner/version/message；Image lease/CAS claim，事务外 Gateway 完整校验，短事务写 ready/quarantined 与 Series/Study 确定性 revision。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。
 - [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。

@@ -1,10 +1,18 @@
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.imaging.manifest import (
+    EMPTY_MANIFEST,
+    ManifestContractError,
+    build_series_manifest,
+    build_study_manifest,
+)
+from app.crud.image import ImageDal
 from app.crud.series import SeriesDal
 from app.crud.session import SessionDal
 from app.crud.study import StudyDal
@@ -49,11 +57,18 @@ class SeriesNotFoundError(StudyServiceError):
     pass
 
 
+@dataclass(frozen=True)
+class StudyRevisionResult:
+    series: Series
+    study: Study
+
+
 class StudyService:
     def __init__(self, db: AsyncSession):
         self.session_dal = SessionDal(db)
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
+        self.image_dal = ImageDal(db)
 
     @staticmethod
     def _study_response(study: Study) -> StudyResponse:
@@ -150,6 +165,7 @@ class StudyService:
             "metadata_schema_version": payload.metadata_schema_version,
             "expected_image_count": payload.expected_image_count,
             "actual_image_count": 0,
+            "manifest_sha256": EMPTY_MANIFEST.sha256,
             "status": "ingesting",
             "state_version": 0,
             "technical_metadata_json": payload.technical_metadata,
@@ -188,6 +204,103 @@ class StudyService:
             study=self._study_response(study),
             series=[self._series_response(item) for item in series],
         )
+
+    async def recompute_after_image_change(
+        self,
+        *,
+        series_id: str,
+        revision_reason: str,
+        changed_at: datetime,
+    ) -> StudyRevisionResult:
+        if revision_reason not in {
+            "add",
+            "replace",
+            "delete",
+            "reorder",
+            "metadata_correction",
+        }:
+            raise StudyStateConflictError("study_revision_reason_invalid")
+        series = await self.series_dal.get_by_id(series_id.strip())
+        if series is None:
+            raise SeriesNotFoundError("series_not_found")
+        study = await self.study_dal.get_by_id(series.study_id)
+        if study is None:
+            raise StudyNotFoundError("study_not_found")
+
+        ready_images = await self.image_dal.list_ready_for_series(series.id)
+        try:
+            series_manifest = build_series_manifest(ready_images)
+        except ManifestContractError as exc:
+            raise StudyStateConflictError(str(exc)) from exc
+        actual_count = len(series_manifest.items)
+        if series.expected_image_count is None:
+            series_status = "validating" if actual_count else "ingesting"
+        elif actual_count < series.expected_image_count:
+            series_status = "validating"
+        elif actual_count == series.expected_image_count:
+            series_status = "ready"
+        else:
+            series_status = "invalid"
+        updated_series = await self.series_dal.cas_update(
+            series_id=series.id,
+            expected_version=series.state_version,
+            values={
+                "actual_image_count": actual_count,
+                "manifest_sha256": series_manifest.sha256,
+                "status": series_status,
+                "ready_at": changed_at if series_status == "ready" else None,
+            },
+        )
+        if updated_series is None:
+            raise StudyStateConflictError("series_manifest_conflict")
+
+        series_rows = await self.series_dal.list_for_study(study.id)
+        try:
+            study_manifest = build_study_manifest(series_rows)
+        except ManifestContractError as exc:
+            raise StudyStateConflictError(str(exc)) from exc
+        total_images = sum(item["actual_image_count"] for item in study_manifest.items)
+        has_invalid_series = any(item.status == "invalid" for item in series_rows)
+        all_series_ready = bool(series_rows) and all(
+            item.status == "ready" for item in series_rows
+        )
+        if has_invalid_series:
+            completeness = "conflict"
+        elif (
+            study.expected_image_count is not None
+            and total_images > study.expected_image_count
+        ):
+            completeness = "conflict"
+        elif study.expected_manifest_sha256 and (
+            study.expected_manifest_sha256 != study_manifest.sha256
+        ):
+            completeness = "conflict"
+        elif (
+            study.expected_image_count is not None
+            and total_images < study.expected_image_count
+        ) or not all_series_ready:
+            completeness = "partial"
+        else:
+            completeness = "complete"
+
+        updated_study = await self.study_dal.cas_revision(
+            study_id=study.id,
+            expected_version=study.state_version,
+            current_revision_id=study.revision_id,
+            values={
+                "revision_no": study.revision_no + 1,
+                "revision_id": new_opaque_id(),
+                "revision_reason": revision_reason,
+                "revision_changed_at": changed_at,
+                "resolved_manifest_sha256": study_manifest.sha256,
+                "completeness_status": completeness,
+                "status": "validating",
+                "ready_at": None,
+            },
+        )
+        if updated_study is None:
+            raise StudyStateConflictError("study_revision_conflict")
+        return StudyRevisionResult(series=updated_series, study=updated_study)
 
     async def _owned_session(self, *, session_id: str, requester_id: str):
         session = await self.session_dal.get_by_id(session_id.strip())
@@ -248,5 +361,6 @@ __all__ = [
     "StudyNotFoundError",
     "StudyService",
     "StudyServiceError",
+    "StudyRevisionResult",
     "StudyStateConflictError",
 ]

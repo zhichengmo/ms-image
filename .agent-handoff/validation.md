@@ -94,6 +94,11 @@
 | 2026-08-18 | P1C Relay 真实 Broker/MySQL | `not run` | 未授权真实数据库或 RabbitMQ 演练；Broker confirm、lease 时钟和多进程竞争仍未运行验证 |
 | 2026-08-18 | P1C Relay 远端 SHA 实时确认 | `blocked` | 本地 HEAD 与 remote-tracking ref 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`；SSH 22 端口不可访问，HTTPS 无法解析 `github.com`，故 `git ls-remote` 未能实时确认远端并停止下一切片 |
 | 2026-08-18 | P1C Relay 远端 SHA 重试 | `passed` | 网络恢复后 `git ls-remote --heads origin codex/ms-image-refactor` 返回 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`，与本地 HEAD 完全一致，门禁解除 |
+| 2026-08-18 | P1C 基础 Python 编译与应用导入 | `passed` | `compileall app workers`、manifest/显式 session/ImageDal/StudyService 导入成功；应用仍装载 36 条路由 |
+| 2026-08-18 | P1C canonical manifest | `passed in memory` | 输入顺序变化保持相同 SHA；Series/Study 稳定排序、空 Series 摘要和重复 ready logical key conflict 均验证通过 |
+| 2026-08-18 | P1C Image validation lease 基础 | `passed in memory` | fake DAL 验证 claim 强制刷新 readback、lease owner/generation 条件和 terminal state_version 推进；未连接真实 MySQL |
+| 2026-08-18 | P1C Study revision 重算基础 | `passed in memory` | fake DAL 下 2 个 ready Image 确定性重算 Series count/manifest，并将 Study revision 1->2、completeness=complete、status=validating |
+| 2026-08-18 | P1C Worker task 注册门禁 | `passed` | `workers/imaging_worker` 中仍无 Celery task decorator，基础切片不会消费已发布消息 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

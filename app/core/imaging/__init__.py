@@ -23,6 +23,13 @@ from .object_store import (
     dicom_to_png,
     inspect_image_bytes,
 )
+from .manifest import (
+    CanonicalManifest,
+    EMPTY_MANIFEST,
+    ManifestContractError,
+    build_series_manifest,
+    build_study_manifest,
+)
 from .oss_resolver import XRayOSSImageResolver
 from .ingest import (
     ApprovedManifestSourceImageFetcher,
@@ -44,6 +51,11 @@ __all__ = [
     "ObjectStoreError",
     "ObjectValidation",
     "UploadGrant",
+    "CanonicalManifest",
+    "EMPTY_MANIFEST",
+    "ManifestContractError",
+    "build_series_manifest",
+    "build_study_manifest",
     "dicom_to_png",
     "XRayOSSImageResolver",
     "inspect_image_bytes",

@@ -22,6 +22,8 @@
 | 2026-08-18 | 使用 `codex/ms-image-refactor` 并按业务 owner 垂直切片提交，每次提交后立即推送 | 用户要求每完成一部分代码即提交并推送；远端确认是进入下一切片的门禁 | 用户确认的实施计划；`.agent-handoff/backlog.md` |
 | 2026-08-18 | 通用 Outbox 只拥有 Broker 发布状态，Image 校验 lease 归 `image_record` | 避免 relay 和业务消费者形成双 lease owner；Image ready 必须由有效业务 lease 的 Worker CAS 回写 | 设计母文第 4.8、4.9、6.7 节；INV-55 至 INV-57 |
 | 2026-08-18 | 目标 `OutboxRelay` 与旧 tenant XRay Relay 暂时同模块并行，复用同一 Celery 工厂 | 目标 Outbox 没有 tenant/consumer lease 字段，强行套旧接口会污染合同；保留旧类可避免在 P1 提前破坏兼容 API | `app/core/messaging/outbox_relay.py`；设计母文第 4.8、6.7 节 |
+| 2026-08-18 | 新存储 API 使用显式事务 session，旧 API 保持请求级事务依赖 | direct/multipart/HEAD 等 OSS I/O 不能跨数据库事务；全局修改旧依赖会改变现有接口提交语义 | `app/core/async_db.py:get_explicit_transaction_session`；设计母文第 4.9 节 |
+| 2026-08-18 | Series/Study manifest 只由 canonical helper 和 StudyService 重算 | 防止 Worker、ImageService 和未来 TaskService 产生不同 hash；StudyService 继续拥有 Series/revision，重复 ready logical key 直接 conflict | `app/core/imaging/manifest.py`；`app/service/study_service.py:recompute_after_image_change`；INV-66 |
 
 ## 记录规则
 

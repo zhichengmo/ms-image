@@ -112,6 +112,22 @@ async def get_async_session() -> AsyncSession:
             yield session
 
 
+async def get_explicit_transaction_session() -> AsyncSession:
+    """Yield a session whose transaction scopes are owned by the endpoint.
+
+    Storage workflows use this dependency to commit a short database phase,
+    perform OSS I/O without a transaction, and then open a new short phase.
+    Existing endpoints keep using ``get_async_session`` unchanged.
+    """
+
+    async with session_factory() as session:
+        try:
+            yield session
+        finally:
+            if session.in_transaction():
+                await session.rollback()
+
+
 async def get_async_session_hd() -> AsyncSession:
     """
     获取 MS_HD 数据库会话（HD服务集成）

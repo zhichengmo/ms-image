@@ -111,3 +111,11 @@
 - 实时 `git ls-remote` 失败：SSH 连接 GitHub 22 端口被当前环境禁止；HTTPS 也无法解析 `github.com`。
 - 严格执行用户门禁，没有开始 Image validation Worker，也没有修改业务代码、迁移或测试脚本。
 - 网络恢复后重新执行实时远端查询，确认 `origin/codex/ms-image-refactor` 与本地 HEAD 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`；失败历史保留，当前门禁已解除。
+
+## 2026-08-18 — P1C 事务、manifest 与 validation lease 基础
+
+- 新增显式事务 session dependency，供后续存储 API 在两个短事务之间执行 OSS I/O；旧 API 事务依赖未改变。
+- 新增 canonical Series/Study manifest：固定字段、排序和 JSON SHA256；重复 ready logical key 与不完整 ObjectRef fail closed。
+- `ImageDal` 新增 validation candidate、claim、heartbeat、retry release、terminal CAS 和 expired lease recovery 基础，lease 不推进业务 state_version。
+- `StudyService` 新增同事务 Series/Study 重算入口；Series count/manifest 由 ready Image 集合确定性生成，Study revision 使用 CAS 推进且 finalize 前保持 validating。
+- 本切片未注册 Worker task，未创建迁移或测试脚本，未访问真实 MySQL/OSS/Broker。

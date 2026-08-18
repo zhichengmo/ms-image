@@ -5,9 +5,9 @@
 - 最后更新：2026-08-18
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前目标：以已冻结的 Canonical XRay Chain（X 光权威主链）开始目标架构重构；先完成有界 P0 核对，再按 P1A -> P1B -> P1C 实施通用影像底座。
-- 当前状态：`p1c_relay_remote_confirmed / foundation_next`（P1C Outbox Relay 本地与远端 SHA 已实时确认一致；下一切片为事务、manifest 和 Image validation lease 基础）
+- 当前状态：`p1c_foundation_implemented / worker_next`（显式事务 session、canonical manifest、Image validation lease DAL 和 StudyService revision 重算基础已实现；尚未注册 Image validation task）
 - 当前分支：`codex/ms-image-refactor`；所有后续工作按业务 owner 垂直切片提交，每次验证后立即推送并核对远端 SHA，推送失败不得进入下一切片。
-- 下一步：完成并推送恢复 checkpoint 后，实现显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；该基础切片不注册 Worker task。
+- 下一步：完成当前基础切片的提交、推送和远端 SHA 确认；随后注册原子 Image validation task，保持 OSS 校验在事务外，并在单一终态事务中完成 Image + Series + Study CAS。
 - 活动入口：
   - `docs/refactor/README.md`
   - `docs/refactor/10-xray-detailed-flow.md`
