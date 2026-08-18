@@ -99,6 +99,11 @@
 | 2026-08-18 | P1C Image validation lease 基础 | `passed in memory` | fake DAL 验证 claim 强制刷新 readback、lease owner/generation 条件和 terminal state_version 推进；未连接真实 MySQL |
 | 2026-08-18 | P1C Study revision 重算基础 | `passed in memory` | fake DAL 下 2 个 ready Image 确定性重算 Series count/manifest，并将 Study revision 1->2、completeness=complete、status=validating |
 | 2026-08-18 | P1C Worker task 注册门禁 | `passed` | `workers/imaging_worker` 中仍无 Celery task decorator，基础切片不会消费已发布消息 |
+| 2026-08-18 | P1C Image Worker Python/任务注册 | `passed` | `compileall app workers` 和应用导入成功；`imaging.validate_image` 已注册到 imaging Celery app，应用路由仍为 36 条 |
+| 2026-08-18 | P1C Image Worker Outbox 合同 | `passed in memory` | event ID/event key、aggregate/version、message hash/version、header trace 均复核；篡改 message version 被拒，终态重复消息返回 already_applied |
+| 2026-08-18 | P1C Image Worker 事务边界 | `passed in memory` | fake session/Gateway 断言对象校验时活动 DB TX 为 0；claim 和 terminal 分属短事务，Study conflict 后释放原 lease 重试 |
+| 2026-08-18 | P1C Image Worker 失败分类 | `passed in memory` | ready、确定性 hash mismatch -> quarantined、下载失败 -> retry、重复消息、Study revision conflict -> retry 均覆盖 |
+| 2026-08-18 | P1C Image Worker 静态检查 | `passed` | Ruff、diff check、Service/Worker 导入均通过；Worker/消息未包含 signed URL、access key 或 Secret 字段 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

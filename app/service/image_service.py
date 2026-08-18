@@ -1,9 +1,10 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.imaging.object_store import ObjectHead
+from app.core.imaging.object_store import ObjectHead, ObjectValidation
 from app.crud.image import ImageDal
 from app.crud.outbox import OutboxDal
 from app.crud.series import SeriesDal
@@ -12,7 +13,9 @@ from app.crud.study import StudyDal
 from app.models.image import Image
 from app.models.imaging_base import new_opaque_id
 from app.schemas.image import ImageCreate, ImageResponse
+from app.schemas.outbox import ValidateImageMessage
 from app.service.session_service import SessionAccessDeniedError, SessionNotFoundError
+from app.service.study_service import StudyService, StudyStateConflictError
 
 
 class ImageServiceError(ValueError):
@@ -31,6 +34,25 @@ class ImageStateConflictError(ImageServiceError):
     pass
 
 
+@dataclass(frozen=True)
+class ImageValidationClaim:
+    outcome: str
+    event_id: str
+    image_id: str
+    expected_state_version: int
+    trace_id: str
+    series_id: str | None = None
+    storage_profile: str | None = None
+    object_key: str | None = None
+    object_version_id: str | None = None
+    file_format: str | None = None
+    declared_content_type: str | None = None
+    expected_sha256: str | None = None
+    expected_size_bytes: int | None = None
+    lease_generation: int | None = None
+    attempt_count: int | None = None
+
+
 class ImageService:
     def __init__(self, db: AsyncSession):
         self.session_dal = SessionDal(db)
@@ -38,6 +60,7 @@ class ImageService:
         self.series_dal = SeriesDal(db)
         self.image_dal = ImageDal(db)
         self.outbox_dal = OutboxDal(db)
+        self.study_service = StudyService(db)
 
     @staticmethod
     def _response(image: Image) -> ImageResponse:
@@ -222,6 +245,220 @@ class ImageService:
                 raise ImageStateConflictError("image_validation_event_conflict")
         return self._response(updated)
 
+    async def claim_validation_event(
+        self,
+        *,
+        event_id: str,
+        message: dict[str, Any],
+        message_version: str,
+        header_trace_id: str,
+        owner_id: str,
+        claimed_at: datetime,
+        lease_expires_at: datetime,
+        max_attempts: int,
+    ) -> ImageValidationClaim:
+        try:
+            received = ValidateImageMessage.model_validate(message)
+        except ValueError as exc:
+            raise ImageStateConflictError("image_validation_message_invalid") from exc
+        expected_event_key = (
+            f"image:{received.image_id}:validate:{received.expected_state_version}"
+        )
+        event = await self.outbox_dal.get_by_id(event_id.strip()) if event_id.strip() else None
+        if event is None:
+            event = await self.outbox_dal.get_by_event_key(expected_event_key)
+        if event is None:
+            raise ImageStateConflictError("image_validation_event_not_found")
+        if event_id.strip() and event.id != event_id.strip():
+            raise ImageStateConflictError("image_validation_event_identity_conflict")
+        try:
+            stored = self.outbox_dal.validate_image_event(event)
+        except ValueError as exc:
+            raise ImageStateConflictError("image_validation_event_conflict") from exc
+        if stored.model_dump() != received.model_dump():
+            raise ImageStateConflictError("image_validation_message_conflict")
+        if message_version.strip() != event.message_version:
+            raise ImageStateConflictError("image_validation_message_version_conflict")
+        if header_trace_id.strip() != event.trace_id:
+            raise ImageStateConflictError("image_validation_trace_conflict")
+        if event.publish_status not in {"publishing", "published"}:
+            raise ImageStateConflictError("image_validation_event_not_deliverable")
+
+        image = await self.image_dal.get_by_id(received.image_id)
+        if image is None:
+            raise ImageNotFoundError("image_not_found")
+        if image.state_version >= received.expected_state_version + 1:
+            if image.status in {"ready", "superseded", "quarantined"}:
+                return ImageValidationClaim(
+                    outcome="already_applied",
+                    event_id=event.id,
+                    image_id=image.id,
+                    expected_state_version=received.expected_state_version,
+                    trace_id=received.trace_id,
+                )
+            raise ImageStateConflictError("image_validation_state_advanced")
+        if (
+            image.status != "validating"
+            or image.state_version != received.expected_state_version
+        ):
+            raise ImageStateConflictError("image_validation_state_conflict")
+        claimed = await self.image_dal.claim_validation_lease(
+            image_id=image.id,
+            expected_version=received.expected_state_version,
+            owner_id=owner_id,
+            claimed_at=claimed_at,
+            lease_expires_at=lease_expires_at,
+            max_attempts=max_attempts,
+        )
+        if claimed is None:
+            return ImageValidationClaim(
+                outcome="lease_unavailable",
+                event_id=event.id,
+                image_id=image.id,
+                expected_state_version=received.expected_state_version,
+                trace_id=received.trace_id,
+            )
+        return ImageValidationClaim(
+            outcome="claimed",
+            event_id=event.id,
+            image_id=claimed.id,
+            expected_state_version=received.expected_state_version,
+            trace_id=received.trace_id,
+            series_id=claimed.series_id,
+            storage_profile=claimed.storage_profile,
+            object_key=claimed.object_key,
+            object_version_id=claimed.object_version_id,
+            file_format=claimed.file_format,
+            declared_content_type=claimed.declared_content_type,
+            expected_sha256=claimed.expected_sha256,
+            expected_size_bytes=claimed.expected_size_bytes,
+            lease_generation=claimed.validation_lease_generation,
+            attempt_count=claimed.validation_attempt_count,
+        )
+
+    async def heartbeat_validation_claim(
+        self,
+        *,
+        claim: ImageValidationClaim,
+        owner_id: str,
+        heartbeat_at: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        if claim.outcome != "claimed" or claim.lease_generation is None:
+            raise ImageStateConflictError("image_validation_claim_invalid")
+        return await self.image_dal.heartbeat_validation_lease(
+            image_id=claim.image_id,
+            expected_version=claim.expected_state_version,
+            owner_id=owner_id,
+            lease_generation=claim.lease_generation,
+            heartbeat_at=heartbeat_at,
+            lease_expires_at=lease_expires_at,
+        )
+
+    async def release_validation_retry(
+        self,
+        *,
+        claim: ImageValidationClaim,
+        owner_id: str,
+        released_at: datetime,
+        next_validation_at: datetime,
+        error_code: str,
+    ) -> bool:
+        if claim.outcome != "claimed" or claim.lease_generation is None:
+            return False
+        return await self.image_dal.release_validation_retry(
+            image_id=claim.image_id,
+            expected_version=claim.expected_state_version,
+            owner_id=owner_id,
+            lease_generation=claim.lease_generation,
+            released_at=released_at,
+            next_validation_at=next_validation_at,
+            error_code=error_code,
+        )
+
+    async def quarantine_validation(
+        self,
+        *,
+        claim: ImageValidationClaim,
+        owner_id: str,
+        error_code: str,
+        finished_at: datetime,
+    ) -> ImageResponse | None:
+        if claim.outcome != "claimed" or claim.lease_generation is None:
+            return None
+        updated = await self.image_dal.finalize_validation(
+            image_id=claim.image_id,
+            expected_version=claim.expected_state_version,
+            owner_id=owner_id,
+            lease_generation=claim.lease_generation,
+            finished_at=finished_at,
+            values={
+                "status": "quarantined",
+                "error_code": error_code.strip()[:80],
+                "verified_at": None,
+            },
+        )
+        return self._response(updated) if updated is not None else None
+
+    async def complete_validation(
+        self,
+        *,
+        claim: ImageValidationClaim,
+        owner_id: str,
+        validation: ObjectValidation,
+        finished_at: datetime,
+    ) -> ImageResponse:
+        if (
+            claim.outcome != "claimed"
+            or claim.lease_generation is None
+            or claim.series_id is None
+        ):
+            raise ImageStateConflictError("image_validation_claim_invalid")
+        image = await self.image_dal.get_by_id(claim.image_id)
+        if image is None:
+            raise ImageNotFoundError("image_not_found")
+        if validation.object_ref.storage_profile != image.storage_profile:
+            raise ImageStateConflictError("image_validation_storage_profile_conflict")
+        if validation.object_ref.object_key != image.object_key:
+            raise ImageStateConflictError("image_validation_object_key_conflict")
+        metadata = dict(image.technical_metadata_json or {})
+        metadata.update(
+            {
+                "pixel_width": validation.inspection.pixel_width,
+                "pixel_height": validation.inspection.pixel_height,
+                "orientation": validation.inspection.orientation,
+            }
+        )
+        updated = await self.image_dal.finalize_validation(
+            image_id=claim.image_id,
+            expected_version=claim.expected_state_version,
+            owner_id=owner_id,
+            lease_generation=claim.lease_generation,
+            finished_at=finished_at,
+            values={
+                "object_version_id": validation.object_ref.object_version_id,
+                "content_type": validation.object_ref.content_type,
+                "sha256": validation.object_ref.sha256,
+                "size_bytes": validation.object_ref.size_bytes,
+                "kms_key_version": validation.object_ref.kms_key_version,
+                "technical_metadata_json": metadata,
+                "status": "ready",
+                "error_code": None,
+                "verified_at": finished_at,
+            },
+        )
+        if updated is None:
+            raise ImageStateConflictError("image_validation_lease_lost")
+        try:
+            await self.study_service.recompute_after_image_change(
+                series_id=claim.series_id,
+                revision_reason="replace" if updated.supersedes_image_id else "add",
+                changed_at=finished_at,
+            )
+        except StudyStateConflictError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        return self._response(updated)
+
     async def _owned_image(self, *, image_id: str, requester_id: str) -> Image:
         image = await self.image_dal.get_by_id(image_id.strip())
         if image is None:
@@ -291,4 +528,5 @@ __all__ = [
     "ImageService",
     "ImageServiceError",
     "ImageStateConflictError",
+    "ImageValidationClaim",
 ]

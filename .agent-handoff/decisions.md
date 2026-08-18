@@ -24,6 +24,8 @@
 | 2026-08-18 | 目标 `OutboxRelay` 与旧 tenant XRay Relay 暂时同模块并行，复用同一 Celery 工厂 | 目标 Outbox 没有 tenant/consumer lease 字段，强行套旧接口会污染合同；保留旧类可避免在 P1 提前破坏兼容 API | `app/core/messaging/outbox_relay.py`；设计母文第 4.8、6.7 节 |
 | 2026-08-18 | 新存储 API 使用显式事务 session，旧 API 保持请求级事务依赖 | direct/multipart/HEAD 等 OSS I/O 不能跨数据库事务；全局修改旧依赖会改变现有接口提交语义 | `app/core/async_db.py:get_explicit_transaction_session`；设计母文第 4.9 节 |
 | 2026-08-18 | Series/Study manifest 只由 canonical helper 和 StudyService 重算 | 防止 Worker、ImageService 和未来 TaskService 产生不同 hash；StudyService 继续拥有 Series/revision，重复 ready logical key 直接 conflict | `app/core/imaging/manifest.py`；`app/service/study_service.py:recompute_after_image_change`；INV-66 |
+| 2026-08-18 | Image Worker 接受 `publishing/published` 两种 Outbox 发布状态 | Broker 可能已接收消息但 Relay 的 DB confirm CAS 尚未成功；事件内容不可变且会被完整复核，拒绝 `publishing` 会破坏至少一次恢复 | `app/service/image_service.py:claim_validation_event`；Relay Broker-accepted/DB-conflict 合同 |
+| 2026-08-18 | Image ready 与 Series/Study revision 使用同一终态事务 | 禁止 Image 已 ready 但 manifest/revision 仍旧；Study CAS 冲突回滚 Image ready，再释放原 lease 安排重试 | `ImageService.complete_validation`；设计母文第 4.9、8.2 节；INV-55、INV-66 |
 
 ## 记录规则
 

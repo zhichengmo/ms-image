@@ -119,3 +119,11 @@
 - `ImageDal` 新增 validation candidate、claim、heartbeat、retry release、terminal CAS 和 expired lease recovery 基础，lease 不推进业务 state_version。
 - `StudyService` 新增同事务 Series/Study 重算入口；Series count/manifest 由 ready Image 集合确定性生成，Study revision 使用 CAS 推进且 finalize 前保持 validating。
 - 本切片未注册 Worker task，未创建迁移或测试脚本，未访问真实 MySQL/OSS/Broker。
+
+## 2026-08-18 — P1C 原子 Image validation Worker
+
+- `ImageService` 新增严格事件 claim、heartbeat、retry release、quarantine 和成功终态入口；Worker 不直接访问 DAL。
+- 新增 `ImageValidationWorker`：短事务 claim，事务外 Gateway 校验并保持 heartbeat，再以短事务完成 Image ready 与 StudyService 的 Series/Study CAS。
+- `imaging.validate_image` Celery task 使用 Outbox ID 作为 task ID，复核 message/header 后执行；临时失败使用受限 countdown retry，attempt exhaustion 进入稳定死信/隔离语义。
+- 内存验证覆盖 ready、quarantined、retry、duplicate、header 篡改和 Study revision conflict；fake Gateway 确认执行时无活动数据库事务。
+- 未创建迁移或测试脚本，未访问真实 MySQL/OSS/RabbitMQ；并发锁、真实 heartbeat 时钟和 Broker retry 仍属运行时未验证。
