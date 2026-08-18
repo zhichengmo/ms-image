@@ -104,3 +104,10 @@
   - 新增当前源码 Preserve/Replace 边界，明确保留 auth/readiness/OSS validation/qualification/DalBase/投递语义，替换 `xray_accuracy` 专项领域。
   - 为本轮新增英文状态、对象和缩写补充中文说明；未新建竞争文档。
   - 未修改业务代码、数据库、迁移或测试脚本。
+
+## 2026-08-18 — Relay 远端 SHA 门禁复核
+
+- 核实本地 `HEAD` 与本地 `origin/codex/ms-image-refactor` remote-tracking ref 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`，工作区无业务代码改动。
+- 实时 `git ls-remote` 失败：SSH 连接 GitHub 22 端口被当前环境禁止；HTTPS 也无法解析 `github.com`。
+- 严格执行用户门禁，没有开始 Image validation Worker，也没有修改业务代码、迁移或测试脚本。
+- 网络恢复后重新执行实时远端查询，确认 `origin/codex/ms-image-refactor` 与本地 HEAD 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`；失败历史保留，当前门禁已解除。

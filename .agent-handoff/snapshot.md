@@ -5,9 +5,9 @@
 - 最后更新：2026-08-18
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前目标：以已冻结的 Canonical XRay Chain（X 光权威主链）开始目标架构重构；先完成有界 P0 核对，再按 P1A -> P1B -> P1C 实施通用影像底座。
-- 当前状态：`p1c_relay_implemented / image_worker_next`（P1C Outbox Relay 已实现/下一切片为 Image validation Worker）
+- 当前状态：`p1c_relay_remote_confirmed / foundation_next`（P1C Outbox Relay 本地与远端 SHA 已实时确认一致；下一切片为事务、manifest 和 Image validation lease 基础）
 - 当前分支：`codex/ms-image-refactor`；所有后续工作按业务 owner 垂直切片提交，每次验证后立即推送并核对远端 SHA，推送失败不得进入下一切片。
-- 下一步：提交并推送 Relay 切片；远端 SHA 确认后实现 Image validation Worker 的业务 lease、事务外对象校验、结果 CAS 和 Series/Study 确定性重算。
+- 下一步：完成并推送恢复 checkpoint 后，实现显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；该基础切片不注册 Worker task。
 - 活动入口：
   - `docs/refactor/README.md`
   - `docs/refactor/10-xray-detailed-flow.md`
@@ -17,7 +17,7 @@
   - `docs/ms-image-final-architecture-and-database-design.md`
   - `docs/history/README.md`
   - `.agent-handoff/backlog.md`
-- 当前阻断：目标表、Stage 和评测控制面尚未实现；未授权迁移、真实数据库和真实对象演练；真实 Provider 和医学发布仍为 `NO-GO`（禁止放行）。
+- 当前阻断：Relay 远端 SHA 门禁已解除；仍未授权迁移、真实数据库、真实 OSS/Broker 演练，目标 Task/Stage 与评测控制面尚未实现，真实 Provider 和医学发布仍为 `NO-GO`（禁止放行）。
 - 开放问题：目标实现、真实 Provider 资格、Gold/paired A/B/Holdout 和生产环境合同仍未闭环；详见 `.agent-handoff/risks.md`。
 
 ## 恢复摘要

@@ -92,6 +92,8 @@
 | 2026-08-18 | P1C Relay Celery 白名单投递 | `passed in memory` | task ID 使用 Outbox ID；queue/routing/exchange 为 imaging 独立 topology；body 仅含 image ID/version/trace，header 仅含 message version/trace |
 | 2026-08-18 | P1C Relay 旧 XRay 兼容 | `passed by import` | 旧 `workers.xray_accuracy_worker.outbox_relay` 继续构造 `TransactionalOutboxRelay`；未修改旧 tenant DAL 合同 |
 | 2026-08-18 | P1C Relay 真实 Broker/MySQL | `not run` | 未授权真实数据库或 RabbitMQ 演练；Broker confirm、lease 时钟和多进程竞争仍未运行验证 |
+| 2026-08-18 | P1C Relay 远端 SHA 实时确认 | `blocked` | 本地 HEAD 与 remote-tracking ref 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`；SSH 22 端口不可访问，HTTPS 无法解析 `github.com`，故 `git ls-remote` 未能实时确认远端并停止下一切片 |
+| 2026-08-18 | P1C Relay 远端 SHA 重试 | `passed` | 网络恢复后 `git ls-remote --heads origin codex/ms-image-refactor` 返回 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`，与本地 HEAD 完全一致，门禁解除 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
