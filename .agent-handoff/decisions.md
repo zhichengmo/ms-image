@@ -20,6 +20,7 @@
 | 2026-08-18 | 去掉目标表 `tenant_id` 不等于取消认证 | 分区字段与访问控制职责不同；旧 API/OSS 仍使用 tenant 派生语义 | `app/api/deps.py:136-204`；`app/core/imaging/object_store.py:47-82`；设计母文第 5.0.1 节 |
 | 2026-08-18 | 重构以当前工作树为资产基线，采用保留入口的内部模块化替换 | 当前 `HEAD` 就是 `9a45209a` 且之后提交数为 0；reset 只会丢弃未提交资产，局部修补又会延续 XRay 专项事实污染 | `docs/refactor/13-refactor-base-decision.md`；当前 Git 和源码点验 |
 | 2026-08-18 | 使用 `codex/ms-image-refactor` 并按业务 owner 垂直切片提交，每次提交后立即推送 | 用户要求每完成一部分代码即提交并推送；远端确认是进入下一切片的门禁 | 用户确认的实施计划；`.agent-handoff/backlog.md` |
+| 2026-08-18 | 通用 Outbox 只拥有 Broker 发布状态，Image 校验 lease 归 `image_record` | 避免 relay 和业务消费者形成双 lease owner；Image ready 必须由有效业务 lease 的 Worker CAS 回写 | 设计母文第 4.8、4.9、6.7 节；INV-55 至 INV-57 |
 
 ## 记录规则
 

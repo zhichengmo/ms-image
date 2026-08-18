@@ -37,6 +37,11 @@
   - 新增 owner namespace、direct PUT、multipart init/sign/list/complete/abort、HEAD、受控读取/删除和完整对象校验。
   - 完整校验执行 HEAD、流式 bytes hash/size/格式、二次 HEAD；ETag 不作为内容 hash。
   - 旧 tenant-derived key/put/get/resolver 接口保留兼容；未访问真实 OSS。
+- P1C Image 事务性 Outbox：
+  - 新增通用 `outbox_record`、严格 `ValidateImageMessage` 和复用 `DalBase` 的 `OutboxDal`；目标表不含 tenant、FK 或数据库 Enum。
+  - `ImageService.accept_upload_complete` 在同一请求事务中 CAS `uploading -> validating` 并创建 `validate_image` Outbox；API/Service 不直接发布 Broker。
+  - 重复 complete 必须命中原 expected version、对象 version 和完整事件合同；event key、owner/version、message version、trace 和 canonical SHA 任一漂移均 fail closed。
+  - Outbox 只拥有 relay 发布状态；Image Worker 的 claim/lease/retry 仍由 `image_record` 拥有。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

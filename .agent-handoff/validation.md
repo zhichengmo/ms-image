@@ -82,6 +82,11 @@
 | 2026-08-18 | P1C Gateway namespace/安全合同 | `passed` | 新 key 为 `image/{image_id}/{generation}/source.{format}`；拒绝 URL/绝对/遍历 key，上传 URL 和 multipart session 不进入 repr |
 | 2026-08-18 | P1C Gateway 内存行为验证 | `passed` | fake OSS 下 direct PUT、HEAD、流式 SHA256/size、PNG 格式、version 和二次 HEAD 变化检测通过；未访问真实 OSS |
 | 2026-08-18 | P1C Gateway ETag 边界 | `passed` | ETag 仅用于 multipart manifest 和对象变化检测；完整 ObjectRef SHA256 来自服务端流式 bytes |
+| 2026-08-18 | P1C Image Outbox Python 编译与应用导入 | `passed` | `compileall app workers`、应用、`ImageService` 和 `OutboxDal` 导入成功；应用装载 36 条路由 |
+| 2026-08-18 | P1C Outbox ORM/MySQL DDL 合同 | `passed` | `outbox_record` 22 列；单列 opaque 主键、0 FK、0 Enum、0 tenant；唯一事件键和三组目标索引符合母文 |
+| 2026-08-18 | P1C Outbox 消息合同 | `passed` | canonical JSON hash 对字段顺序稳定；已有事件的 event key/owner/version/message version/trace/hash 会完整自校验，篡改 event key 被拒绝 |
+| 2026-08-18 | P1C Image complete 事务边界 | `passed by static contract` | `ImageService` 只经 `ImageDal/OutboxDal` flush，request `AsyncSession.begin()` 负责同事务提交；Service 无直接 SQL，未在 API 内发布 Broker |
+| 2026-08-18 | P1C Image Outbox 真实 DB/Broker | `not run` | 未获授权创建迁移或连接真实 MySQL/Broker；当前仅为代码与内存合同验证 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
