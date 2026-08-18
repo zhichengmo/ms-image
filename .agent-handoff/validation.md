@@ -62,6 +62,10 @@
 | 2026-08-18 | P0 事务边界核对 | `deferred to P1C` | 旧 ingest/technical worker 存在事务期间外部 I/O；不阻止纯数据库 P1A，但禁止直接作为目标 Image Worker |
 | 2026-08-18 | P0 身份与授权核对 | `passed for P1` | JWT subject/scope 强校验可复用；目标资源 owner 校验放在 Service，旧 tenant dependency 暂不删除 |
 | 2026-08-18 | P0 Broker/Trace/启动核对 | `passed for code implementation` | Broker/readiness/Celery 和 API/Admin 启动入口可装载；TraceEvent 在 AuditSink 资格化前保留，未做真实 Broker 运行验证 |
+| 2026-08-18 | P1A Session Python 编译与应用导入 | `passed` | `compileall app workers`、`from main import app`、`SessionService` 导入均成功；应用仍装载 26 条路由 |
+| 2026-08-18 | P1A Session ORM/MySQL DDL 合同 | `passed` | `session_record` 17 列；单列 `VARCHAR(64)` 主键、0 FK、0 Enum、0 tenant；唯一约束和双索引符合母文 |
+| 2026-08-18 | P1A Session Schema UTC 归一 | `passed` | 带时区 `started_at` 可解析并归一为 UTC naive DATETIME；额外字段拒绝 |
+| 2026-08-18 | P1A Session 分层边界 | `passed` | Service 无 SQLAlchemy select/update/delete；数据库访问集中在 `SessionDal(DalBase)` |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

@@ -12,6 +12,11 @@
   - 确认 JWT subject/scope、Broker/readiness、API/Admin/Celery 启动入口可作为 P1 代码基线；生产运行仍未验证。
   - 保留旧 tenant compatibility dependency 和 TraceEvent，分别等待目标 owner 授权与 AuditSink 资格闭环。
   - 结论：无 P1A 硬阻断，下一切片为 Session 分层。
+- P1A Session 垂直切片：
+  - 新增通用 `ImagingRecordBase`，仅统一服务端 opaque ID 与 UTC DATETIME(6) 时间戳，继续使用唯一 `DalBase`。
+  - 新增 `Session -> session_record`、Create/Update/Query/Response Schema、`SessionDal` 和 `SessionService`。
+  - 实现 request/source 双幂等、requester owner 校验、CAS 状态推进、空会话取消与 completed 关闭；需要子资源事实的动作保持 fail-closed。
+  - 未新增迁移或测试脚本，未连接真实数据库。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：
