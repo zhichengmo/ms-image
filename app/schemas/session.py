@@ -81,6 +81,27 @@ class SessionQuery(BaseModel):
         return normalize_required_text(value)
 
 
+class SessionVersionCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
+class SessionCancelCommand(SessionVersionCommand):
+    cancel_reason: str = Field(min_length=1, max_length=200)
+
+    @field_validator("cancel_reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -106,7 +127,9 @@ class SessionResponse(BaseModel):
 __all__ = [
     "SESSION_STATUSES",
     "SessionCreate",
+    "SessionCancelCommand",
     "SessionQuery",
     "SessionResponse",
     "SessionUpdate",
+    "SessionVersionCommand",
 ]

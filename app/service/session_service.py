@@ -31,6 +31,7 @@ class SessionStateConflictError(SessionServiceError):
 class SessionService:
     def __init__(self, db: AsyncSession):
         self.session_dal = SessionDal(db)
+        self._db = db
 
     @staticmethod
     def _response(session: Session) -> SessionResponse:
@@ -121,15 +122,57 @@ class SessionService:
             raise SessionStateConflictError("session_state_conflict")
         return self._response(updated)
 
-    async def cancel_open_session(
+    async def complete_session(
+        self,
+        *,
+        session_id: str,
+        requester_id: str,
+        expected_state_version: int,
+    ) -> SessionResponse:
+        from app.crud.image import ImageDal
+        from app.crud.series import SeriesDal
+        from app.crud.study import StudyDal
+
+        session = await self._owned_session(
+            session_id=session_id, requester_id=requester_id
+        )
+        if session.status == "completed":
+            return self._response(session)
+        if session.status != "processing" or session.state_version != expected_state_version:
+            raise SessionStateConflictError("session_state_conflict")
+        studies = await StudyDal(self._db).list_for_session(session.id)
+        if not studies:
+            raise SessionStateConflictError("session_study_required")
+        series_dal = SeriesDal(self._db)
+        image_dal = ImageDal(self._db)
+        for study in studies:
+            if study.status in {"ingesting", "validating"}:
+                raise SessionStateConflictError("session_children_active")
+            for series in await series_dal.list_for_study(study.id):
+                images = await image_dal.list_for_series(series.id)
+                if any(image.status in {"uploading", "validating"} for image in images):
+                    raise SessionStateConflictError("session_children_active")
+        updated = await self.session_dal.cas_update(
+            session_id=session.id,
+            expected_version=expected_state_version,
+            values={"status": "completed", "completed_at": datetime.utcnow()},
+        )
+        if updated is None:
+            raise SessionStateConflictError("session_state_conflict")
+        return self._response(updated)
+
+    async def cancel_session(
         self,
         *,
         session_id: str,
         requester_id: str,
         expected_state_version: int,
         cancel_reason: str,
-        cancelled_at: datetime,
     ) -> SessionResponse:
+        from app.crud.image import ImageDal
+        from app.crud.series import SeriesDal
+        from app.crud.study import StudyDal
+
         session = await self._owned_session(
             session_id=session_id, requester_id=requester_id
         )
@@ -137,8 +180,16 @@ class SessionService:
             if session.cancel_reason == cancel_reason:
                 return self._response(session)
             raise SessionStateConflictError("session_cancel_conflict")
-        if session.status != "open" or session.state_version != expected_state_version:
-            raise SessionStateConflictError("session_children_must_be_closed")
+        if session.status not in {"open", "processing"} or session.state_version != expected_state_version:
+            raise SessionStateConflictError("session_state_conflict")
+        if session.status == "processing":
+            series_dal = SeriesDal(self._db)
+            image_dal = ImageDal(self._db)
+            for study in await StudyDal(self._db).list_for_session(session.id):
+                for series in await series_dal.list_for_study(study.id):
+                    images = await image_dal.list_for_series(series.id)
+                    if any(image.status in {"uploading", "validating"} for image in images):
+                        raise SessionStateConflictError("session_children_must_be_closed")
         normalized_reason = cancel_reason.strip()
         if not normalized_reason or len(normalized_reason) > 200:
             raise SessionStateConflictError("session_cancel_reason_invalid")
@@ -149,7 +200,7 @@ class SessionService:
                 "status": "cancelled",
                 "cancelled_by_id": requester_id,
                 "cancel_reason": normalized_reason,
-                "cancelled_at": cancelled_at,
+                "cancelled_at": datetime.utcnow(),
             },
         )
         if updated is None:
@@ -162,7 +213,6 @@ class SessionService:
         session_id: str,
         requester_id: str,
         expected_state_version: int,
-        closed_at: datetime,
     ) -> SessionResponse:
         session = await self._owned_session(
             session_id=session_id, requester_id=requester_id
@@ -174,7 +224,7 @@ class SessionService:
         updated = await self.session_dal.cas_update(
             session_id=session.id,
             expected_version=expected_state_version,
-            values={"status": "closed", "closed_at": closed_at},
+            values={"status": "closed", "closed_at": datetime.utcnow()},
         )
         if updated is None:
             raise SessionStateConflictError("session_state_conflict")

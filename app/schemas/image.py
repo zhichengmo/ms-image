@@ -119,6 +119,18 @@ class ImageUpdate(BaseModel):
     expected_state_version: int = Field(ge=0)
 
 
+class ImageAbortCommand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
 class ImageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -168,6 +180,7 @@ __all__ = [
     "IMAGE_KINDS",
     "IMAGE_ROLES",
     "UPLOAD_MODES",
+    "ImageAbortCommand",
     "ImageCreate",
     "ImageResponse",
     "ImageUpdate",

@@ -106,6 +106,8 @@ class Settings(BaseSettings):
     API_PRIVATE_KEY: str = ""
     JWT_ISSUER: str = "ms-image"
     JWT_AUDIENCE: str = "ms-image-api"
+    # Generic imaging scope; the legacy default preserves current XRay callers.
+    IMAGING_REQUIRED_SCOPE: str = "xray:run"
     XRAY_REQUIRED_SCOPE: str = "xray:run"
 
     # Admin JWT settings

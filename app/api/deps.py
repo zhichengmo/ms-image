@@ -206,6 +206,49 @@ def require_tenant_scope(*required_scopes: str):
     return dependency
 
 
+def get_resource_context(jwt_data: dict = Depends(get_jwt_data)) -> dict:
+    """Return verified identity/scope without persisting the legacy tenant claim."""
+    subject = jwt_data.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        raise _unauthorized("Subject is required")
+    return {
+        "subject": subject.strip(),
+        "scopes": sorted(_scopes(jwt_data)),
+    }
+
+
+def require_resource_scope(*required_scopes: str):
+    scopes = tuple(required_scopes)
+
+    def dependency(context: dict = Depends(get_resource_context)) -> dict:
+        if scopes and not set(scopes).issubset(set(context["scopes"])):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient resource scope",
+            )
+        return context
+
+    return dependency
+
+
+async def get_session_service(db=Depends(get_async_session)):
+    from app.service.session_service import SessionService
+
+    return SessionService(db)
+
+
+async def get_study_service(db=Depends(get_async_session)):
+    from app.service.study_service import StudyService
+
+    return StudyService(db)
+
+
+async def get_image_service(db=Depends(get_async_session)):
+    from app.service.image_service import ImageService
+
+    return ImageService(db)
+
+
 async def get_xray_run_service(
     db=Depends(get_async_session),
 ):

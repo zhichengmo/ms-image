@@ -27,6 +27,11 @@
   - 实现 owner 链校验、对象键幂等、逻辑影像版本递增、并发版本冲突 fail closed、受控 upload abort。
   - 原始/派生 lineage 和 direct/multipart 请求合同在 Schema 层拒绝非法组合。
   - 未接 OSS、Outbox、Broker 或 Worker；Image complete/ready 明确保留给 P1C。
+- P1B 非存储生命周期 API：
+  - 新增通用 resource JWT subject/scope context 和 Session/Study/Image Service DI；旧 tenant dependency 保持兼容。
+  - 注册 Session create/get/complete/close/cancel、Study create/get、Series create、Image get/abort-upload。
+  - 所有目标资源 ID 仅使用 query/body；endpoint 统一 `GenericResponse` 并将稳定 Service 错误映射为 404/409/503。
+  - Gateway/Outbox 未实现前不暴露 prepare/complete/replace/finalize，防止客户端进入不可恢复状态。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

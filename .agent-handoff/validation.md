@@ -74,6 +74,10 @@
 | 2026-08-18 | P1A Image ORM/MySQL DDL 合同 | `passed` | `image_record` 43 列；单列 opaque 主键、0 FK、0 Enum、0 tenant；6 组目标索引与双唯一约束已定义 |
 | 2026-08-18 | P1A Image Schema 合同 | `passed` | direct/multipart 互斥字段、UTC expiry、original 无 source manifest、derived 必须有 lineage 均 fail closed |
 | 2026-08-18 | P1A Image 分层边界 | `passed` | Service 无直接 SQL；版本查询、创建与 CAS 均由 `ImageDal(DalBase)` 完成，未接 OSS/Broker |
+| 2026-08-18 | P1B API Python 编译与 OpenAPI | `passed` | 应用导入成功；OpenAPI 共 27 个 path，其中 8 个为目标 Session/Study/Series/Image 非存储路径 |
+| 2026-08-18 | P1B ID 路由合同 | `passed` | 新目标 API 无路径参数；资源 ID 仅使用 `?id=` query 或 request body |
+| 2026-08-18 | P1B 认证与 DI | `passed` | 新 resource context 依赖已验证 JWT subject/scope，不要求目标表 tenant；API 仅注入 Service，旧 tenant XRay 路由保持不变 |
+| 2026-08-18 | P1B 不可用接口门禁 | `passed` | Gateway/Outbox 未到位前未注册 Image prepare/complete/replace 或 Study finalize，避免假闭环 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
