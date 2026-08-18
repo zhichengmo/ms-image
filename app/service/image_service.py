@@ -53,6 +53,28 @@ class ImageValidationClaim:
     attempt_count: int | None = None
 
 
+@dataclass(frozen=True)
+class ImageValidationEventCandidate:
+    event_id: str
+    message: dict[str, Any]
+    message_version: str
+    trace_id: str
+
+
+@dataclass(frozen=True)
+class ImageObjectCandidate:
+    image_id: str
+    state_version: int
+    series_id: str
+    storage_profile: str
+    object_key: str
+    object_version_id: str | None
+    file_format: str
+    declared_content_type: str | None
+    expected_sha256: str | None
+    expected_size_bytes: int | None
+
+
 class ImageService:
     def __init__(self, db: AsyncSession):
         self.session_dal = SessionDal(db)
@@ -176,6 +198,39 @@ class ImageService:
         trace_id: str,
     ) -> ImageResponse:
         image = await self._owned_image(image_id=image_id, requester_id=requester_id)
+        return await self._accept_upload_complete_for_image(
+            image=image,
+            expected_state_version=expected_state_version,
+            object_head=object_head,
+            trace_id=trace_id,
+        )
+
+    async def accept_reconciled_upload(
+        self,
+        *,
+        image_id: str,
+        expected_state_version: int,
+        object_head: ObjectHead,
+        trace_id: str,
+    ) -> ImageResponse:
+        image = await self.image_dal.get_by_id(image_id.strip())
+        if image is None:
+            raise ImageNotFoundError("image_not_found")
+        return await self._accept_upload_complete_for_image(
+            image=image,
+            expected_state_version=expected_state_version,
+            object_head=object_head,
+            trace_id=trace_id,
+        )
+
+    async def _accept_upload_complete_for_image(
+        self,
+        *,
+        image: Image,
+        expected_state_version: int,
+        object_head: ObjectHead,
+        trace_id: str,
+    ) -> ImageResponse:
         self._validate_head(image, object_head)
         if image.status == "validating":
             if image.state_version != expected_state_version + 1:
@@ -244,6 +299,153 @@ class ImageService:
             if existing_message is None or existing_message.model_dump() != message:
                 raise ImageStateConflictError("image_validation_event_conflict")
         return self._response(updated)
+
+    async def recover_expired_validation_leases(
+        self, *, now: datetime, limit: int, max_attempts: int
+    ) -> dict[str, int]:
+        rows = await self.image_dal.list_expired_validation_leases(
+            now=now, limit=limit
+        )
+        recovered = 0
+        quarantined = 0
+        for image in rows:
+            updated = await self.image_dal.recover_expired_validation_lease(
+                image_id=image.id,
+                expected_version=image.state_version,
+                lease_generation=image.validation_lease_generation,
+                now=now,
+                max_attempts=max_attempts,
+            )
+            if updated is None:
+                continue
+            if updated.status == "quarantined":
+                quarantined += 1
+            else:
+                recovered += 1
+        return {"recovered": recovered, "quarantined": quarantined}
+
+    async def list_validation_reconcile_events(
+        self, *, now: datetime, limit: int
+    ) -> list[ImageValidationEventCandidate]:
+        rows = await self.image_dal.list_validation_candidates(now=now, limit=limit)
+        candidates: list[ImageValidationEventCandidate] = []
+        for image in rows:
+            event_key = f"image:{image.id}:validate:{image.state_version}"
+            event = await self.outbox_dal.get_by_event_key(event_key)
+            if event is None:
+                await self.image_dal.cas_update(
+                    image_id=image.id,
+                    expected_version=image.state_version,
+                    values={
+                        "status": "quarantined",
+                        "error_code": "validation_event_missing",
+                        "next_validation_at": None,
+                    },
+                )
+                continue
+            try:
+                message = self.outbox_dal.validate_image_event(event)
+            except ValueError:
+                await self.image_dal.cas_update(
+                    image_id=image.id,
+                    expected_version=image.state_version,
+                    values={
+                        "status": "quarantined",
+                        "error_code": "validation_event_invalid",
+                        "next_validation_at": None,
+                    },
+                )
+                continue
+            if event.publish_status not in {"publishing", "published"}:
+                continue
+            candidates.append(
+                ImageValidationEventCandidate(
+                    event_id=event.id,
+                    message=message.model_dump(),
+                    message_version=event.message_version,
+                    trace_id=event.trace_id,
+                )
+            )
+        return candidates
+
+    async def list_expired_upload_candidates(
+        self, *, now: datetime, limit: int
+    ) -> list[ImageObjectCandidate]:
+        rows = await self.image_dal.list_expired_uploads(now=now, limit=limit)
+        return [self._object_candidate(image) for image in rows]
+
+    async def quarantine_expired_upload(
+        self,
+        *,
+        image_id: str,
+        expected_state_version: int,
+        error_code: str,
+        now: datetime,
+    ) -> bool:
+        image = await self.image_dal.get_by_id(image_id)
+        if (
+            image is None
+            or image.status != "uploading"
+            or image.state_version != expected_state_version
+            or image.upload_expires_at is None
+            or image.upload_expires_at > now
+        ):
+            return False
+        updated = await self.image_dal.cas_update(
+            image_id=image.id,
+            expected_version=expected_state_version,
+            values={
+                "status": "quarantined",
+                "upload_session_ref": None,
+                "error_code": error_code.strip()[:80],
+                "next_validation_at": None,
+            },
+        )
+        return updated is not None
+
+    async def get_ready_object_candidate(
+        self, *, image_id: str
+    ) -> ImageObjectCandidate | None:
+        image = await self.image_dal.get_by_id(image_id.strip())
+        if image is None or image.status != "ready":
+            return None
+        return self._object_candidate(image)
+
+    async def invalidate_ready_image(
+        self,
+        *,
+        image_id: str,
+        expected_state_version: int,
+        error_code: str,
+        changed_at: datetime,
+    ) -> bool:
+        image = await self.image_dal.get_by_id(image_id)
+        if (
+            image is None
+            or image.status != "ready"
+            or image.state_version != expected_state_version
+        ):
+            return False
+        updated = await self.image_dal.cas_update(
+            image_id=image.id,
+            expected_version=expected_state_version,
+            values={
+                "status": "quarantined",
+                "error_code": error_code.strip()[:80],
+                "verified_at": None,
+            },
+        )
+        if updated is None:
+            return False
+        try:
+            await self.study_service.recompute_after_image_change(
+                series_id=image.series_id,
+                revision_reason="delete",
+                changed_at=changed_at,
+            )
+        except StudyStateConflictError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        return True
 
     async def claim_validation_event(
         self,
@@ -521,6 +723,21 @@ class ImageService:
         ):
             raise ImageStateConflictError("image_object_content_type_conflict")
 
+    @staticmethod
+    def _object_candidate(image: Image) -> ImageObjectCandidate:
+        return ImageObjectCandidate(
+            image_id=image.id,
+            state_version=image.state_version,
+            series_id=image.series_id,
+            storage_profile=image.storage_profile,
+            object_key=image.object_key,
+            object_version_id=image.object_version_id,
+            file_format=image.file_format,
+            declared_content_type=image.declared_content_type,
+            expected_sha256=image.sha256 or image.expected_sha256,
+            expected_size_bytes=image.size_bytes or image.expected_size_bytes,
+        )
+
 
 __all__ = [
     "ImageIdempotencyConflictError",
@@ -529,4 +746,6 @@ __all__ = [
     "ImageServiceError",
     "ImageStateConflictError",
     "ImageValidationClaim",
+    "ImageValidationEventCandidate",
+    "ImageObjectCandidate",
 ]

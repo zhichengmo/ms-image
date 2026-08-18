@@ -26,6 +26,8 @@
 | 2026-08-18 | Series/Study manifest 只由 canonical helper 和 StudyService 重算 | 防止 Worker、ImageService 和未来 TaskService 产生不同 hash；StudyService 继续拥有 Series/revision，重复 ready logical key 直接 conflict | `app/core/imaging/manifest.py`；`app/service/study_service.py:recompute_after_image_change`；INV-66 |
 | 2026-08-18 | Image Worker 接受 `publishing/published` 两种 Outbox 发布状态 | Broker 可能已接收消息但 Relay 的 DB confirm CAS 尚未成功；事件内容不可变且会被完整复核，拒绝 `publishing` 会破坏至少一次恢复 | `app/service/image_service.py:claim_validation_event`；Relay Broker-accepted/DB-conflict 合同 |
 | 2026-08-18 | Image ready 与 Series/Study revision 使用同一终态事务 | 禁止 Image 已 ready 但 manifest/revision 仍旧；Study CAS 冲突回滚 Image ready，再释放原 lease 安排重试 | `ImageService.complete_validation`；设计母文第 4.9、8.2 节；INV-55、INV-66 |
+| 2026-08-18 | ready 对象漂移首期按显式 Image ID 有界核查 | 当前表没有 durable scan cursor/next-check 字段；伪造全局前 N 条扫描会永久重复同一批对象。显式核查仍执行完整 Gateway 校验和原子 Study 失效，周期 inventory 留待有运行合同后实现 | `workers/imaging_worker/reconcile.py:verify_ready_image`；未授权迁移边界 |
+| 2026-08-18 | OSS HEAD 将 NoSuchKey/NotFound 归一为 `object_not_found` | 过期 upload reconcile 必须区分确定性对象缺失和可重试 HEAD/网络失败，且不能把 SDK 错误详情写入业务状态 | `app/core/imaging/object_store.py:head_object` |
 
 ## 记录规则
 

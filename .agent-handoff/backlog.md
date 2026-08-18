@@ -18,7 +18,8 @@
 - [x] Relay 远端 SHA 门禁：实时确认 `origin/codex/ms-image-refactor` 与本地均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`。
 - [x] P1C 基础：已增加显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；未注册 Worker task。
 - [x] P1C Image validation Worker：已复核 Outbox ID/aggregate/version/message/header；Image lease/heartbeat 后在事务外执行 Gateway 校验，单一短事务写 ready 与 Series/Study revision，确定性失败写 quarantined。
-- [ ] P1C Image reconcile：恢复 expired validating lease、uploading timeout、complete callback 丢失和 Study revision conflict；ready 对象漂移只标记 conflict/invalid，不删除对象。
+- [x] P1C Image reconcile：已恢复 expired validating lease 和到期 validation event；过期 upload 有对象时补建 validating+Outbox、无对象时隔离；指定 ready Image 可执行完整漂移核查并原子失效 Study revision。
+- [ ] P1B/P1C direct prepare API：服务端生成 Image ID/version/object key，短事务创建 uploading Image，事务外生成 direct PUT grant；相同 in-progress 载荷幂等返回。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。
 - [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。
 - [ ] P2 复用 P1C 的同一 Outbox/Relay，实现 Task + first Stage + Outbox 原子事务和零模型 replay。

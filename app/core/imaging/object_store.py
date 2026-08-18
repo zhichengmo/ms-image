@@ -369,7 +369,12 @@ class OSSObjectStore:
         object_key = validate_object_key(object_key)
 
         def _head() -> ObjectHead:
-            result = self._bucket.get_object_meta(object_key)
+            try:
+                result = self._bucket.get_object_meta(object_key)
+            except (oss2.exceptions.NoSuchKey, oss2.exceptions.NotFound) as exc:
+                raise ObjectStoreError("object_not_found") from exc
+            except oss2.exceptions.OssError as exc:
+                raise ObjectStoreError("object_store_head_failed") from exc
             if getattr(result, "status", 500) >= 400:
                 raise ObjectStoreError("object_store_head_failed")
             size = int(getattr(result, "content_length", -1))

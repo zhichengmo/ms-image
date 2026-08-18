@@ -89,6 +89,41 @@ class ImageDal(DalBase):
             v_return_objs=True,
         )
 
+    async def list_expired_validation_leases(
+        self, *, now: datetime, limit: int
+    ) -> list[Image]:
+        if limit < 1:
+            raise ValueError("image_validation_limit_invalid")
+        return await self.get_datas(
+            page=1,
+            limit=limit,
+            v_where=[
+                self.model.status == "validating",
+                self.model.validation_lease_generation > 0,
+                self.model.validation_lease_expires_at.is_not(None),
+                self.model.validation_lease_expires_at <= now,
+            ],
+            v_order_field="validation_lease_expires_at",
+            v_return_objs=True,
+        )
+
+    async def list_expired_uploads(
+        self, *, now: datetime, limit: int
+    ) -> list[Image]:
+        if limit < 1:
+            raise ValueError("image_upload_reconcile_limit_invalid")
+        return await self.get_datas(
+            page=1,
+            limit=limit,
+            v_where=[
+                self.model.status == "uploading",
+                self.model.upload_expires_at.is_not(None),
+                self.model.upload_expires_at <= now,
+            ],
+            v_order_field="upload_expires_at",
+            v_return_objs=True,
+        )
+
     async def claim_validation_lease(
         self,
         *,

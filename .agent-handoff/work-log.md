@@ -127,3 +127,11 @@
 - `imaging.validate_image` Celery task 使用 Outbox ID 作为 task ID，复核 message/header 后执行；临时失败使用受限 countdown retry，attempt exhaustion 进入稳定死信/隔离语义。
 - 内存验证覆盖 ready、quarantined、retry、duplicate、header 篡改和 Study revision conflict；fake Gateway 确认执行时无活动数据库事务。
 - 未创建迁移或测试脚本，未访问真实 MySQL/OSS/RabbitMQ；并发锁、真实 heartbeat 时钟和 Broker retry 仍属运行时未验证。
+
+## 2026-08-18 — P1C Image reconcile
+
+- `ImageDal/ImageService` 增加 expired validation lease、到期 validation event 和过期 uploading Image 的有界扫描与 CAS 恢复。
+- 新增 `ImageReconciler`：恢复 lease 后直接重放已发布事件；过期 upload 在事务外 HEAD，有对象则幂等补建 validating+Outbox，无对象则隔离，可重试 HEAD 失败保持原事实。
+- OSS `NoSuchKey/NotFound` 统一映射为稳定 `object_not_found`；不将 SDK 错误详情写入状态。
+- ready 对象漂移使用显式 Image ID 做完整 Gateway 校验；确定性漂移将 Image 隔离并在同事务重算 Series/Study，Study CAS 冲突整体回滚。
+- 未创建迁移或测试脚本，未物理删除或自动认领对象，未访问真实 MySQL/OSS/RabbitMQ。

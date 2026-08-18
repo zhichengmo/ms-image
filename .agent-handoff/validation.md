@@ -104,6 +104,10 @@
 | 2026-08-18 | P1C Image Worker 事务边界 | `passed in memory` | fake session/Gateway 断言对象校验时活动 DB TX 为 0；claim 和 terminal 分属短事务，Study conflict 后释放原 lease 重试 |
 | 2026-08-18 | P1C Image Worker 失败分类 | `passed in memory` | ready、确定性 hash mismatch -> quarantined、下载失败 -> retry、重复消息、Study revision conflict -> retry 均覆盖 |
 | 2026-08-18 | P1C Image Worker 静态检查 | `passed` | Ruff、diff check、Service/Worker 导入均通过；Worker/消息未包含 signed URL、access key 或 Secret 字段 |
+| 2026-08-18 | P1C Image reconcile Python/Ruff | `passed` | reconcile、Gateway error normalization、ImageDal/Service 编译和 Ruff 通过；应用仍装载 36 条路由 |
+| 2026-08-18 | P1C Image reconcile 状态行为 | `passed in memory` | fake session 覆盖 expired lease recovery、published event 重放、过期 upload accepted/missing 和指定 ready drift invalidated |
+| 2026-08-18 | P1C Image reconcile 事务边界 | `passed in memory` | fake Gateway 断言 upload HEAD 与 ready 完整校验时活动 DB TX 均为 0；状态更新使用新短事务 |
+| 2026-08-18 | P1C OSS missing 分类 | `passed in memory` | fake OSS `NoSuchKey` 被归一为稳定 `object_not_found`，未暴露 SDK 详情 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
