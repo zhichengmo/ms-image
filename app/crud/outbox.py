@@ -52,6 +52,11 @@ class OutboxDal(DalBase):
         }
         return self._validate_event(values)
 
+    def validate_publish_event(self, event: Outbox) -> dict[str, Any]:
+        if event.aggregate_type == "image" and event.event_type == "validate_image":
+            return self.validate_image_event(event).model_dump()
+        raise ValueError("outbox_publish_event_not_registered")
+
     async def get_by_id(self, event_id: str) -> Outbox | None:
         return await self.get_data(data_id=event_id, v_return_none=True)
 
@@ -95,7 +100,8 @@ class OutboxDal(DalBase):
         now: datetime,
         lease_expires_at: datetime,
     ) -> Outbox | None:
-        if not owner_id.strip() or lease_expires_at <= now:
+        normalized_owner_id = owner_id.strip()
+        if not normalized_owner_id or lease_expires_at <= now:
             raise ValueError("outbox_publish_lease_invalid")
         row = await self.get_by_id(event_id)
         if row is None:
@@ -103,7 +109,17 @@ class OutboxDal(DalBase):
         changed = await self.conditional_update(
             v_where=[
                 self.model.id == event_id,
-                self.model.publish_status.in_(["pending", "retry_wait"]),
+                or_(
+                    and_(
+                        self.model.publish_status == "pending",
+                        self.model.next_retry_at.is_(None),
+                    ),
+                    and_(
+                        self.model.publish_status == "retry_wait",
+                        self.model.next_retry_at.is_not(None),
+                        self.model.next_retry_at <= now,
+                    ),
+                ),
                 self.model.publish_attempt_count == row.publish_attempt_count,
                 or_(
                     self.model.relay_owner_id.is_(None),
@@ -112,7 +128,7 @@ class OutboxDal(DalBase):
             ],
             data={
                 "publish_status": "publishing",
-                "relay_owner_id": owner_id,
+                "relay_owner_id": normalized_owner_id,
                 "relay_lease_expires_at": lease_expires_at,
                 "publish_attempt_count": row.publish_attempt_count + 1,
                 "next_retry_at": None,
@@ -130,18 +146,22 @@ class OutboxDal(DalBase):
         broker_message_id: str,
         published_at: datetime,
     ) -> bool:
+        normalized_owner_id = owner_id.strip()
+        normalized_message_id = broker_message_id.strip()
+        if not normalized_owner_id or not normalized_message_id:
+            raise ValueError("outbox_publish_confirmation_invalid")
         return await self.conditional_update(
             v_where=[
                 self.model.id == event_id,
                 self.model.publish_status == "publishing",
-                self.model.relay_owner_id == owner_id,
+                self.model.relay_owner_id == normalized_owner_id,
                 self.model.relay_lease_expires_at > published_at,
             ],
             data={
                 "publish_status": "published",
                 "relay_owner_id": None,
                 "relay_lease_expires_at": None,
-                "broker_message_id": broker_message_id,
+                "broker_message_id": normalized_message_id[:128],
                 "published_at": published_at,
             },
         )
@@ -185,17 +205,24 @@ class OutboxDal(DalBase):
             error_message=error_message,
         )
 
-    async def reconcile_expired_publish_leases(self, *, now: datetime) -> int:
-        changed = 0
+    async def reconcile_expired_publish_leases(
+        self, *, now: datetime, max_attempts: int, limit: int = 100
+    ) -> dict[str, int]:
+        if max_attempts <= 0 or limit <= 0:
+            raise ValueError("outbox_reconcile_contract_invalid")
+        changed = {"retry_wait": 0, "dead_lettered": 0}
         rows = await self.get_datas(
-            limit=100,
+            page=1,
+            limit=limit,
             v_where=[
                 self.model.publish_status == "publishing",
                 self.model.relay_lease_expires_at <= now,
             ],
+            v_order_field="created_at",
             v_return_objs=True,
         )
         for row in rows:
+            exhausted = row.publish_attempt_count >= max_attempts
             recovered = await self.conditional_update(
                 v_where=[
                     self.model.id == row.id,
@@ -204,15 +231,16 @@ class OutboxDal(DalBase):
                     self.model.relay_lease_expires_at == row.relay_lease_expires_at,
                 ],
                 data={
-                    "publish_status": "retry_wait",
+                    "publish_status": "dead_letter" if exhausted else "retry_wait",
                     "relay_owner_id": None,
                     "relay_lease_expires_at": None,
-                    "next_retry_at": now,
+                    "next_retry_at": None if exhausted else now,
                     "error_code": "relay_lease_expired",
                     "error_message": "relay lease expired before confirmation",
                 },
             )
-            changed += int(recovered)
+            key = "dead_lettered" if exhausted else "retry_wait"
+            changed[key] += int(recovered)
         return changed
 
     async def _mark_failure(
@@ -226,14 +254,26 @@ class OutboxDal(DalBase):
         error_code: str,
         error_message: str,
     ) -> bool:
-        if not error_code.strip() or len(error_code) > 80:
+        normalized_owner_id = owner_id.strip()
+        normalized_error_code = error_code.strip()
+        if not normalized_owner_id:
+            raise ValueError("outbox_publish_owner_invalid")
+        if not normalized_error_code or len(normalized_error_code) > 80:
             raise ValueError("outbox_error_code_invalid")
+        if publish_status == "retry_wait":
+            if next_retry_at is None or next_retry_at <= failed_at:
+                raise ValueError("outbox_retry_time_invalid")
+        elif publish_status == "dead_letter":
+            if next_retry_at is not None:
+                raise ValueError("outbox_dead_letter_retry_invalid")
+        else:
+            raise ValueError("outbox_failure_status_invalid")
         safe_message = error_message.strip()[:500]
         return await self.conditional_update(
             v_where=[
                 self.model.id == event_id,
                 self.model.publish_status == "publishing",
-                self.model.relay_owner_id == owner_id,
+                self.model.relay_owner_id == normalized_owner_id,
                 self.model.relay_lease_expires_at > failed_at,
             ],
             data={
@@ -241,7 +281,7 @@ class OutboxDal(DalBase):
                 "relay_owner_id": None,
                 "relay_lease_expires_at": None,
                 "next_retry_at": next_retry_at,
-                "error_code": error_code,
+                "error_code": normalized_error_code,
                 "error_message": safe_message,
             },
         )

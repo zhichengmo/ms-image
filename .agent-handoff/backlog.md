@@ -14,7 +14,8 @@
 - [ ] 实现 P1C：在现有 OSS 实现上收敛 ObjectStorageGateway，并闭环 Image validate Outbox/Relay/Worker + reconcile/revision，不接医学 Provider。
 - [x] P1C ObjectStorageGateway：现有 OSS 实现已收敛唯一 Gateway，新 owner namespace 与 direct/multipart/完整校验合同完成。
 - [x] P1C Image 事务性 Outbox：`outbox_record/OutboxDal` 与 `ValidateImageMessage` 已实现；Image `uploading -> validating` 和 `validate_image` 事件使用同一 DB 事务，重复事件执行 owner/version/hash 自校验。
-- [ ] P1C Relay：短事务 claim/confirm，事务外 Broker 发布，支持 retry/dead-letter 和过期 relay lease reconcile。
+- [x] P1C Relay：短事务 claim/confirm，事务外 Broker 发布，支持 retry/dead-letter、过期 relay lease reconcile 和 Broker 已接受但 DB confirm 冲突的至少一次恢复。
+- [ ] P1C Image validation Worker：消费前复核 Outbox owner/version/message；Image lease/CAS claim，事务外 Gateway 完整校验，短事务写 ready/quarantined 与 Series/Study 确定性 revision。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。
 - [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。
 - [ ] P2 复用 P1C 的同一 Outbox/Relay，实现 Task + first Stage + Outbox 原子事务和零模型 replay。

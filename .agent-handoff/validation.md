@@ -87,6 +87,11 @@
 | 2026-08-18 | P1C Outbox 消息合同 | `passed` | canonical JSON hash 对字段顺序稳定；已有事件的 event key/owner/version/message version/trace/hash 会完整自校验，篡改 event key 被拒绝 |
 | 2026-08-18 | P1C Image complete 事务边界 | `passed by static contract` | `ImageService` 只经 `ImageDal/OutboxDal` flush，request `AsyncSession.begin()` 负责同事务提交；Service 无直接 SQL，未在 API 内发布 Broker |
 | 2026-08-18 | P1C Image Outbox 真实 DB/Broker | `not run` | 未获授权创建迁移或连接真实 MySQL/Broker；当前仅为代码与内存合同验证 |
+| 2026-08-18 | P1C Relay Python 编译与兼容导入 | `passed` | `compileall app workers`、应用、旧 `TransactionalOutboxRelay` 和目标 `OutboxRelay` 导入成功；应用仍装载 36 条路由 |
+| 2026-08-18 | P1C Relay 事务边界与状态行为 | `passed in memory` | fake session/DAL 覆盖 published、retry_wait、attempt exhausted dead-letter、Broker accepted/DB confirm conflict、invalid message dead-letter；publisher 调用时无活动 DB TX |
+| 2026-08-18 | P1C Relay Celery 白名单投递 | `passed in memory` | task ID 使用 Outbox ID；queue/routing/exchange 为 imaging 独立 topology；body 仅含 image ID/version/trace，header 仅含 message version/trace |
+| 2026-08-18 | P1C Relay 旧 XRay 兼容 | `passed by import` | 旧 `workers.xray_accuracy_worker.outbox_relay` 继续构造 `TransactionalOutboxRelay`；未修改旧 tenant DAL 合同 |
+| 2026-08-18 | P1C Relay 真实 Broker/MySQL | `not run` | 未授权真实数据库或 RabbitMQ 演练；Broker confirm、lease 时钟和多进程竞争仍未运行验证 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

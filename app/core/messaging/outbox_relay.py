@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 import inspect
 import socket
@@ -29,6 +30,182 @@ def safe_error(exc: BaseException) -> str:
     if "connection" in name or "connect" in name:
         return "network_unreachable"
     return "broker_publish_failed"
+
+
+@dataclass(frozen=True)
+class OutboxPublishEnvelope:
+    event_id: str
+    destination_key: str
+    message_version: str
+    trace_id: str
+    message: dict[str, Any]
+
+
+class OutboxRelay:
+    """Relay target outbox events without owning consumer execution state."""
+
+    def __init__(
+        self,
+        *,
+        session_factory: Any,
+        publish: Callable[[OutboxPublishEnvelope], Any],
+        runtime: BrokerRuntimeConfig,
+        owner_prefix: str,
+        dal_factory: Callable[[Any], Any],
+    ):
+        if runtime.relay_lease_seconds <= 0 or runtime.max_attempts <= 0:
+            raise ValueError("outbox_relay_runtime_invalid")
+        self.session_factory = session_factory
+        self.publish = publish
+        self.runtime = runtime
+        self.dal_factory = dal_factory
+        self.owner_id = f"{owner_prefix}:{socket.gethostname()}:{uuid4().hex[:12]}"[:128]
+
+    async def _claim_one(self, event_id: str) -> dict[str, Any] | None:
+        now = datetime.utcnow()
+        async with self.session_factory() as db:
+            async with db.begin():
+                dal = self.dal_factory(db)
+                claimed = await dal.claim_publish(
+                    event_id=event_id,
+                    owner_id=self.owner_id,
+                    now=now,
+                    lease_expires_at=now
+                    + timedelta(seconds=self.runtime.relay_lease_seconds),
+                )
+                if claimed is None:
+                    return None
+                try:
+                    message = dal.validate_publish_event(claimed)
+                except ValueError:
+                    marked = await dal.mark_dead_letter(
+                        event_id=claimed.id,
+                        owner_id=self.owner_id,
+                        failed_at=datetime.utcnow(),
+                        error_code="outbox_message_contract_invalid",
+                        error_message="outbox message contract invalid",
+                    )
+                    if not marked:
+                        raise RuntimeError("outbox_invalid_message_state_conflict")
+                    return {"invalid": True, "event_id": claimed.id}
+                return {
+                    "invalid": False,
+                    "attempt_count": claimed.publish_attempt_count,
+                    "envelope": OutboxPublishEnvelope(
+                        event_id=claimed.id,
+                        destination_key=claimed.destination_key,
+                        message_version=claimed.message_version,
+                        trace_id=claimed.trace_id,
+                        message=message,
+                    ),
+                }
+
+    async def _mark_publish_failure(
+        self, *, event_id: str, attempt_count: int, exc: BaseException
+    ) -> str:
+        failed_at = datetime.utcnow()
+        error_code = safe_error(exc)
+        async with self.session_factory() as db:
+            async with db.begin():
+                dal = self.dal_factory(db)
+                if attempt_count >= self.runtime.max_attempts:
+                    marked = await dal.mark_dead_letter(
+                        event_id=event_id,
+                        owner_id=self.owner_id,
+                        failed_at=failed_at,
+                        error_code=error_code,
+                        error_message=error_code,
+                    )
+                    outcome = "dead_lettered"
+                else:
+                    delay_seconds = min(300, 2 ** max(0, attempt_count - 1))
+                    marked = await dal.mark_retry(
+                        event_id=event_id,
+                        owner_id=self.owner_id,
+                        failed_at=failed_at,
+                        next_retry_at=failed_at + timedelta(seconds=delay_seconds),
+                        error_code=error_code,
+                        error_message=error_code,
+                    )
+                    outcome = "retry_wait"
+                return outcome if marked else "conflicted"
+
+    async def relay_once(self, *, limit: int = 100) -> dict[str, int]:
+        result = {
+            "disabled": 0,
+            "claimed": 0,
+            "published": 0,
+            "retry_wait": 0,
+            "dead_lettered": 0,
+            "conflicted": 0,
+        }
+        if not self.runtime.enabled:
+            result["disabled"] = 1
+            return result
+        async with self.session_factory() as db:
+            async with db.begin():
+                rows = await self.dal_factory(db).list_publishable_global(
+                    now=datetime.utcnow(), limit=limit
+                )
+                candidates = [row.id for row in rows]
+        for event_id in candidates:
+            claimed = await self._claim_one(event_id)
+            if claimed is None:
+                continue
+            result["claimed"] += 1
+            if claimed["invalid"]:
+                result["dead_lettered"] += 1
+                continue
+            envelope: OutboxPublishEnvelope = claimed["envelope"]
+            broker_accepted = False
+            try:
+                broker_message_id = self.publish(envelope)
+                if inspect.isawaitable(broker_message_id):
+                    broker_message_id = await broker_message_id
+                broker_accepted = True
+                confirmed_at = datetime.utcnow()
+                async with self.session_factory() as db:
+                    async with db.begin():
+                        marked = await self.dal_factory(db).mark_published(
+                            event_id=envelope.event_id,
+                            owner_id=self.owner_id,
+                            broker_message_id=str(broker_message_id or envelope.event_id),
+                            published_at=confirmed_at,
+                        )
+                        if not marked:
+                            raise RuntimeError("outbox_publish_confirmation_conflict")
+                result["published"] += 1
+            except Exception as exc:
+                if broker_accepted:
+                    result["conflicted"] += 1
+                    continue
+                outcome = await self._mark_publish_failure(
+                    event_id=envelope.event_id,
+                    attempt_count=claimed["attempt_count"],
+                    exc=exc,
+                )
+                result[outcome] += 1
+        return result
+
+    async def reconcile_once(self, *, limit: int = 100) -> dict[str, int]:
+        if not self.runtime.enabled:
+            return {"disabled": 1, "retry_wait": 0, "dead_lettered": 0}
+        async with self.session_factory() as db:
+            async with db.begin():
+                result = await self.dal_factory(db).reconcile_expired_publish_leases(
+                    now=datetime.utcnow(),
+                    max_attempts=self.runtime.max_attempts,
+                    limit=limit,
+                )
+                return {"disabled": 0, **result}
+
+    async def run_forever(self) -> None:
+        if not self.runtime.enabled:
+            raise RuntimeError("broker_disabled")
+        while True:
+            await self.reconcile_once()
+            await self.relay_once()
+            await asyncio.sleep(max(0.1, self.runtime.relay_poll_seconds))
 
 
 class TransactionalOutboxRelay:
@@ -236,4 +413,9 @@ class TransactionalOutboxRelay:
             await asyncio.sleep(max(0.1, self.runtime.relay_poll_seconds))
 
 
-__all__ = ["TransactionalOutboxRelay", "safe_error"]
+__all__ = [
+    "OutboxPublishEnvelope",
+    "OutboxRelay",
+    "TransactionalOutboxRelay",
+    "safe_error",
+]

@@ -1,0 +1,67 @@
+"""Executable target imaging Outbox relay."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+
+from app.core.async_db import async_engine, session_factory
+from app.core.messaging.outbox_relay import (
+    OutboxPublishEnvelope,
+    OutboxRelay,
+)
+from app.crud.outbox import OutboxDal
+
+from .celery_app import celery_app, runtime, topology
+
+
+def publish(envelope: OutboxPublishEnvelope) -> str:
+    if envelope.destination_key != OutboxDal.IMAGE_DESTINATION_KEY:
+        raise ValueError("outbox_destination_not_registered")
+    result = celery_app.send_task(
+        topology.task_name,
+        args=[envelope.message],
+        task_id=envelope.event_id,
+        queue=topology.queue,
+        routing_key=topology.routing_key,
+        exchange=topology.exchange,
+        headers={
+            "message_version": envelope.message_version,
+            "trace_id": envelope.trace_id,
+        },
+    )
+    return str(result.id or envelope.event_id)
+
+
+relay = OutboxRelay(
+    session_factory=session_factory,
+    publish=publish,
+    runtime=runtime,
+    owner_prefix="relay:imaging",
+    dal_factory=OutboxDal,
+)
+
+
+async def _main(once: bool) -> None:
+    try:
+        if once:
+            print(
+                {
+                    "reconcile": await relay.reconcile_once(),
+                    "relay": await relay.relay_once(),
+                }
+            )
+        else:
+            await relay.run_forever()
+    finally:
+        await async_engine.dispose()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--once", action="store_true")
+    args = parser.parse_args()
+    asyncio.run(_main(args.once))
+
+
+__all__ = ["publish", "relay"]

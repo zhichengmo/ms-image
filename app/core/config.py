@@ -153,6 +153,14 @@ class Settings(BaseSettings):
     XRAY_RELAY_LEASE_SECONDS: int = 120
     XRAY_WORKER_LEASE_SECONDS: int = 120
     XRAY_WORKER_MAX_ATTEMPTS: int = 5
+    IMAGING_BROKER_EXCHANGE: str = "imaging.v1"
+    IMAGING_BROKER_QUEUE: str = "imaging.image.validate"
+    IMAGING_BROKER_ROUTING_KEY: str = "imaging.image.validate"
+    IMAGING_BROKER_DLQ: str = "imaging.image.validate.dlq"
+    IMAGING_RELAY_POLL_SECONDS: float = 1.0
+    IMAGING_RELAY_LEASE_SECONDS: int = 120
+    IMAGING_WORKER_LEASE_SECONDS: int = 120
+    IMAGING_WORKER_MAX_ATTEMPTS: int = 5
     READINESS_TIMEOUT_SECONDS: float = 3.0
 
     # AI transport is selected by the database-backed OpenAI-compatible

@@ -42,6 +42,11 @@
   - `ImageService.accept_upload_complete` 在同一请求事务中 CAS `uploading -> validating` 并创建 `validate_image` Outbox；API/Service 不直接发布 Broker。
   - 重复 complete 必须命中原 expected version、对象 version 和完整事件合同；event key、owner/version、message version、trace 和 canonical SHA 任一漂移均 fail closed。
   - Outbox 只拥有 relay 发布状态；Image Worker 的 claim/lease/retry 仍由 `image_record` 拥有。
+- P1C Outbox Relay：
+  - 在共享 messaging 模块新增目标 `OutboxRelay/OutboxPublishEnvelope`，保留旧 `TransactionalOutboxRelay` 供 tenant XRay 兼容路径继续运行。
+  - 目标 Relay 按候选扫描、claim TX、事务外 Celery confirm publish、确认/失败 TX 分段；Broker 已接收但 DB confirm 失败时不误标 retry，由过期 lease reconcile 触发至少一次重投。
+  - Outbox 消息通过 DAL 注册表复核 owner/version/event key/message version/trace/hash；未注册或篡改合同直接 dead-letter。
+  - 新增 imaging Broker topology/config 和 `workers.imaging_worker.outbox_relay` 可执行入口；未连接真实 Broker，也未注册 Image consumer（下一切片）。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：
