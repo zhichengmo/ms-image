@@ -1,8 +1,65 @@
-from pydantic import DirectoryPath
 from pydantic_settings import BaseSettings
-from dotenv import find_dotenv, load_dotenv
+import os
+from pathlib import Path
+from dotenv import dotenv_values, find_dotenv, load_dotenv
+
+from app.core.reference_env import read_reference_env, reference_env_path
 
 load_dotenv(find_dotenv())
+
+
+def _missing_reference_values(explicit: dict) -> dict:
+    """Map only allow-listed legacy settings into the local runtime config.
+
+    This is a local qualification convenience.  The old repository is not
+    imported and its .env-01 is never written back to disk or persisted by this
+    service.  Explicit process/local ms-image values always win.
+    """
+
+    local_path = find_dotenv()
+    local = dotenv_values(local_path) if local_path else {}
+    reference = read_reference_env(
+        path=reference_env_path(),
+        keys={
+            "ALIYUN_OSS_ENDPOINT",
+            "ALIYUN_OSS_BUCKET",
+            "RABBITMQ_HOST",
+            "RABBITMQ_PORT",
+            "RABBITMQ_USERNAME",
+            "RABBITMQ_VIRTUAL_HOST",
+        },
+    )
+    present = set(explicit) | set(os.environ) | {
+        key for key, value in local.items() if isinstance(value, str) and value.strip()
+    }
+    mapping = {
+        "OSS_ENDPOINT": "ALIYUN_OSS_ENDPOINT",
+        "OSS_BUCKET_NAME": "ALIYUN_OSS_BUCKET",
+        # The old project names these OSS credentials ALIYUN_*; accept the
+        # names only from the current ms-image process environment/local .env.
+        # Provider credentials are deliberately not mapped from GEMINI_*.
+        "OSS_ACCESS_KEY_ID": "ALIYUN_OSS_ACCESS_KEY_ID",
+        "OSS_ACCESS_KEY_SECRET": "ALIYUN_OSS_ACCESS_KEY_SECRET",
+        "RABBITMQ_HOST": "RABBITMQ_HOST",
+        "RABBITMQ_PORT": "RABBITMQ_PORT",
+        "RABBITMQ_USERNAME": "RABBITMQ_USERNAME",
+        "RABBITMQ_VIRTUAL_HOST": "RABBITMQ_VIRTUAL_HOST",
+    }
+    values: dict[str, str] = {}
+    for target, source in mapping.items():
+        if target in present:
+            continue
+        source_value = (
+            os.environ.get(source)
+            or local.get(source)
+            or reference.get(source)
+        )
+        if isinstance(source_value, str) and source_value.strip():
+            values[target] = source_value.strip()
+    # Secrets are intentionally never projected from the legacy repository.
+    # Provider, OSS and RabbitMQ credentials must be supplied explicitly by
+    # the process environment or an approved Secret Manager integration.
+    return values
 
 
 class Settings(BaseSettings):
@@ -30,6 +87,7 @@ class Settings(BaseSettings):
     MYSQL_PW: str = "password"
     MYSQL_USER: str = "root"
     MYSQL_PORT: str = "3306"
+    MYSQL_UNIX_SOCKET: str = ""
 
     # MS_HD Database settings (optional for HD service integration)
     MYSQL_HD_DB: str = "ms_hd"
@@ -37,6 +95,7 @@ class Settings(BaseSettings):
     MYSQL_HD_PW: str = "password"
     MYSQL_HD_USER: str = "root"
     MYSQL_HD_PORT: str = "3306"
+    MYSQL_HD_UNIX_SOCKET: str = ""
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -45,20 +104,33 @@ class Settings(BaseSettings):
     ALGORITHM: str = "RS256"
     SECRET_KEY: str = ""
     API_PRIVATE_KEY: str = ""
+    JWT_ISSUER: str = "ms-image"
+    JWT_AUDIENCE: str = "ms-image-api"
+    XRAY_REQUIRED_SCOPE: str = "xray:run"
 
     # Admin JWT settings
     ADMIN_ALGORITHM: str = "HS256"
     ADMIN_SECRET_KEY: str = ""
+    ADMIN_JWT_ISSUER: str = "ms-image-admin"
+    ADMIN_JWT_AUDIENCE: str = "ms-image-admin-api"
+    ADMIN_REQUIRED_SCOPE: str = "xray:admin:read"
+    ADMIN_REQUIRED_WRITE_SCOPE: str = "xray:admin:write"
+    RSA_PUBLIC_KEY_PATH: str = "rsa_public.pem"
+    TENANT_CLAIM: str = "tenant_id"
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        fallback_values = _missing_reference_values(kwargs)
+        super().__init__(**{**fallback_values, **kwargs})
         # 根据算法类型加载密钥
-        if self.ALGORITHM == "RS256":
-            try:
-                with open('rsa_public.pem', 'r') as f:
-                    self.SECRET_KEY = f.read()
-            except FileNotFoundError:
-                print("Warning: rsa_public.pem not found, JWT verification may fail")
+        if self.ALGORITHM == "RS256" and not self.SECRET_KEY:
+            key_path = Path(self.RSA_PUBLIC_KEY_PATH)
+            if not key_path.is_absolute():
+                key_path = Path(__file__).resolve().parents[2] / key_path
+            if key_path.is_file():
+                self.SECRET_KEY = key_path.read_text(encoding="utf-8")
+            else:
+                # Authentication dependencies fail closed when this key is
+                # absent; importing the app remains possible for liveness.
                 self.SECRET_KEY = ""
         # HS256算法使用环境变量中的SECRET_KEY
 
@@ -69,6 +141,44 @@ class Settings(BaseSettings):
     RABBITMQ_PORT: str = "5672"
     RABBITMQ_USERNAME: str = "admin"
     RABBITMQ_VIRTUAL_HOST: str = "/"
+    BROKER_ENABLED: bool = False
+    CELERY_BROKER_URL: str = ""
+    XRAY_BROKER_EXCHANGE: str = "xray.v2"
+    XRAY_BROKER_QUEUE: str = "xray.stage.requested"
+    XRAY_BROKER_ROUTING_KEY: str = "xray.run.stage.requested"
+    XRAY_BROKER_DLQ: str = "xray.stage.dlq"
+    XRAY_RELAY_POLL_SECONDS: float = 1.0
+    XRAY_RELAY_LEASE_SECONDS: int = 120
+    XRAY_WORKER_LEASE_SECONDS: int = 120
+    XRAY_WORKER_MAX_ATTEMPTS: int = 5
+    READINESS_TIMEOUT_SECONDS: float = 3.0
+
+    # AI transport is selected by the database-backed OpenAI-compatible
+    # connection pool.  These are qualification artifacts/secrets only;
+    # endpoint/model/key/timeout/max_tokens do not belong in environment vars.
+    AI_RECEIPT_SIGNING_KEY: str = ""
+    AI_EGRESS_PROOF_SIGNING_KEY: str = ""
+    AI_TRANSPORT_QUALIFICATION_ARTIFACT_PATH: str = (
+        "docs/artifacts/ai-provider-transport-qualification.v1.json"
+    )
+    AI_QUALIFICATION_IMAGE_PATHS: str = ""
+    AI_QUALIFICATION_ARTIFACT_PATH: str = "docs/artifacts/ai-provider-qualification.v1.json"
+    AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: str = ""
+    AI_QUALIFICATION_MAX_ATTEMPTS: int = 32
+    AI_QUALIFICATION_TENANT_ID: str = "xray-qualification"
+    AI_QUALIFICATION_SUBJECT_ID: str = "provider-qualification"
+    AI_CONFIG_VERSION: str = ""
+    # Isolated qualification-only source fixture contract.  The manifest
+    # contains opaque refs, relative paths and expected SHA256; it is never
+    # accepted from an API request and is not a production image source.
+    AI_SOURCE_IMAGE_MANIFEST_PATH: str = ""
+    AI_SOURCE_IMAGE_ROOT: str = ""
+    # Compatibility-only hash map. Keys are SHA256(image_url), values are
+    # approved opaque source refs. Raw legacy URLs are never persisted.
+    AI_LEGACY_IMAGE_REF_MAP_PATH: str = ""
+    # Compatibility switch stays false until the Study/ObjectStore gate is
+    # deployed and its isolated test-database artifact is approved.
+    AI_REQUIRE_FROZEN_STUDY: bool = True
 
     PROJECT_ENV: str = "development"
 
@@ -87,7 +197,7 @@ class Settings(BaseSettings):
 
     class Config:
         case_sensitive = True
-        env_file = '.env'
+        env_file = '.env-01'
         env_file_encoding = 'utf-8'
 
 

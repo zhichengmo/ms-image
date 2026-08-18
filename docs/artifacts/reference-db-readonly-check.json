@@ -1,0 +1,26 @@
+{
+  "captured_at_utc": "2026-08-10T05:04:00Z",
+  "reference_project": "/Users/mozhicheng/workspace/code/py-project-v2/vet-platform-system/vet-platform",
+  "connection_mode": "read_only_attempt",
+  "database_driver": "mysql+aiomysql",
+  "config_presence": {
+    "MYSQL_HOST": "present",
+    "MYSQL_PORT": "present",
+    "MYSQL_USER": "present",
+    "MYSQL_DB": "present",
+    "MYSQL_PW": {"present": false, "length": 0}
+  },
+  "result": "SUPERSEDED",
+  "reason": "initial_tcp_config_check_blocked_by_empty_password; local Unix socket read-only fallback later succeeded",
+  "superseded_by": "docs/artifacts/reference-db-readonly-live.json",
+  "sensitive_values_read": false,
+  "queries_executed": [],
+  "unknown_due_to_block": [
+    "AI-related table list and row counts",
+    "status distributions",
+    "key fingerprint/expiry/health",
+    "prompt revision checksum/language/publish state",
+    "request failure/token/latency statistics"
+  ],
+  "safe_next_action": "obtain an approved read-only credential or sanitized dump; do not copy production secrets"
+}

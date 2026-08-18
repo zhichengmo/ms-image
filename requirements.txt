@@ -25,9 +25,12 @@ python-dotenv==1.0.1
 # HTTP client
 aiohttp==3.9.1
 httpx==0.28.1
+openai==1.57.1
 
 # Cache and messaging
 redis[hiredis]==5.2.1
+celery==5.5.2
+# Celery uses Kombu/py-amqp for RabbitMQ; no second broker client is needed.
 
 # MongoDB (optional)
 mongoengine==0.27.0
@@ -35,6 +38,9 @@ mongoengine==0.27.0
 # File handling
 aiofiles==24.1.0
 oss2==2.18.4
+Pillow==11.2.1
+pydicom==3.0.1
+numpy==2.2.6
 
 # Utilities
 python-multipart==0.0.6

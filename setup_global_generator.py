@@ -43,7 +43,7 @@ def setup_global_generator():
             '.vscode',
             'logs',
             '*.log',
-            '.env',
+            '.env-01',
             'setup_global_generator.py'
         ))
 

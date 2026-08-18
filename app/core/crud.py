@@ -287,6 +287,65 @@ class DalBase:
         else:
             return None
 
+    async def cas_put_data(
+            self,
+            data_id: Any,
+            expected_version: int,
+            data: dict[str, Any],
+            version_field: str = "state_version",
+            v_where: list[BinaryExpression] = None,
+    ) -> Any:
+        """Atomically update one row when its optimistic-lock version matches.
+
+        This remains part of the shared DalBase contract so services do not
+        issue ad-hoc SQL.  The caller must provide tenant predicates through
+        ``v_where`` for tenant-scoped entities.
+        """
+        predicates = [
+            self.model.id == data_id,
+            getattr(self.model, version_field) == expected_version,
+        ]
+        if v_where:
+            predicates.extend(v_where)
+        values = dict(data)
+        values[version_field] = expected_version + 1
+        result = await self.db.execute(
+            update(self.model).where(*predicates).values(**values)
+        )
+        await self.db.flush()
+        if result.rowcount != 1:
+            return None
+        return await self.get_data(
+            data_id=data_id,
+            v_where=v_where,
+            v_return_none=True,
+            v_expire_all=True,
+        )
+
+    async def conditional_update(
+            self,
+            *,
+            v_where: list[BinaryExpression],
+            data: dict[str, Any],
+    ) -> bool:
+        """Atomically update rows matching caller-owned predicates.
+
+        Entity DALs use this for lease/status transitions whose optimistic
+        condition is not the shared ``state_version`` column.  Keeping the
+        UPDATE inside ``DalBase`` prevents services/workers from introducing
+        a second direct-SQL path.  At least one predicate is mandatory so a
+        caller cannot accidentally update the whole table.
+        """
+        if not v_where:
+            raise ValueError("conditional_update_requires_predicate")
+        if not data:
+            raise ValueError("conditional_update_requires_values")
+        result = await self.db.execute(
+            update(self.model).where(*v_where).values(**data)
+        )
+        await self.db.flush()
+        return result.rowcount == 1
+
     async def delete_datas(self, ids: list[int], v_soft: bool = False, **kwargs) -> None:
         """
         删除多条数据

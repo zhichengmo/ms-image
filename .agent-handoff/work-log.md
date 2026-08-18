@@ -1,0 +1,66 @@
+# 当前工作日志
+
+## 2026-08-18
+
+- P0 安全 checkpoint：
+  - 恢复根 `.gitignore` 的 `.env` 规则，保留 `.env-01` 兼容规则；未读取或修改本地 `.env`。
+  - 清空 `.env.example` 中 OSS/STS/Gemini 和示例 Mongo 密码值；脱敏扫描未发现其他常见云密钥或私钥。
+  - 创建 `codex/ms-image-refactor`；后续按 Session、Study+Series、Image、API、Gateway、异步校验垂直切片提交并立即推送。
+  - 真实凭据轮换仍由凭据持有人完成；本轮未执行外部凭据操作。
+
+- 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
+- 修改：
+  - `docs/history/README.md`：重写为历史演进、冲突和归宿索引。
+  - `docs/refactor/`：新增项目、架构、数据库/OSS、Service/Stage、开发、迁移、决策、新会话和团队介绍文档。
+  - `docs/refactor/10-xray-detailed-flow.md`：集中新增 XRay 端到端、上传、异步执行、默认医学链、实验分支、Provider 调用、事务落表、状态、恢复和开发阶段流程图。
+  - `AGENT_SESSION_PROMPTS.md`、`docs/refactor/08-new-session-handoff.md`：收敛新会话唯一启动提示，明确有界 P0、直接进入 P1、授权边界、必读材料和完成定义。
+  - `docs/README.md`：增加重构入口和权威顺序。
+  - `AGENT_HANDOFF.md`、`.agent-handoff/`、`AGENT_SESSION_PROMPTS.md`：建立多文档交接。
+  - `AGENTS.md`：由技能脚本追加幂等 handoff protocol（交接协议）块。
+- 未修改：业务代码、数据库、迁移脚本和测试脚本。
+- 当前结果：文档结构和新会话执行合同已建立；本地链接、母文锚点、Markdown 围栏、XRay 流程图静态结构、交接容量和协议标记校验通过。
+- 验证限制：环境未安装 Mermaid CLI，XRay 的 10 个 Mermaid 图块未做渲染级检查；本轮未运行业务测试或数据库验证。
+- 后续确认：用户允许按必要性新增表且不设数量上限，并允许内部代码完全重构；已同步母文、重构文档和交接决策。
+- 本轮追加调整：
+  - `AGENT_SESSION_PROMPTS.md`：重写唯一新会话 Prompt，加入多轴权威、脏工作树保护、P1A/P1B/P1C、Image Outbox、不变量、租户/OSS key 过渡、兼容和真实完成状态。
+  - `docs/README.md`、`docs/refactor/README.md`、设计母文：将单一权威顺序改为按问题分轴。
+  - `docs/refactor/02/03/05/06/07/08/10`：同步权限、OSS、P1/P2 和状态口径。
+  - `docs/refactor/11-xray-core-chain-developer-briefing.md`：新增面向新开发的 XRay 核心链沟通文档，串联影像接入、可靠执行、默认医学主链、报告、评测、家族实验边界、Service/表映射和联调定位顺序。
+  - `docs/README.md`、`docs/refactor/README.md`：增加新沟通文档入口和阅读顺序。
+- 剩余风险：目标实现和医学准确率仍未验证，详见 `risks.md`。
+- Canonical XRay Chain（X 光权威主链）确认与文档统一：
+  - 用户确认 `xray_primary_v1` 从 JointPrimaryReader 直接进入 DecisionFinalization，`xray_targeted_review_v1` 才进入 FamilyRouting 和可选的一次 TargetedReview。
+  - 重写根 `README.md` 为 MS-Image 项目入口并加入权威双 Profile Mermaid；重写 `USAGE.md` 为当前本地运行/开发指南；重写 `CLAUDE.md` 为项目协作上下文。
+  - `docs/refactor/10-xray-detailed-flow.md` 第 2 节替换为同一 Canonical Chain，并明确后续图只能展开细节、不能改变 Profile/owner/失败语义。
+  - 修正术语表中 Control Plane 与 Evaluation Plane 的边界；将 Image“完成回调”改为上传完成通知；将 history 冲突规则改为多轴权威。
+  - 未修改历史正文、业务代码、数据库、迁移或测试脚本。
+- Canonical XRay Chain 逐层责任补充：
+  - 新增 `docs/refactor/12-canonical-xray-layer-responsibility-contract.md`，覆盖 ControlPlane、Session、Study、Image、Task、Execution、5 个 Stage、Report、三类终点、Evaluation 和全部关键边。
+  - 每层统一写明目的/意义、功能逻辑、输入/输出、事实落点、失败语义、禁止职责和删除影响。
+  - 增加“哪些层可以合并”和“逐层验收证据/Stop 条件”，明确 Series 可并入 Study、Preparation 可吸收旧 Assembler/Gate；Image/Task/Execution/Finalization/Evaluation 等边界不能随意合并。
+  - 更新根 README、文档中心、重构导航、详细流程、开发沟通、新会话 Prompt 和交接入口链接。
+  - 本轮未修改业务代码、数据库、迁移或测试脚本。
+- 文档目标一致性审计（只读）：
+  - 确认 `docs/refactor/`、设计母文和 handoff 当前统一采用 Primary-only 默认链，`FamilyRouting + TargetedReview` 仅为实验候选。
+  - 确认该口径与用户最近提供的“FamilyRouting 必经”流程图冲突，需先冻结 Canonical Chain 后再统一修订。
+  - 确认根 `README.md`、`USAGE.md`、`CLAUDE.md` 仍把项目描述为 MS-Scaffold 通用脚手架，是当前最高风险的目标漂移来源。
+  - 检查官方 curated Skill 和公开 GitHub 候选；未找到比现有证据审计 + handoff 治理更适合且可信的本地 Markdown Skill，未安装第三方内容。
+  - 本轮未修改业务文档、业务代码、数据库、迁移或测试脚本；仅按强制关闭协议更新 handoff 状态。
+- 逐层 I/O 与重构基线复核：
+  - 核实 `docs/refactor/12-canonical-xray-layer-responsibility-contract.md` 已覆盖每层目的、意义、功能逻辑、接收、必填约束、成功/失败输出、消费者和数据落点。
+  - 新增并核验 `docs/refactor/13-refactor-base-decision.md`：当前 `HEAD` 就是 `9a45209a`，选择当前工作树资产基线 + 保留入口的内部模块化替换。
+  - 修正 `docs/README.md` 的目标 10+4 表未实现口径，以及 `docs/refactor/01-project-overview-and-business-chain.md` 的目标链状态提示。
+  - 发现 `.env` 未跟踪且未被 ignore；只统计变量名类别，未读取、记录或输出值。
+  - 未修改业务代码、数据库、迁移或测试脚本。
+- 新会话执行 Prompt 收敛：
+  - 更新 `AGENT_SESSION_PROMPTS.md` 的主启动提示，明确本会话必须开始实现而非重新设计或只做审计。
+  - 加入 `.env` 不输出值检查、禁止 `git add -A`/自动 commit/stash/reset/clean、checkpoint 需要精确授权的边界。
+  - 将 `docs/refactor/12` 第 20 章逐层 I/O 合同设为实现验收依据，并明确 P1A 实体顺序、P1B API 边界和 P1C Worker/Service owner。
+  - 修正 `docs/refactor/13` 中会随工作树变化而失效的未跟踪文件固定数量。
+  - 未修改业务代码、数据库、迁移或测试脚本。
+- XRay 新开发沟通文档补强：
+  - 更新 `docs/refactor/11-xray-core-chain-developer-briefing.md`，在总图加入 ControlPlane 与 Evaluation -> 审批 -> ControlPlane 闭环。
+  - 新增全链输入/成功输出/失败边界/下游交接矩阵，覆盖在线默认链和 Targeted 实验链。
+  - 新增当前源码 Preserve/Replace 边界，明确保留 auth/readiness/OSS validation/qualification/DalBase/投递语义，替换 `xray_accuracy` 专项领域。
+  - 为本轮新增英文状态、对象和缩写补充中文说明；未新建竞争文档。
+  - 未修改业务代码、数据库、迁移或测试脚本。

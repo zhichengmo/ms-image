@@ -1,0 +1,27 @@
+{
+  "captured_at_utc": "2026-08-10T05:02:00Z",
+  "scope": "local readiness probe; MySQL unavailable, local Redis reachable, broker disabled, provider stub_only; admin readiness protected",
+  "user": {
+    "health": {"http_status": 200, "ready": null},
+    "readiness": {
+      "http_status": 503,
+      "ready": false,
+      "service_mode": "api_only",
+      "worker_ready": false,
+      "components": {
+        "database": {"ready": false, "error": "database_unavailable"},
+        "redis": {"ready": true, "error": null},
+        "broker": {"ready": null, "required": false, "state": "disabled", "error": null},
+        "provider": {"ready": true, "required": false, "state": "stub_only", "error": null}
+      }
+    }
+  },
+  "admin": {
+    "liveness_root": {"http_status": 200},
+    "readiness_without_token": {"http_status": 401},
+    "readiness_with_read_scope": {"http_status": 503, "ready": false, "service_mode": "api_only", "worker_ready": false, "provider": {"ready": true, "required": false, "state": "stub_only", "error": null}},
+    "status_without_token": {"http_status": 401}
+  },
+  "interpretation": "PASS for liveness/protected-readiness/fail-closed semantics; NOT a dependency-available proof",
+  "missing_evidence": ["live MySQL SELECT 1", "qualified RabbitMQ/Celery broker", "deployed-edge HTTP smoke"]
+}

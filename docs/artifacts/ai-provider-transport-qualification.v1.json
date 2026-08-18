@@ -1,0 +1,13 @@
+{
+  "medical_verdict_produced": false,
+  "provider": {
+    "endpoint_sha256": "8b9c481a802b0805aa6c8ab52f8b85692ede3574b43bb1c557afb553a6245788",
+    "key_fingerprint": "07950e1016aa4045dad1cad66aea24686dd7e93a81190c12c1589133f36577a1",
+    "kind": "openai_compatible",
+    "model": "gemini-3-flash-preview"
+  },
+  "reason": "qualification_artifact_signing_key_missing",
+  "retryable": false,
+  "schema": "ai-provider-transport-qualification.v1",
+  "status": "blocked"
+}

@@ -57,7 +57,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail=str(e)
+                detail="数据库操作失败"
             )
         return db_obj
 

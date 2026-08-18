@@ -1,0 +1,44 @@
+XRay implementation baseline
+Captured: 2026-08-11T04:05:17Z
+
+Safety boundary
+- Existing user changes were preserved; no reset, clean, checkout, or stash was run.
+- Original database was not modified.
+- Isolated database: ms_image_imaging_test (MySQL 9.3.0, socket connection).
+- Backup: docs/artifacts/ms_image_imaging_test-20260811T040517Z.sql
+- Backup SHA256: 91041eec492fa65fba6c53b47df4652b5e2665a8f1cdd2993484b93b9de855fc
+
+Runtime
+- Python: 3.12.7
+- import main: PASS (FastAPI user and admin applications created)
+- MYSQL_DB setting: ms_image (runtime default; isolated DB was used only for read-only inspection)
+- BROKER_ENABLED: false
+- XRAY_PROVIDER_ENABLED: false
+- XRAY_PROVIDER_QUALIFIED: false
+- provider_kind: openai_compatible
+- provider_model: gemini-3-flash-preview
+- provider endpoint configured: yes (value intentionally omitted)
+- provider secret configured: yes (value intentionally omitted)
+- receipt signing key configured: no
+- qualification artifact signing key configured: no
+
+Isolated database tables
+- xray_accuracy_image_asset (10 rows)
+- xray_accuracy_model_call (0 rows)
+- xray_accuracy_outbox (0 rows)
+- xray_accuracy_request_snapshot (0 rows)
+- xray_accuracy_run (0 rows)
+- xray_accuracy_session (6 rows)
+- xray_accuracy_session_event (6 rows)
+- xray_accuracy_stage_checkpoint (0 rows)
+- xray_accuracy_study_snapshot (5 rows)
+- xray_accuracy_trace_event (0 rows)
+
+Qualification gate
+- Current status: BLOCKED
+- Current reason: provider_auth (latest qualification artifact)
+- Medical verdict produced: false
+
+Tracked worktree summary
+- Existing tracked files are modified and XRay implementation directories are untracked.
+- This snapshot records the state; it does not claim the worktree is clean.

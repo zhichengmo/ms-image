@@ -16,8 +16,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import FastAPI
 
 # from app.core.logger import logger
-# from application.settings import DEBUG
-DEBUG = True
+# Legacy handlers remain available to the scaffold, but they must not print
+# request payloads, query strings, or exception details that may contain
+# credentials or image addresses.
+DEBUG = False
 logger = logging.getLogger(__name__)
 from typing import Optional
 
@@ -51,6 +53,32 @@ class PushServiceException(Exception):
         super().__init__(self.message)
 
 
+def _request_path(request: Request) -> str:
+    """Return only the path component for safe diagnostic logging."""
+    return request.url.path
+
+
+def _safe_public_message(status_code: int, detail: object) -> str:
+    """Do not reflect arbitrary HTTP/validation details from legacy handlers."""
+    if isinstance(detail, str) and detail in {
+        "Missing bearer token",
+        "Invalid bearer token",
+        "Tenant scope is required",
+        "Insufficient tenant scope",
+        "Insufficient admin scope",
+    }:
+        return detail
+    return {
+        400: "请求无效",
+        401: "未认证",
+        403: "无权限",
+        404: "资源不存在",
+        409: "请求冲突",
+        422: "请求参数无效",
+        503: "服务暂不可用",
+    }.get(status_code, "请求失败")
+
+
 def register_exception(app: FastAPI):
     """
     异常捕捉
@@ -61,16 +89,13 @@ def register_exception(app: FastAPI):
         """
         自定义异常
         """
-        if DEBUG:
-            print("请求地址", request.url.__str__())
-            print("捕捉到重写CustomException异常异常：custom_exception_handler")
-            print(exc.desc)
-            print(exc.msg)
-        # 打印栈信息，方便追踪排查异常
-        logger.exception(exc)
+        logger.warning("custom_exception status=%s path=%s", exc.status_code, _request_path(request))
         return JSONResponse(
             status_code=exc.status_code,
-            content={"message": exc.msg, "code": exc.code},
+            content={
+                "message": _safe_public_message(exc.status_code, exc.msg),
+                "code": exc.code,
+            },
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -78,17 +103,12 @@ def register_exception(app: FastAPI):
         """
         重写HTTPException异常处理器
         """
-        if DEBUG:
-            print("请求地址", request.url.__str__())
-            print("捕捉到重写HTTPException异常异常：unicorn_exception_handler")
-            print(exc.detail)
-        # 打印栈信息，方便追踪排查异常
-        logger.exception(exc)
+        logger.warning("http_exception status=%s path=%s", exc.status_code, _request_path(request))
         return JSONResponse(
             status_code=exc.status_code,
             content={
                 "code": exc.status_code,
-                "message": exc.detail,
+                "message": _safe_public_message(exc.status_code, exc.detail),
             }
         )
 
@@ -97,30 +117,18 @@ def register_exception(app: FastAPI):
         """
         重写请求验证异常处理器
         """
-        if DEBUG:
-            print("请求地址", request.url.__str__())
-            print("捕捉到重写请求验证异常异常：validation_exception_handler")
-            print(exc.errors())
-        # 打印栈信息，方便追踪排查异常
-        logger.exception(exc)
-        msg = exc.errors()[0].get("msg")
-        if msg == "field required":
-            msg = "请求失败，缺少必填项！"
-        elif msg == "value is not a valid list":
-            print(exc.errors())
-            msg = f"类型错误，提交参数应该为列表！"
-        elif msg == "value is not a valid int":
-            msg = f"类型错误，提交参数应该为整数！"
-        elif msg == "value could not be parsed to a boolean":
-            msg = f"类型错误，提交参数应该为布尔值！"
-        elif msg == "Input should be a valid list":
-            msg = f"类型错误，输入应该是一个有效的列表！"
+        logger.warning("request_validation_error path=%s", _request_path(request))
+        # Keep a stable message instead of reflecting malformed values or
+        # nested request keys from the validation payload.
+        msg = "请求参数无效"
         return JSONResponse(
             status_code=200,
             content=jsonable_encoder(
                 {
                     "message": msg,
-                    "body": exc.body,
+                    # Validation bodies can contain signed URLs or image
+                    # addresses; never echo them from a shared error handler.
+                    "body": None,
                     "code": status.HTTP_400_BAD_REQUEST
                 }
             ),
@@ -131,17 +139,12 @@ def register_exception(app: FastAPI):
         """
         捕获值异常
         """
-        if DEBUG:
-            print("请求地址", request.url.__str__())
-            print("捕捉到值异常：value_exception_handler")
-            print(exc.__str__())
-        # 打印栈信息，方便追踪排查异常
-        logger.exception(exc)
+        logger.warning("value_exception path=%s", _request_path(request))
         return JSONResponse(
             status_code=200,
             content=jsonable_encoder(
                 {
-                    "message": exc.__str__(),
+                    "message": "请求参数无效",
                     "code": status.HTTP_400_BAD_REQUEST
                 }
             ),
@@ -152,12 +155,12 @@ def register_exception(app: FastAPI):
         """
         捕获全部异常
         """
-        if DEBUG:
-            print("请求地址", request.url.__str__())
-            print("捕捉到全局异常：all_exception_handler")
-            print(exc.__str__())
-        # 打印栈信息，方便追踪排查异常
-        logger.exception(exc)
+        logger.error(
+            "unhandled_exception type=%s path=%s",
+            type(exc).__name__,
+            _request_path(request),
+            exc_info=False,
+        )
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=jsonable_encoder(

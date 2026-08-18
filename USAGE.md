@@ -1,303 +1,188 @@
-# FastAPI 脚手架使用指南
+# MS-Image 本地运行与开发指南
 
-本文档介绍如何使用 ms-scaffold 脚手架快速创建新的 FastAPI 项目。
+状态：`CURRENT_RUNTIME_GUIDE`（当前运行指南）
 
-## 🚀 快速使用方式
+说明：本文描述当前仓库可以执行的工程操作，不表示目标通用影像架构已经实现。
 
-### 方式一：使用内置生成器（推荐）
+## 1. 环境要求
 
-#### 1. 基本使用
-```bash
-# 在脚手架目录中
-cd /Users/ayogg/Documents/project/ms-scaffold
+- Python 3.11
+- MySQL 8.0
+- Redis 7
+- RabbitMQ 3.13：只有启用 `xray-broker`（X 光消息代理）Profile 时需要
+- OSS（对象存储）和 AI Provider（AI 服务提供方）凭证：只有进行已授权的真实资格验证时需要
 
-# 创建新项目
-python create_new_project.py my-new-service
+所有 Secret（密钥）必须通过本地环境或批准的 Secret Manager（密钥管理服务）注入，不得写入文档、代码、数据库明文字段或提交到 Git。
 
-# 或指定目标目录
-python create_new_project.py my-new-service ~/projects
-```
-
-#### 2. 设置全局命令（一次性设置）
-```bash
-# 在脚手架目录中执行
-python setup_global_generator.py
-
-# 添加到 PATH（根据提示操作）
-export PATH="~/.fastapi-templates:$PATH"
-
-# 现在可以在任何地方使用
-fastapi-new my-new-service
-```
-
-### 方式二：直接复制（简单快速）
+## 2. 本地安装
 
 ```bash
-# 复制整个脚手架目录
-cp -r /Users/ayogg/Documents/project/ms-scaffold ~/projects/my-new-service
-
-# 进入新项目目录
-cd ~/projects/my-new-service
-
-# 清理不需要的文件
-rm create_new_project.py setup_global_generator.py cookiecutter.json USAGE.md
-
-# 手动替换项目名称（在各配置文件中）
-```
-
-### 方式三：使用 Cookiecutter
-
-```bash
-# 安装 cookiecutter
-pip install cookiecutter
-
-# 从脚手架创建项目
-cookiecutter /Users/ayogg/Documents/project/ms-scaffold
-```
-
-## 📋 项目创建后的步骤
-
-无论使用哪种方式创建项目，都需要执行以下步骤：
-
-### 1. 配置环境
-```bash
-cd your-new-project
-
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑环境变量
-vim .env  # 或使用其他编辑器
-```
-
-### 2. 安装依赖
-```bash
-# 创建虚拟环境（推荐）
+cd /Users/mozhicheng/workspace/code/cy-code/ms-image
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# .venv\Scripts\activate  # Windows
-
-# 安装依赖
+source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env-01
 ```
 
-### 3. 数据库设置
-```bash
-# 生成初始迁移
-alembic revision --autogenerate -m "Initial migration"
+`.env-01` 是当前 `Settings`（配置对象）读取的本地环境文件。只填写本机所需配置，不提交真实密钥。
 
-# 执行迁移
-alembic upgrade head
+常用配置：
+
+```dotenv
+APPLICATION_NAME=Ms Image Service
+APPLICATION_PORT=8000
+ENV=dev
+
+MYSQL_DB=ms_image
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PW=
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+
+BROKER_ENABLED=false
 ```
 
-### 4. 启动服务
+## 3. 启动方式
+
+### 3.1 同时启动用户端和管理端
+
 ```bash
-# 方式1: 同时启动双端
 python run_servers.py
-
-# 方式2: 分别启动
-python start_user_api.py   # 用户端 (8000)
-python start_admin_api.py  # 管理端 (8001)
-
-# 方式3: 使用 Docker
-docker-compose up -d
 ```
 
-### 5. 验证服务
-访问以下地址确认服务正常：
-- 用户端API文档: http://localhost:8000/docs
-- 管理端API文档: http://localhost:8001/admin/docs
-
-## 🔧 项目定制
-
-### 修改项目名称和配置
-
-如果使用直接复制方式，需要手动替换以下文件中的项目名称：
-
-#### 1. 应用配置 (`app/core/config.py`)
-```python
-# 修改应用名称
-APPLICATION_NAME: str = "Your Service Name"
-```
-
-#### 2. 主程序 (`main.py`)
-```python
-# 修改根路径
-root_path='/your-service'
-```
-
-#### 3. 环境变量 (`.env`)
-```bash
-# 修改应用名称和数据库名
-APPLICATION_NAME=Your Service Name
-MYSQL_DB=your_service_db
-```
-
-#### 4. 数据库配置 (`alembic.ini`)
-```ini
-# 修改数据库连接
-sqlalchemy.url = mysql+pymysql://root:password@localhost/your_service_db
-```
-
-#### 5. Docker 配置 (`docker-compose.yml`)
-```yaml
-# 修改数据库名称
-MYSQL_DATABASE: your_service_db
-```
-
-### 添加新功能
-
-#### 1. 添加数据模型
-```python
-# app/models/your_model.py
-from app.models.base import BaseTimeModel
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String
-
-class YourModel(BaseTimeModel):
-    __tablename__ = "your_table"
-
-    name: Mapped[str] = mapped_column(String(100), comment="名称")
-```
-
-#### 2. 添加 API 端点
-```python
-# app/api/api_v1/endpoints/your_endpoint.py
-from fastapi import APIRouter, Depends
-from app.schemas.base import GenericResponse
-
-router = APIRouter()
-
-@router.get("/your-endpoint", response_model=GenericResponse[dict])
-async def your_endpoint():
-    return GenericResponse(
-        success=True,
-        message="成功",
-        data={"result": "data"}
-    )
-```
-
-#### 3. 注册路由
-```python
-# app/api/api_v1/api.py
-from app.api.api_v1.endpoints import your_endpoint
-
-api_router.include_router(your_endpoint.router, tags=["Your Feature"])
-```
-
-## 🛠️ 高级配置
-
-### 自定义生成器
-
-如果需要自定义项目生成逻辑，可以修改 `create_new_project.py`:
-
-```python
-# 添加更多文件替换规则
-replacements = {
-    'ms-scaffold': project_name.lower(),
-    # 添加更多替换规则...
-}
-
-# 添加更多需要处理的文件
-files_to_replace = [
-    'app/core/config.py',
-    # 添加更多文件...
-]
-```
-
-### Git 模板仓库
-
-将脚手架推送到 Git 仓库，然后：
+### 3.2 分别启动
 
 ```bash
-# 使用 Git 模板创建项目
-git clone https://github.com/your-username/ms-scaffold-template.git my-new-service
-cd my-new-service
-rm -rf .git
-git init
+python start_user_api.py
+python start_admin_api.py
 ```
 
-### 创建私有模板仓库
+### 3.3 Docker Compose（容器编排）
 
-1. 在 GitHub/GitLab 上创建私有仓库
-2. 推送脚手架代码
-3. 团队成员可以直接克隆使用
+默认启动用户 API、管理 API、MySQL 和 Redis：
 
-## 📝 最佳实践
-
-### 1. 环境变量管理
-- 永远不要提交 `.env` 文件
-- 为不同环境准备不同的 `.env` 模板
-- 使用有意义的默认值
-
-### 2. 数据库迁移
-- 每次模型更改后都要生成迁移文件
-- 在生产环境谨慎执行迁移
-- 备份数据库再执行迁移
-
-### 3. 项目结构
-- 保持清晰的分层架构
-- 使用有意义的文件和目录命名
-- 及时更新文档
-
-### 4. 版本控制
 ```bash
-# 创建项目后立即初始化 Git
-git init
-git add .
-git commit -m "Initial commit from ms-scaffold"
+docker compose up --build
 ```
 
-## 🔧 故障排除
+启用当前 XRay validation-only（X 光仅验证）的 Relay（中继）和 Worker（工作进程）：
 
-### 常见问题
-
-#### 1. 端口占用
 ```bash
-# 检查端口使用情况
+BROKER_ENABLED=true docker compose --profile xray-broker up --build
+```
+
+这里的 `xray_accuracy_worker` 是当前验证骨架，不是目标 `ImagingExecutionService + StageRegistry` 已经实现的证明。
+
+## 4. 本地地址
+
+| 用途 | 地址 | 说明 |
+|---|---|---|
+| 用户 API 文档 | `http://localhost:8000/docs` | 开发环境 OpenAPI（接口规范） |
+| 管理 API 文档 | `http://localhost:8001/docs` | 受管理端鉴权约束 |
+| 健康检查 | `http://localhost:8000/api/v1/health` | 只证明进程可响应 |
+| 用户依赖就绪 | `http://localhost:8000/api/v1/readiness` | 检查 Redis/数据库等当前依赖 |
+| 管理依赖就绪 | `http://localhost:8001/api/v1/readiness` | 需要管理身份与 scope（作用域） |
+| RabbitMQ 管理界面 | `http://localhost:15672` | 仅 `xray-broker` Profile |
+
+健康检查、readiness（就绪检查）、Provider 调用成功和工程测试均不能证明医学准确率。
+
+## 5. 当前与目标的区别
+
+| 范围 | 当前事实 | 目标设计 |
+|---|---|---|
+| 影像领域模型 | 仍以 XRay 专项验证结构为主 | 通用 Session/Study/Series/Image/Task |
+| 执行器 | `xray_accuracy_worker` 骨架 | `ImagingExecutionService + StageRegistry + 固定 Profile` |
+| 数据库 | 仍含旧 XRay/AI 模型 | `ms_image` 在线候选 10 表 + `ms_image_eval` 隔离候选 4 表 |
+| 医学链 | 未完成真实资格和准确率闭环 | Primary 基线 + Targeted 实验链 |
+| 发布状态 | `PARTIAL / NO-GO` | 必须通过工程、Provider、paired A/B 和 Holdout 门禁 |
+
+精确差距见 [重构迁移与验证计划](docs/refactor/06-refactor-migration-and-validation-plan.md)。
+
+## 6. 开发分层
+
+新增业务实体按以下顺序实现：
+
+```text
+Model（数据库模型）
+-> Schema（接口结构）
+-> DAL（数据访问层，继承 DalBase）
+-> Service（业务服务层）
+-> API（接口层，通过依赖注入调用 Service）
+```
+
+必须遵守：
+
+- API 不直接访问数据库，不编排多个 DAL。
+- Service 接收 `AsyncSession`，负责业务校验、状态流转、幂等和多实体编排。
+- CRUD/DAL 统一继承 `app.core.crud.DalBase`；不得绕过基类直接操作 session。
+- Model 不承载 HTTP（网络接口）语义；Schema 不访问数据库。
+- 资源 ID 放 query（查询参数）或 request body（请求体），不使用 `/{id}`。
+- OSS、Broker 和 Provider 外部 I/O 不得在数据库事务内执行。
+- 状态、类型等可演进字段使用 string/json/timestamp，并在 SQLAlchemy `comment` 中写候选类型和中文含义。
+- 不使用 Foreign Key（外键）、数据库 Enum（枚举）、联合主键或目标 `tenant_id`。
+
+## 7. XRay Profile（X 光流程配置）
+
+```text
+xray_primary_v1:
+StudyPreparation -> JointPrimaryReader -> DecisionFinalization -> Report
+
+xray_targeted_review_v1:
+StudyPreparation -> JointPrimaryReader -> FamilyRouting
+-> primary_final -> DecisionFinalization
+或
+-> targeted_review -> TargetedReview -> DecisionFinalization
+-> Report
+```
+
+- FamilyRouting 仅属于 Targeted 实验 Profile。
+- TargetedReview 最多一次，必须输出完整病例结果。
+- TargetedReview 技术失败不得回退 Primary。
+- Profile、Prompt（提示词）、Schema（结构合同）、模型和预算必须冻结到 Task 快照。
+
+## 8. 数据库与迁移
+
+目标数据库设计见[数据库与 OSS 设计](docs/refactor/03-database-and-storage-design.md)和[设计母文](docs/ms-image-final-architecture-and-database-design.md)。
+
+未经用户明确授权：
+
+- 不生成 Alembic（数据库迁移）脚本。
+- 不执行 `alembic upgrade` 或真实数据库写操作。
+- 不迁移旧 XRay 数据、Prompt、Provider Key 或 OSS 对象。
+- 不删除、重命名或双写生产表。
+
+迁移获得授权后，也必须先核对真实 schema、数据量、Secret、owner、回滚和验证门禁，不能直接按目标文档推断数据库现状。
+
+## 9. 验证原则
+
+可以运行仓库已有的非破坏性检查，但必须分别报告：
+
+- engineering validity（工程有效性）
+- execution completion（执行完成情况）
+- medical accuracy（医学准确率）
+
+医学准确率只能由冻结 Gold、同病例 Paired A/B、确定性 scorer（评分器）和隔离 Holdout 证明。不得因为单例结果更详细、Provider 成功或测试通过就宣称准确率提高。
+
+## 10. 故障排查
+
+### 端口占用
+
+```bash
 lsof -i :8000
 lsof -i :8001
-
-# 修改端口配置
-# 在 .env 文件中修改 APPLICATION_PORT
 ```
 
-#### 2. 数据库连接失败
-```bash
-# 检查数据库服务
-mysqladmin ping
+### MySQL 或 Redis 未就绪
 
-# 检查连接配置
-# 确认 .env 中的数据库配置正确
-```
+先检查 `/api/v1/readiness` 的组件状态，再核对 `.env-01`。不要把连接密码粘贴到日志或文档。
 
-#### 3. 依赖安装失败
-```bash
-# 升级 pip
-pip install --upgrade pip
+### Broker 未消费
 
-# 使用国内镜像
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-```
+确认使用了 `--profile xray-broker` 且 `BROKER_ENABLED=true`，再检查 Relay、Worker 和 RabbitMQ 状态。重复消息由数据库 CAS/lease 处理，不能依赖 Broker 恰好只投递一次。
 
-#### 4. 权限问题
-```bash
-# 确保脚本有执行权限
-chmod +x start_user_api.py start_admin_api.py
-```
+### AI Provider 不可用
 
-## 📞 支持
-
-如果遇到问题：
-
-1. 检查本文档的故障排除部分
-2. 查看项目的 `README.md` 和 `CLAUDE.md`
-3. 检查日志文件 `logs/` 目录
-4. 确认环境配置和依赖版本
-
-## 🎯 提示
-
-- 建议为每个项目创建独立的虚拟环境
-- 定期更新脚手架模板以包含最新的最佳实践
-- 可以根据团队需求定制脚手架内容
-- 考虑在 CI/CD 中集成项目生成器
+缺少模型资格、签名 Artifact（证据产物）或 Secret 时应 fail closed（失败关闭）。禁止自动换模型、换 Prompt 或把 Stub（桩实现）结果当作医学报告。

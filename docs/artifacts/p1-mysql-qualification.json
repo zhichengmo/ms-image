@@ -1,0 +1,54 @@
+{
+  "captured_at": "2026-08-10T01:22:00+08:00",
+  "scope": "temporary local MySQL qualification for the validation-only Phase 1 scaffold; no migration, broker, real Provider, or medical output",
+  "environment": {
+    "mysql_endpoint": "127.0.0.1:3306",
+    "schema": "temporary schema created from current SQLAlchemy metadata and removed after qualification",
+    "migration_created": false,
+    "test_script_created": false,
+    "broker_called": false,
+    "real_provider_called": false
+  },
+  "success_path": {
+    "run_snapshot_checkpoint_trace_outbox_same_transaction": "PASS",
+    "request_id_idempotent_repeat_same_run": "PASS",
+    "worker_outbox_claim": "PASS",
+    "stub_model_call_persisted": 1,
+    "checkpoint_status": "completed",
+    "run_status": "completed",
+    "run_state_version": 1,
+    "outbox_status": "published",
+    "duplicate_delivery": "duplicate",
+    "ai_medical_status": "not_produced"
+  },
+  "cancel_and_late_path": {
+    "api_transition": "queued -> cancel_requested",
+    "worker_transition": "cancel_requested -> cancelled",
+    "cancel_duplicate_state_advance": 0,
+    "request_gate_after_cancel": "late_trace_only",
+    "checkpoint_status": "late",
+    "checkpoint_late_flag": "yes",
+    "trace_events": [
+      "run_accepted",
+      "run_cancel_requested",
+      "run_cancelled",
+      "technical_late_result"
+    ],
+    "model_call_count": 0,
+    "all_outbox_rows": "published",
+    "ai_medical_status": "not_produced"
+  },
+  "defect_found_and_fixed": {
+    "error": "MissingGreenlet caused by accessing an expired Outbox ORM instance after releasing a nested transaction",
+    "fix": "capture run_id, task_id, and message_json as plain values before entering the savepoint",
+    "file": "workers/xray_accuracy_worker/technical_worker.py"
+  },
+  "medical_verdict_produced": false,
+  "result": "PASS-LOCAL",
+  "limitations": [
+    "temporary metadata.create_all is qualification evidence only and is not a migration artifact",
+    "no RabbitMQ/Celery relay or consumer was used",
+    "no deployed-schema, gateway, production-secret, Redis, or production-readiness claim is made",
+    "this is a pre-G0 Phase 1 scaffold qualification and does not make Phase 0 or G0 DONE"
+  ]
+}

@@ -1,6 +1,7 @@
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
+from sqlalchemy.engine import URL
 from sqlalchemy import pool
 
 from alembic import context
@@ -12,10 +13,32 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Import your models
 from app.core.async_db import BaseModel
+from app.core.config import settings
+# Import every model package explicitly so autogenerate sees the same metadata
+# used by the runtime.  This import is metadata-only; it does not create/drop
+# tables and does not execute a migration.
+from app.models import xray_accuracy  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Never use the repository's historical hard-coded password.  Resolve the
+# Alembic URL from the same environment source as the application and build it
+# with SQLAlchemy URL encoding so special characters remain valid.
+config.set_main_option(
+    "sqlalchemy.url",
+    str(
+        URL.create(
+            "mysql+pymysql",
+            username=settings.MYSQL_USER,
+            password=settings.MYSQL_PW,
+            host=settings.MYSQL_HOST,
+            port=int(settings.MYSQL_PORT),
+            database=settings.MYSQL_DB,
+        )
+    ),
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -22,7 +22,7 @@ COPY . .
 RUN mkdir -p logs
 
 # Expose port
-EXPOSE 8000
+EXPOSE 8000 8001
 
 # Command to run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,24 @@
+DB rebuild preflight — 2026-08-10
+
+compose_database=ms_image
+compose_mysql_version=8.0
+compose_named_volume=mysql_data (existence not verified; Docker daemon unavailable)
+host_mysql_version=9.3.0 (Homebrew; separate from Compose)
+host_tcp_root_password_auth=blocked
+host_socket_root_auth=available (no destructive operation performed)
+host_ms_image_database=not_found (SHOW DATABASES via local MySQL 9.3 socket)
+in_scope_backup=not_required (the configured ms_image database does not exist; unrelated databases were not read or modified)
+new_test_database=ms_image_imaging_test (created on local MySQL 9.3)
+new_test_schema_tables=6 xray_accuracy_* tables created with current de-duplicated ORM metadata
+test_database_backup=docs/artifacts/ms_image_imaging_test-before-schema-change.sql (schema and retained qualification rows)
+deduplication=execution_mode replaces validation_only; execution_status replaces cancel_requested; trace event_type replaces late_flag
+schema_creation_method=SQLAlchemy metadata.create_all(checkfirst=True), non-destructive
+alembic_versions_directory=absent
+xray_model_metadata_import=verified (6 current ORM tables)
+drop_database_executed=false
+drop_volume_executed=false
+metadata_drop_all_executed=false
+migration_created=false
+
+Required user confirmation before destructive or state-changing work:
+target_environment; data_retention_or_backup; schema_naming; migration_authorization.

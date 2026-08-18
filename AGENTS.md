@@ -18,6 +18,8 @@ Schema 作为接口边界与数据结构约束层
 
 强制规则：
 - 业务接口必须遵循 `API -> Service -> CRUD`
+- 数据库访问必须统一经由现有 `app.core.crud.DalBase`；不得新建第二套 `CRUDBase`、Repository 或数据库服务。
+- “不另外添加服务”指不平行创建新的 service/repository 包、通用数据库服务或重复的微服务边界；需要业务编排时，只在现有 `app/service/` 中增加对应的 `XxxService`，并复用同一条调用链。
 - `API` 层不直接承载复杂数据库访问逻辑
 - `CRUD` 层不承载 HTTP 语义
 - `Schema` 层不承载数据库访问逻辑
@@ -99,6 +101,8 @@ class UserService:
 约束：
 - 每个核心实体一个 `XxxDal`
 - `XxxDal.__init__` 必须调用 `super().__init__(db=db, model=YourModel)`
+- `XxxDal` 必须继承 `app.core.crud.DalBase`，构造函数接收 `AsyncSession`；所有查询、新增、更新、删除均使用其异步方法（如 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas`）。
+- 不得直接在 Service、API、Worker 或脚本中拼装 SQLAlchemy 数据库调用；确需实体特有查询时，封装为 `XxxDal` 方法并继续调用 `DalBase`。
 - 默认只处理数据访问，不处理接口语义
 - 不在 CRUD 中直接拼装 `GenericResponse`
 
@@ -173,6 +177,47 @@ async def get_user_service(
 - Service 内部再初始化 `XxxDal`
 - 除简单接口外，不推荐 API 直接使用 `XxxDal`
 
+## Database and Service Reuse
+
+数据库访问合同以 `app/core/crud.py` 中的 `DalBase` 实现为准：
+
+```python
+class DalBase:
+    # 倒序排序字段
+    ORDER_FIELD = ["desc", "descending"]
+
+    def __init__(self, db: AsyncSession = None, model: Any = None, schema: Any = None):
+        self.db = db
+        self.model = model
+        self.schema = schema
+
+    async def get_data(
+        self,
+        data_id: int = None,
+        v_start_sql: SelectType = None,
+        v_select_from: list[Any] = None,
+        v_join: list[Any] = None,
+        v_outer_join: list[Any] = None,
+        v_options: list[Any] = None,
+        v_where: list[Any] = None,
+        v_order: str = None,
+        v_order_field: str = None,
+        v_return_none: bool = False,
+        v_schema: Any = None,
+        v_expire_all: bool = False,
+        **kwargs,
+    ) -> Any:
+        ...
+```
+
+`DalBase` 的 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas` 等方法都是异步方法，调用必须使用 `await`。`XxxDal` 不得绕过基类直接操作 session；不得把遗留 MongoEngine 的 `app/crud/base.py:CRUDBase` 当作本项目的数据库访问实现。
+
+实体 DAL 只在 `app/crud/xxx.py` 中定义一次，例如 `class UserDal(DalBase)`；Service 使用 `from app.crud.user import UserDal`，构造 `UserDal(db)` 后调用它的方法。Service、API、Worker 和脚本都不得重新写 SQL、`select`/`update`/`delete` 语句或另造一个数据库访问类。
+
+本项目已经有 `app/service/` 业务层和 `app/core/crud.py` 数据访问基类。新增功能应复用它们：API 通过 `get_xxx_service` 注入现有 Service，Service 接收 `AsyncSession` 并初始化 `XxxDal`。除健康检查、版本信息和静态状态接口外，不要在 endpoint 中直接创建 DAL，也不要再增加平行的 Repository/DatabaseService/微服务。
+
+数据库模型约束：每张物理 MySQL 表必须定义独立、非空的 `id` 作为单列主键，默认使用服务端生成的 opaque `VARCHAR(64)`；业务 ID、请求 ID、事件键、版本号、哈希和联合唯一约束不得替代 `id` 主键，也不得使用联合主键。目标新表不设计 `tenant_id` 或其他租户分区字段，资源 ID 必须全局唯一；读取历史兼容数据时不得把旧租户字段带回目标模型。新表不声明 foreign key；状态、类型等可演进字段优先使用 string/json/timestamp，不使用数据库 enum；每个字段的 SQLAlchemy `comment` 同时写候选类型和中文含义。资源 ID 只能放在 query 参数或 request body，禁止设计 `/{id}` 路由。
+
 ## Response Rules
 
 统一响应格式：
@@ -236,6 +281,7 @@ async def get_user_service(
 - 示例代码优先展示完整调用链
 - 优先复用 `DalBase`、`GenericResponse`、`PagedResponse`
 - 除健康检查外，不生成 “API 直连 CRUD” 的示例实现
+- 不重复创建数据库访问基类、Repository、DatabaseService 或新的平行 service 包；先复用现有 `DalBase` 与 `app/service/`，只有明确的业务用例才新增实体级 `XxxService`。
 
 ## Reference Notes
 
@@ -243,3 +289,103 @@ async def get_user_service(
 - 当前仓库已有 `CLAUDE.md`，可作为架构说明参考
 - 实际代码中 `health` 与 `admin` 示例接口较轻，可视为简单接口例外
 - 当前 `app/service/` 目录存在，但业务示例尚未完全走通完整分层；后续新增模块应按本文件补齐
+
+<!-- AGENT_HANDOFF_PROTOCOL:START -->
+# Codex Agent Handoff Protocol
+
+Layout: multi-document
+
+## Required Startup Routine
+
+Before making a plan or editing files, read:
+
+1. `AGENT_HANDOFF.md`
+2. `.agent-handoff/snapshot.md`
+3. `.agent-handoff/risks.md`
+4. `.agent-handoff/backlog.md`
+5. Additional `.agent-handoff/` files only when needed by the current task, following the Recovery Reading Order in `AGENT_HANDOFF.md`
+6. The source files directly relevant to the user's current request
+
+Use the handoff files as continuity memory, but verify implementation details from source files before changing behavior.
+
+## Default Implementation Standard
+
+For non-trivial development work, target production/commercial-grade quality by default rather than minimum viable implementation. Prefer robust, maintainable solutions with appropriate validation, runtime and edge-case consideration, and clear reporting of what was and was not tested. Keep scope aligned with the user's request; do not add unrelated features or speculative abstractions.
+
+## Stable File Reading Protocol
+
+To avoid Read tool line-number or offset drift:
+
+1. Prefer dedicated search/read tools for ordinary file lookup, content search, and file reads.
+2. Confirm file size before reading large or volatile files, using line counts or targeted searches when needed.
+3. Search for exact targets first, then read small exact ranges around those targets.
+4. Keep Read ranges no larger than 240 lines unless the file is known to be small.
+5. If Read returns unexpected empty output, offset warnings, stale snippets, inconsistent line numbers, `file is shorter than the provided offset`, or an API termination after a Read attempt, stop paging with Read for that file immediately.
+6. Treat Read `offset` as a line number, not a character offset. Never retry the same out-of-range offset, and never guess by adding zeros or using large approximate offsets. If the tool reports the file has N lines, all follow-up Read offsets for that file must be within `0..N`.
+7. Recover from Read offset failure by re-anchoring with a targeted `Grep` for the section/title/symbol, or by reading a small known-valid range such as offset `0`; only then read a small range around the confirmed line number.
+8. When Read becomes unreliable, use shell verification commands such as `wc -l`, `rg -n`, and `sed -n '<start>,<end>p'` with quoted paths; keep ranges small and record that fallback in validation notes when relevant.
+9. Treat read-only shell inspection commands (`wc`, `rg`, `grep`, `sed -n`, `ls`, `pwd`, and non-mutating `git status`/`git diff`/`git log`/`git ls-files`) as safe query operations. They should be pre-approved in project settings where possible so source verification does not require repeated manual approval.
+10. Do not propose or edit code based on uncertain offsets; re-anchor with search results first.
+
+## Continuation Recovery Guard
+
+If the user says `continue`, `继续`, `Continue from where you left off.`, or any equivalent continuation request, treat it as an explicit instruction to resume the task. Do not answer `No response requested.` and do not stop silently. First state the last known objective and next concrete action, then continue. If context is insufficient, recover from the handoff files and task-relevant source files before acting.
+
+## Durable Handoff Memory
+
+The repository uses multi-document durable handoff memory:
+
+- `AGENT_HANDOFF.md`: index and recovery route
+- `.agent-handoff/snapshot.md`: current objective, status, next actions, active files, blockers, and open questions
+- `.agent-handoff/workspace.md`: repository map, entry points, commands, and stable context
+- `.agent-handoff/decisions.md`: durable decisions with reasons and evidence
+- `.agent-handoff/work-log.md`: recent operational work
+- `.agent-handoff/validation.md`: validation commands/checks and results
+- `.agent-handoff/backlog.md`: pending work
+- `.agent-handoff/risks.md`: risks, blockers, unknowns, and confirmations
+- `.agent-handoff/archive.md`: compressed old history
+
+Maintain the smallest relevant file. Do not put all state into `AGENT_HANDOFF.md`; it is an index.
+
+## Handoff Size Discipline
+
+- Keep `AGENT_HANDOFF.md` short; it is an index.
+- Treat `.agent-handoff/snapshot.md` as replace-in-place current state, never an append-only history.
+- Snapshot soft limit: 16 KiB or 240 lines. Hard limit: 32 KiB or 400 lines.
+- Rotate `.agent-handoff/work-log.md` above 64 KiB or 30 dated sections.
+- Rotate `.agent-handoff/validation.md` above 64 KiB or 200 table rows.
+- Keep `.agent-handoff/backlog.md` and `.agent-handoff/risks.md` at or below 32 KiB. Only completed backlog items may be archived mechanically; risks need semantic review.
+- Keep generated archive chunks at or below 128 KiB and keep archive history outside normal recovery.
+- After updating handoff state, run the installed `agent-handoff/scripts/maintain_handoff.py --repo <repo> --compact-if-needed` when available. Archive before replacement and never rewrite unparseable state.
+- In an ongoing uninterrupted chat, reread only relevant handoff files after compaction, resume, uncertainty, or task changes.
+
+## Mandatory Closeout Protocol
+
+Before any final response for a non-trivial task, update the relevant handoff files without waiting for the user to ask.
+
+Minimum required updates:
+
+- Refresh `.agent-handoff/snapshot.md` with current objective, status, next actions, active files, blockers, and open questions.
+- Add or update `.agent-handoff/work-log.md` when files or task status changed.
+- Add `.agent-handoff/validation.md` entries for commands/checks run or intentionally not run.
+- Record durable decisions in `.agent-handoff/decisions.md`.
+- Update `.agent-handoff/backlog.md` and `.agent-handoff/risks.md` when follow-ups, blockers, risks, or unknowns changed.
+- Remove or rewrite stale state that would mislead the next agent.
+- Run the bundled handoff maintenance script when available and resolve any hard-limit or unsafe-cleanup findings.
+
+If the task was purely conversational and no project state changed, no file update is required.
+
+## Work Discipline
+
+- Do not assume which subproject is active. Infer it from the user request, handoff files, and repository evidence.
+- Prefer existing project conventions over new abstractions.
+- Read files before editing them.
+- Keep edits scoped to the task.
+- Do not modify generated dependency folders unless explicitly asked.
+- Never revert unrelated user or agent changes.
+- Record validation honestly. If tests or checks were not run, say so in handoff files and in the final response.
+
+## Session Closeout Checklist
+
+Before final response, update the relevant `.agent-handoff/` files with final task status, files changed, commands/checks run and outcomes, and remaining risks, blockers, open questions, or next steps.
+<!-- AGENT_HANDOFF_PROTOCOL:END -->

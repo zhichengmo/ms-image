@@ -1,0 +1,31 @@
+Phase 0 Git working-tree snapshot
+
+Captured at (UTC): 2026-08-10T04:56:29Z
+Repository: /Users/mozhicheng/workspace/code/cy-code/ms-image
+HEAD: 9a45209ac9fce07ca5c7c209728d186ad411ae14
+Branch: main
+Tracked diff SHA256: 5a628ee4ab2a6ad541618145e4c1d29a54911fbdf6feb5c492e19df8f9902f70
+Untracked-file manifest SHA256 (excluding this snapshot and runtime manifest, git-ignored files omitted): 76b4d6e4acf2d18e3165e69867a779eae207a64a993a54343920561b0024df80
+
+The working tree was already dirty before this snapshot. Existing user
+changes are preserved; no reset, checkout, clean, or destructive operation was
+used. This is a full `git status --short` inventory, not a claim that the tree
+is clean.
+
+Modified paths:
+
+`.env.example`, `.gitignore`, `AGENTS.md`, `CLAUDE.md`, `Dockerfile`,
+`README.md`, `USAGE.md`, `app/api/admin_v1/api.py`,
+`app/api/admin_v1/endpoints/admin.py`, `app/api/api_v1/api.py`,
+`app/api/api_v1/endpoints/health.py`, `app/api/deps.py`, `app/core/config.py`,
+`app/core/crud.py`, `app/core/exception.py`, `app/core/redis_manager.py`,
+`docker-compose.yml`, `main.py`, `requirements.txt`, `run_servers.py`,
+`start_admin_api.py`.
+
+Untracked paths:
+
+`app/api/admin_v1/endpoints/xray_control.py`,
+`app/api/api_v1/endpoints/xray_runs.py`, `app/core/readiness.py`,
+`app/crud/xray_accuracy/`, `app/lib/`, `app/models/xray_accuracy/`,
+`app/schemas/xray_accuracy/`, `app/service/xray_accuracy/`, `docs/`,
+`evaluation/`, `prompts/`, `workers/`.

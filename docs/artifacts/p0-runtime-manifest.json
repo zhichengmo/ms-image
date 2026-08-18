@@ -1,0 +1,37 @@
+{
+  "captured_at_utc": "2026-08-10T04:58:00Z",
+  "repository": "/Users/mozhicheng/workspace/code/cy-code/ms-image",
+  "python": {
+    "version": "3.12.7",
+    "executable": "/opt/homebrew/anaconda3/bin/python",
+    "pip": "24.2"
+  },
+  "dependency_contract": {
+    "source": "requirements.txt",
+    "sha256": "2d536a1d7bcd86554081d6cb67050f6b1291ddafc773b181d5e922dff4675668"
+  },
+  "entrypoints": {
+    "user": "uvicorn main:app --host 0.0.0.0 --port 8000",
+    "admin": "uvicorn main:admin_app --host 0.0.0.0 --port 8001"
+  },
+  "compose": {
+    "version": "Docker Compose v2.40.3-desktop.1",
+    "config_parse": "PASS",
+    "broker_enabled": false,
+    "readiness_timeout_seconds": 3,
+    "admin_host_bind": "127.0.0.1:8001",
+    "infrastructure_host_bindings": [
+      "127.0.0.1:3306:3306",
+      "127.0.0.1:6379:6379",
+      "127.0.0.1:5672:5672",
+      "127.0.0.1:15672:15672"
+    ]
+  },
+  "working_tree": {
+    "head": "9a45209ac9fce07ca5c7c209728d186ad411ae14",
+    "branch": "main",
+    "tracked_diff_sha256": "5a628ee4ab2a6ad541618145e4c1d29a54911fbdf6feb5c492e19df8f9902f70",
+    "untracked_manifest_sha256_excluding_snapshot_artifacts": "76b4d6e4acf2d18e3165e69867a779eae207a64a993a54343920561b0024df80"
+  },
+  "scope": "Phase 0 engineering baseline plus validation-only Prompt/AI stub chain; no real Provider, migration, test script, or medical chain"
+}

@@ -23,7 +23,11 @@ async_engine = create_async_engine(
     pool_recycle=3600,
     pool_size=5,
     max_overflow=5,
-    connect_args={}
+    connect_args=(
+        {"unix_socket": settings.MYSQL_UNIX_SOCKET}
+        if settings.MYSQL_UNIX_SOCKET.strip()
+        else {}
+    )
 )
 
 async_engine_hd = create_async_engine(
@@ -34,7 +38,11 @@ async_engine_hd = create_async_engine(
     pool_recycle=3600,
     pool_size=5,
     max_overflow=5,
-    connect_args={}
+    connect_args=(
+        {"unix_socket": settings.MYSQL_HD_UNIX_SOCKET}
+        if settings.MYSQL_HD_UNIX_SOCKET.strip()
+        else {}
+    )
 )
 
 # Create database sessions

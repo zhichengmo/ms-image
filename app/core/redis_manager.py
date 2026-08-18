@@ -7,6 +7,8 @@ from app.core.config import settings
 class RedisManager:
     def __init__(self):
         self.redis: Optional[Redis] = None
+        self.ready: bool = False
+        self.last_error: Optional[str] = None
 
     async def init_redis_pool(self, app: FastAPI):
         """在FastAPI应用启动时初始化Redis连接池"""
@@ -22,9 +24,37 @@ class RedisManager:
         # 测试连接
         try:
             await self.redis.ping()
-        except Exception as e:
-            print(f"Redis connection failed: {e}")
-            return
+        except Exception:
+            self.last_error = "redis_unavailable"
+            self.ready = False
+            await self.redis.aclose()
+            self.redis = None
+            return False
+        self.ready = True
+        self.last_error = None
+        return True
+
+    async def check_readiness(self) -> bool:
+        """主动检查连接，供 readiness 使用；失败不会伪造健康状态。"""
+        if self.redis is None:
+            # A failed ping closes the client below.  The next probe may
+            # establish a fresh connection, so a transient Redis outage does
+            # not require an application restart to recover readiness.
+            await self.init_redis_pool(None)
+            return self.ready
+        try:
+            await self.redis.ping()
+        except Exception:
+            self.last_error = "redis_unavailable"
+            self.ready = False
+            try:
+                await self.redis.aclose()
+            finally:
+                self.redis = None
+            return False
+        self.last_error = None
+        self.ready = True
+        return True
 
     async def get(self, key: str) -> Optional[str]:
         """从Redis获取值"""
@@ -60,5 +90,6 @@ class RedisManager:
     async def close_redis_pool(self):
         """关闭Redis连接"""
         if self.redis is not None:
-            await self.redis.close()
+            await self.redis.aclose()
             self.redis = None  # 关闭后置为 None
+        self.ready = False

@@ -1,0 +1,47 @@
+{
+  "captured_at": "2026-08-10T05:06:00Z",
+  "database": "ms_image_imaging_test",
+  "server": "local MySQL 9.3 via unix socket",
+  "original_database_modified": false,
+  "real_provider_called": false,
+  "medical_verdict_produced": false,
+  "path": "XRayRunService -> DalBase/MySQL -> Outbox -> XRayTechnicalWorker -> StubAIProvider",
+  "schema_contract": {
+    "tables": 6,
+    "foreign_key_count": 0,
+    "missing_column_comments": 0,
+    "run_execution_mode_is_single_mode_fact": true,
+    "run_validation_only_column_present": false,
+    "run_cancel_requested_column_present": false,
+    "trace_late_flag_column_present": false
+  },
+  "run": {
+    "execution_status": "completed",
+    "ai_medical_status": "not_produced",
+    "delivery_status": "not_published",
+    "engineering_eligibility": "clean",
+    "state_version": 1,
+    "validation_only_projection": true
+  },
+  "worker": {
+    "outcome": "published",
+    "checkpoint_status": "completed",
+    "provider_key": "stub/replay",
+    "duplicate_delivery_not_run": "not_replayed_in_rerun"
+  },
+  "row_counts_after_rerun": {
+    "xray_accuracy_run": 2,
+    "xray_accuracy_request_snapshot": 2,
+    "xray_accuracy_stage_checkpoint": 2,
+    "xray_accuracy_model_call": 2,
+    "xray_accuracy_trace_event": 4,
+    "xray_accuracy_outbox": 2
+  },
+  "limitations": [
+    "local socket only; no API TCP deployment proof",
+    "no RabbitMQ/Celery live broker proof",
+    "no real Provider qualification",
+    "no Alembic revision or production schema",
+    "test rows are isolated to the new test database"
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "captured_at_utc": "2026-08-10T05:12:00Z",
+  "reference_project": "/Users/mozhicheng/workspace/code/py-project-v2/vet-platform-system/vet-platform",
+  "database": "vet_platform",
+  "server": "local MySQL 9.3.0",
+  "connection": {
+    "source": "reference .env host/user/db with local Unix socket fallback",
+    "read_only_queries_only": true,
+    "password_value_read_or_output": false,
+    "mysql_password_configured": false,
+    "socket_connection": "PASS"
+  },
+  "exact_row_counts": {
+    "ai_provider": 1,
+    "ai_api_connection": 96,
+    "ai_connection_profile": 85,
+    "ai_model_pool": 19,
+    "ai_governance_model_pool": 20,
+    "ai_model_pool_lane": 84,
+    "ai_prompt": 354,
+    "ai_prompt_revision": 354,
+    "ai_prompt_template": 375,
+    "ai_output_schema": 0,
+    "ai_stage": 338,
+    "ai_stage_plan": 338,
+    "ai_stage_round": 340,
+    "ai_execution_trace": 0,
+    "ai_execution_attempt": 0,
+    "ai_request_log": 167388,
+    "api_request_stats": 0,
+    "ai_config": 640,
+    "ai_config_pool_override": 13
+  },
+  "status_distributions": {
+    "ai_provider": {"provider_type_openai_compatible_enabled_1_is_del_0": 1},
+    "ai_api_connection": {"is_del_0": 96},
+    "ai_connection_profile": {"official_active_1": 9, "relay_active_1": 76},
+    "ai_governance_model_pool": {"is_active_1": 20},
+    "ai_model_pool_lane": {"is_active_1": 80, "is_active_0": 4},
+    "ai_prompt": {"is_active_1": 354},
+    "ai_prompt_revision": {"published": 354},
+    "ai_prompt_template": {"is_del_0": 375},
+    "ai_stage": {"is_active_1": 338},
+    "ai_stage_plan": {"published": 338},
+    "ai_stage_round": {"serial_active_1": 340},
+    "ai_execution_trace": {},
+    "ai_execution_attempt": {},
+    "ai_request_log": {"success": 167145, "failed": 168, "pending": 75},
+    "api_request_stats": {}
+  },
+  "key_safety_aggregates": {
+    "ai_api_connection_empty_key_count": 0,
+    "ai_api_connection_key_length_min": 20,
+    "ai_api_connection_key_length_max": 73,
+    "distinct_sha256_fingerprint_prefix_count": 30,
+    "raw_key_values_exported": false,
+    "provider_api_key_values_exported": false
+  },
+  "prompt_aggregates": {
+    "revision_content_en_present": 169,
+    "revision_checksum_column_present": true,
+    "revision_status_column_present": true,
+    "output_schema_rows": 0
+  },
+  "request_statistics_aggregates": {
+    "distinct_model_count": 22,
+    "distinct_connection_family_count": 14,
+    "distinct_base_url_count": 9,
+    "distinct_business_type_count": 2,
+    "distinct_diagnosis_stage_count": 1,
+    "input_token_present": 0,
+    "output_token_present": 0,
+    "total_token_present": 0,
+    "request_params_present": 167388,
+    "original_prompt_present": 167388,
+    "rendered_prompt_present": 167220,
+    "response_text_present": 167145
+  },
+  "redis_db0_readonly_aggregate": {
+    "ping": "PONG",
+    "total_keys": 17,
+    "interesting_key_count": 6,
+    "interesting_prefixes": {"round_robin": 6},
+    "interesting_keys_persistent_ttl": 6,
+    "health_cooldown_lease_key_values_read": false,
+    "key_values_exported": false
+  },
+  "constraints_and_indexes": {
+    "ai_table_foreign_key_count": 0,
+    "selected_unique_constraints": [
+      "ai_provider.uk_ai_provider_key",
+      "ai_connection_profile.uq_ai_connection_profile_connection_id",
+      "ai_governance_model_pool.uq_ai_governance_model_pool_key",
+      "ai_model_pool_lane.uq_ai_model_pool_lane_pool_lane",
+      "ai_prompt.uq_ai_prompt_prompt_key",
+      "ai_prompt_revision.uq_ai_prompt_revision_prompt_version",
+      "ai_stage.uq_ai_stage_stage_key",
+      "ai_stage_round.uq_ai_stage_round_plan_round",
+      "ai_execution_trace.uq_ai_execution_trace_request_id",
+      "ai_request_log.request_id",
+      "api_request_stats.uk_request_api_date_hour"
+    ],
+    "ai_tables_have_foreign_keys": false
+  },
+  "security_observations": [
+    "Legacy ai_provider.api_key and ai_api_connection.api_key are persisted as sensitive columns; values were never output or copied.",
+    "Legacy ai_request_log contains raw request_params, original_prompt, rendered_prompt, and response_text; these are excluded from migration.",
+    "Database counts and status distributions are current read-only observations, not a migration authorization."
+  ]
+}

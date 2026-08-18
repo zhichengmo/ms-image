@@ -1,589 +1,136 @@
-# MS-Scaffold 微服务脚手架
-Author：Wen ZhiChao
+# MS-Image（宠物影像 AI 服务）
 
-> 基于 FastAPI + SQLAlchemy 2.0 的通用微服务脚手架，提供完整的开发框架和最佳实践
+状态：`REFACTOR_DESIGN_READY / TARGET_NOT_IMPLEMENTED`（重构设计已准备/目标架构尚未实现）
 
-## 📖 项目概述
+当前日期：2026-08-18
 
-MS-Scaffold 是一个现代化的 FastAPI 微服务脚手架，采用异步架构设计，提供开箱即用的微服务开发环境。该脚手架参考了企业级微服务架构最佳实践，集成了完整的认证、缓存、日志、数据库等核心功能。
+适用范围：XRay（X 光）首期闭环，以及 CT（计算机断层成像）、MRI（磁共振成像）、超声、视频和 WSI（全切片影像）的通用影像底座。
 
-## ✨ 核心特性
+MS-Image 是宠物多模态影像接入、AI（人工智能）诊断执行、报告和离线评测服务，不是用于生成其他 FastAPI 项目的脚手架。
 
-### 🏗️ 双端架构
-- **用户端API** (端口8000): 面向C端用户，使用RS256+RSA公钥鉴权
-- **管理端API** (端口8001): 面向管理后台，使用HS256+密钥鉴权
-- **独立文档**: 分别提供专用的Swagger API文档
+当前代码仍是 `XRay validation-only`（X 光仅验证）工程骨架；目标在线 10 表、隔离评测 4 表、8 个在线业务 Service（业务服务）和 5 个 Stage Service（阶段服务）均属于已评审设计，不代表已经建表、迁移或上线。医学准确率当前仍为 `UNKNOWN`（未知），发布状态仍为 `PARTIAL / NO-GO`（部分完成/禁止放行）。
 
-### 🗄️ 数据层支持
-- **MySQL异步连接池**: 主数据库 + 可选集成数据库支持
-- **Redis缓存**: 异步连接池管理，支持缓存和会话存储
-- **MongoDB支持**: 可选的NoSQL数据库支持
-- **Alembic迁移**: 自动数据库迁移管理
+## 项目目的
 
-### 🔐 认证与安全
-- **双重JWT认证**: RS256(用户端) + HS256(管理端)
-- **RSA密钥验证**: 支持RSA公钥/私钥对验证
-- **Basic Auth**: 管理端基础认证支持
-- **权限控制**: 多级权限管理体系
+MS-Image 负责形成一条可追溯、可恢复、可评测的影像 AI 链路：
 
-### 📊 监控与日志
-- **结构化日志**: 统一的日志格式和轮转策略
-- **并发安全**: 多进程安全的日志记录
-- **请求追踪**: 完整的请求响应日志记录
-- **异常处理**: 全局异常捕获和处理
+1. 接收 Session（会话）、Study（检查）、Series（序列）和 Image（影像）。
+2. 通过 OSS（对象存储）直传保存影像 bytes（文件字节），服务端校验对象后封存 Study revision（检查修订版本）。
+3. 冻结 Task（任务）的输入、AI Config（AI 配置）、Profile（流程配置）和预算。
+4. 通过 Outbox（事务发件箱）、Broker（消息代理）、Lease（租约）和 CAS（比较并设置）可靠执行 Stage。
+5. 由模型产生医学判断；Python 只做校验、路由、持久化和审计，不改写医学结论。
+6. 保存不可变 Report（报告），并把脱敏运行产物送入隔离 Evaluation Plane（离线评测面）。
+7. 使用 Gold（可信金标准）、Failure Bank（失败样本库）、Paired A/B（配对对照实验）和 Holdout（隔离留出集）验证候选链，禁止用工程成功率冒充医学准确率。
 
-### 🚀 开发体验
-- **热重载**: 开发环境自动重载
-- **类型安全**: 完整的类型提示支持
-- **CRUD基类**: 标准化的数据操作封装
-- **自动文档**: 自动生成API文档
+## Canonical XRay Chain（X 光权威主链）
 
-## 🚀 快速开始
+以下流程是当前文档必须统一遵循的权威链路：
 
-### 1. 使用脚手架创建新项目
+```mermaid
+flowchart TD
+    CP["ControlPlane（控制面）<br/>AIConfig、Prompt、模型资格、冻结 Profile"]
+    S["SessionService（会话服务）"]
+    ST["StudyService（检查服务）<br/>Study、Series、Revision、完整性"]
+    IM["ImageService（影像服务）<br/>OSS 上传、服务端校验、替换、隔离"]
+    T["TaskService（任务服务）<br/>冻结请求、Config、Profile、预算"]
+    EX["ImagingExecutionService（执行服务）<br/>Stage、Checkpoint、Lease、CAS、恢复"]
 
-#### 方法一：使用项目生成器（推荐）
-```bash
-# 克隆脚手架到本地
-git clone https://github.com/your-org/ms-image.git
-cd ms-image
+    subgraph XR["XRay Pipeline（X 光流水线）"]
+        SP["StudyPreparationStage（检查准备）"]
+        PR["JointPrimaryReaderStage（完整 Study 联合主读）"]
+        FR["FamilyRoutingStage（家族路由）<br/>仅 Targeted 实验 Profile"]
+        TR["TargetedReviewStage（专项复核）<br/>最多一次视觉调用"]
+        DF["DecisionFinalizationStage（结果定稿）<br/>不调用模型、不改判"]
 
-# 在当前目录创建新项目
-python create_new_project.py my-api-service
+        SP --> PR
+        PR -->|"xray_primary_v1"| DF
+        PR -->|"xray_targeted_review_v1"| FR
+        FR -->|"primary_final"| DF
+        FR -->|"targeted_review"| TR
+        TR -->|"成功且输出完整病例结果"| DF
+    end
 
-# 或指定目标目录（推荐）
-python create_new_project.py my-api-service /path/to/your/projects
+    R["ReportService（报告服务）<br/>不可变报告、发布、作废、授权查询"]
+    TF["failed/dead_letter<br/>medical=not_produced"]
+    CF["completed<br/>medical=not_produced<br/>调用前覆盖/能力/预算不足"]
+    OUT["normal / abnormal / review_required / non_diagnostic"]
+    EV["EvaluationPlane（离线评测面）<br/>Gold、Failure Bank、Paired A/B、Holdout"]
 
-# 或在上级目录创建（避免嵌套在脚手架内）
-python create_new_project.py my-api-service ../
+    CP -. "冻结配置快照" .-> T
+    S --> ST --> IM
+    IM -->|"服务端校验后形成 ready revision"| ST
+    ST --> T --> EX --> SP
 
-# 进入新项目目录
-cd ../my-api-service  # 或对应的目标路径
+    SP -->|"输入或传输失败"| TF
+    SP -->|"调用前覆盖不足"| CF
+    PR -->|"Provider 或 Schema 失败"| TF
+    TR -->|"不可恢复工程失败"| TF
+
+    DF --> R --> OUT
+    R -. "脱敏冻结运行产物" .-> EV
+    EV -. "候选证据 + 人工审批" .-> CP
 ```
 
-**使用说明**：
-- `<项目名称>`: 必需参数，如 `user-service`、`order-api`
-- `[目标目录]`: 可选参数，指定项目创建位置
-  - 不指定：在当前目录（脚手架目录内）创建
-  - 指定路径：如 `/home/user/projects` 或 `../`
-  - 推荐使用 `../` 避免在脚手架目录内创建项目
+两个 Profile（流程配置）的边界固定如下：
 
-#### 方法二：手动复制
-```bash
-# 复制脚手架目录
-cp -r ms-image my-new-service
-cd my-new-service
+- `xray_primary_v1`（X 光仅主读基线）：`StudyPreparation -> JointPrimaryReader -> DecisionFinalization -> Report`。
+- `xray_targeted_review_v1`（X 光专项复核实验）：Primary 后执行确定性 `FamilyRouting`；只允许 `primary_final` 或最多一次 `TargetedReview`。
+- `FamilyRouting` 只属于 Targeted 实验 Profile，不调用模型、不读取 Gold、不修改 `normal/abnormal`。
+- `TargetedReview` 必须输出完整病例结果；触发后若发生不可恢复技术失败，必须 fail closed（失败关闭），不得静默回退 Primary。
+- Evaluation Plane 只产生候选证据；必须经过人工审批，Control Plane 才能激活新配置。
 
-# 删除.git目录重新初始化
-rm -rf .git
-git init
+## 文档阅读顺序
+
+| 目的 | 文档 |
+|---|---|
+| 第一次了解项目 | [文档中心](docs/README.md) -> [项目概览与业务链](docs/refactor/01-project-overview-and-business-chain.md) |
+| 向开发人员讲解 XRay | [XRay 核心链路沟通文档](docs/refactor/11-xray-core-chain-developer-briefing.md) |
+| 审查每一层的目的、逻辑、输入、输出和必要性 | [XRay 权威主链逐层责任与接口合同](docs/refactor/12-canonical-xray-layer-responsibility-contract.md) |
+| 查看完整 XRay 状态、事务和故障链 | [XRay 详细链路与开发流程图](docs/refactor/10-xray-detailed-flow.md) |
+| 查看精确表、字段、索引和不变量 | [最终架构、数据库与完整链路设计](docs/ms-image-final-architecture-and-database-design.md) |
+| 判断基于哪个代码状态重构 | [重构基线决策](docs/refactor/13-refactor-base-decision.md) |
+| 开始重构 | [重构文档包](docs/refactor/README.md) -> [新会话交接](docs/refactor/08-new-session-handoff.md) |
+| 查看历史方案 | [历史文档索引](docs/history/README.md)，只用于追溯，不指导新开发 |
+| 查询英文含义 | [英文术语中英对照](docs/术语中英对照.md) |
+
+## 目标边界
+
+- 在线核心业务 Service 只有 `SessionService / StudyService / ImageService / TaskService / ImagingExecutionService / AIConfigService / AIRequestService / ReportService` 这 8 个。
+- 目标 XRay 注册 5 个 Stage Service；默认 Profile 执行其中 3 个，Targeted 实验 Profile 才增加 FamilyRouting 和 TargetedReview。
+- XRay、CT、MRI 等复用 Session/Study/Series/Image/Task/Stage/Call/Report 公共领域模型；医学 Pipeline（流水线）分别资格化。
+- OSS 保存文件字节；MySQL 保存领域 owner（所有者）和完整 ObjectRef（对象引用），不建设公共 `file_asset`（文件资产）表。
+- 首期没有报告 callback/ack（回调/确认）生命周期，没有人工复核表，也没有在线 Evidence Graph（证据图）或通用 DAG（有向无环图）引擎。
+- 当前 10+4 表是候选基线，不是数量指标；只有独立事实 owner、生命周期、事务、查询或审计合同才能触发增删表。
+
+## 工程分层
+
+业务接口必须遵循：
+
+```text
+API（接口层） -> Service（业务层） -> CRUD/DAL（数据访问层） -> Model/DB（模型/数据库）
 ```
 
-### 2. 环境配置
+- 数据访问统一复用 `app.core.crud.DalBase`，不得新增 Repository（仓储层）、第二套 CRUDBase 或 DatabaseService（数据库服务）。
+- Service 接收 `AsyncSession`（异步数据库会话）并初始化实体 DAL；API、Service、Worker 和脚本不得直接拼装 SQLAlchemy 查询。
+- 每张目标 MySQL 表使用服务端生成、非空、独立的 `id VARCHAR(64)` 单列主键。
+- 不使用 Foreign Key（外键）、数据库 Enum（枚举）、联合主键或 `tenant_id`（租户字段）。
+- API 资源 ID 使用 query（查询参数）或 request body（请求体），不设计 `/{id}`。
+- 未经明确授权不生成迁移脚本、新测试脚本，不操作真实数据库或生产对象。
+
+## 本地运行
+
+详细说明见 [USAGE.md](USAGE.md)。最小启动方式：
 
 ```bash
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑配置文件
-vim .env  # 或使用其他编辑器
-```
-
-关键配置项：
-```bash
-# 应用基础配置
-APPLICATION_NAME=My API Service
-APPLICATION_PORT=8000
-
-# 数据库配置
-MYSQL_HOST=localhost
-MYSQL_DB=my_service_db
-MYSQL_USER=root
-MYSQL_PW=your_password
-
-# Redis配置
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# JWT密钥配置
-SECRET_KEY=your-secret-key
-ADMIN_SECRET_KEY=your-admin-secret
-```
-
-### 3. 安装依赖
-
-```bash
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 安装依赖
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 4. 数据库初始化
-
-```bash
-# 初始化数据库迁移
-alembic revision --autogenerate -m "Initial migration"
-
-# 执行迁移
-alembic upgrade head
-```
-
-### 5. 启动服务
-
-#### 开发环境
-```bash
-# 启动双端服务（用户端8000 + 管理端8001）
+cp .env.example .env-01
 python run_servers.py
-
-# 或者单独启动
-python start_user_api.py   # 仅用户端
-python start_admin_api.py  # 仅管理端
 ```
 
-#### 生产环境
-```bash
-# 使用Docker Compose
-docker-compose up -d
-
-# 或使用Gunicorn
-gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
-```
-
-### 6. 验证部署
-
-访问以下地址验证服务：
-- **用户端API文档**: http://localhost:8000/docs
-- **管理端API文档**: http://localhost:8001/admin/docs
-- **健康检查**: http://localhost:8000/api/v1/health
-- **管理端状态**: http://localhost:8001/api/v1/status
-
-## 🏛️ 系统架构
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   客户端层                                │
-├─────────────────┬───────────────────────────────────────┤
-│   用户端API     │          管理端API                     │
-│   (端口8000)    │         (端口8001)                     │
-│   RS256鉴权     │         HS256鉴权                      │
-└─────────────────┴───────────────────────────────────────┘
-           │                        │
-           ▼                        ▼
-┌─────────────────────────────────────────────────────────┐
-│                   API路由层                              │
-│              FastAPI + Pydantic                        │
-└─────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   业务逻辑层                             │
-│               Service Layer                             │
-└─────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   数据访问层                             │
-│           CRUD + Repository Pattern                     │
-└─────────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   数据存储层                             │
-│        MySQL + Redis + MongoDB(可选)                    │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 📁 项目结构
-
-```
-ms-image/
-├── 📱 app/                          # 应用核心目录
-│   ├── 🔧 core/                     # 核心模块
-│   │   ├── config.py               # 配置管理
-│   │   ├── async_db.py             # 异步数据库连接
-│   │   ├── exception.py            # 异常处理
-│   │   ├── redis_manager.py        # Redis连接管理
-│   │   └── crud.py                 # CRUD基类
-│   ├── 🛠️ lib/                      # 工具库
-│   │   ├── log/                    # 日志模块
-│   │   │   ├── log_config.py       # 日志配置
-│   │   │   └── log_request.py      # 请求日志
-│   │   ├── conversion.py           # 数据转换工具
-│   │   ├── message.py              # 消息模板
-│   │   ├── response.py             # 响应工具
-│   │   └── oid.py                  # ObjectId处理
-│   ├── 📊 models/                   # 数据模型
-│   │   └── base.py                 # 基础模型类
-│   ├── 📋 schemas/                  # Pydantic模式
-│   │   └── base.py                 # 基础响应模式
-│   ├── 🌐 api/                      # API路由
-│   │   ├── api_v1/                 # 用户端API v1
-│   │   │   ├── endpoints/          # API端点
-│   │   │   └── api.py              # 路由聚合
-│   │   ├── admin_v1/               # 管理端API v1
-│   │   │   ├── endpoints/          # 管理端点
-│   │   │   └── api.py              # 管理路由聚合
-│   │   └── deps.py                 # 依赖注入
-│   ├── 💾 crud/                     # 数据访问层
-│   └── 🧠 service/                  # 业务逻辑层
-├── 🔄 alembic_migrations/           # 数据库迁移
-├── 📝 logs/                         # 日志文件
-├── 🐳 docker-compose.yml            # Docker配置
-├── 🚀 run_servers.py                # 双端启动脚本
-├── 📦 requirements.txt              # 依赖列表
-└── 📄 .env.example                  # 环境变量模板
-```
-
-## 🔧 开发指南
-
-### 1. 添加新的API端点
-
-#### 用户端API
-```python
-# app/api/api_v1/endpoints/users.py
-from fastapi import APIRouter, Depends
-from app.schemas.base import GenericResponse
-
-router = APIRouter()
-
-@router.get("/users", response_model=GenericResponse)
-async def get_users():
-    return GenericResponse(success=True, data={"users": []})
-```
-
-#### 管理端API
-```python
-# app/api/admin_v1/endpoints/admin_users.py
-from fastapi import APIRouter, Depends
-from app.api.deps import get_admin_user
-
-router = APIRouter()
-
-@router.get("/users", dependencies=[Depends(get_admin_user)])
-async def admin_get_users():
-    return {"data": {"users": []}}
-```
-
-### 2. 添加数据模型
-
-```python
-# app/models/user.py
-from sqlalchemy import Column, Integer, String, DateTime
-from app.models.base import Base
-
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True)
-    username = Column(String(50), unique=True, nullable=False)
-    email = Column(String(100), unique=True, nullable=False)
-    created_at = Column(DateTime, default=func.now())
-```
-
-### 3. 添加CRUD操作（DAL模式）
-
-```python
-# app/crud/user.py
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.crud import DalBase
-from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate, UserResponse
-
-class UserDal(DalBase):
-    def __init__(self, db: AsyncSession):
-        super().__init__(db=db, model=User)
-
-    async def create_user(self, user_data: UserCreate):
-        """创建新用户"""
-        return await self.create_data(user_data.model_dump(), v_schema=UserResponse)
-
-    async def update_user(self, user_id: int, user_data: UserUpdate):
-        """更新用户信息"""
-        update_data = user_data.model_dump(exclude_unset=True)
-        if not update_data:
-            return await self.get_data(user_id, v_schema=UserResponse)
-        return await self.put_data(user_id, update_data, v_schema=UserResponse)
-
-    async def get_user_by_email(self, email: str):
-        """根据邮箱获取用户"""
-        return await self.get_data(email=email, v_schema=UserResponse)
-```
-
-### 4. 添加业务逻辑（重要：DAL使用规范）
-
-**✅ 正确的使用方式** - 使用 `XxDal(AsyncSession)` 模式：
-
-```python
-# app/service/user_service.py
-from app.crud.user import UserDal
-from app.core.async_db import get_db_session
-
-# 方式一：Service类模式（推荐）
-class UserService:
-    def __init__(self, db: AsyncSession):
-        self.db = db
-        self.user_dal = UserDal(db)  # 关键：传入AsyncSession
-
-    async def create_user(self, user_data: UserCreate):
-        return await self.user_dal.create_user(user_data)
-
-    async def get_user(self, user_id: int):
-        return await self.user_dal.get_data(user_id)
-
-    async def get_users_list(self, page: int = 1, limit: int = 10):
-        return await self.user_dal.get_datas(page=page, limit=limit)
-
-    async def update_user(self, user_id: int, user_data: UserUpdate):
-        return await self.user_dal.update_user(user_id, user_data)
-
-    async def delete_user(self, user_id: int, soft: bool = True):
-        if soft:
-            await self.user_dal.put_data(user_id, {"is_del": 1})
-        else:
-            await self.user_dal.delete_datas([user_id])
-
-# 方式二：函数式模式
-async def create_user_func(user_data: UserCreate):
-    async with get_db_session() as db:
-        user_dal = UserDal(db)  # 关键：传入AsyncSession
-        return await user_dal.create_user(user_data)
-
-async def get_user_func(user_id: int):
-    async with get_db_session() as db:
-        user_dal = UserDal(db)  # 关键：传入AsyncSession
-        return await user_dal.get_data(user_id)
-```
-
-**❌ 错误的使用方式**：
-```python
-# 不要这样做
-user_dal = UserDal()  # 缺少AsyncSession参数
-user_data = await user_crud.create(user_data)  # 使用了过时的模式
-```
-
-**🔑 关键要点**：
-1. 必须使用 `XxDal(AsyncSession)` 传入数据库会话
-2. DAL类继承自 DalBase，在构造函数中调用 `super().__init__(db=db, model=Model)`
-3. 支持的DalBase方法包括：
-   - `get_data()` - 获取单个记录
-   - `create_data()` - 创建新记录
-   - `put_data()` - 更新记录
-   - `delete_datas()` - 删除记录
-   - `get_datas()` - 获取多个记录（支持分页）
-4. Service层推荐在构造函数中初始化DAL实例
-5. 可以在DAL中添加业务相关的自定义方法（如 `create_user`, `get_user_by_email` 等）
-
-## 🔐 认证配置
-
-### RS256 (用户端)
-1. 生成RSA密钥对：
-```bash
-# 生成私钥
-openssl genpkey -algorithm RSA -out rsa_private.pem -pkcs8 -aes256
-
-# 提取公钥
-openssl pkey -in rsa_private.pem -pubout -out rsa_public.pem
-```
-
-2. 将`rsa_public.pem`放在项目根目录
-
-### HS256 (管理端)
-在`.env`文件中设置：
-```bash
-ADMIN_SECRET_KEY=your-256-bit-secret-key-here
-```
-
-## 📋 API接口规范
-
-### 用户端API
-
-#### 健康检查
-```http
-GET /api/v1/health
-```
-
-#### 版本信息
-```http
-GET /api/v1/version
-```
-
-### 管理端API
-
-#### 状态检查
-```http
-GET /admin/api/v1/status
-Authorization: Basic <base64(username:password)>
-```
-
-#### 系统信息
-```http
-GET /admin/api/v1/info
-Authorization: Basic <base64(username:password)>
-```
-
-### 统一响应格式
-
-```json
-{
-  "success": true,
-  "data": {},
-  "message": "操作成功",
-  "timestamp": "2024-01-01T12:00:00Z"
-}
-```
-
-## 🐳 Docker部署
-
-### 开发环境
-```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f app
-
-# 停止服务
-docker-compose down
-```
-
-### 生产环境
-```yaml
-# docker-compose.prod.yml
-version: '3.8'
-services:
-  app:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - ENV=production
-    restart: unless-stopped
-```
-
-## 📊 监控与日志
-
-### 日志配置
-- **日志级别**: DEBUG/INFO/WARNING/ERROR
-- **日志格式**: `%(asctime)s - [%(levelname)s] - %(name)s - %(message)s`
-- **文件轮转**: 10MB自动轮转，保留100个备份
-- **并发安全**: 支持多进程环境
-
-### 日志位置
-```
-logs/
-├── app.log              # 应用日志
-├── request.log          # 请求日志
-├── error.log            # 错误日志
-└── gunicorn_error.log   # Gunicorn错误日志
-```
-
-### 监控指标
-- API响应时间
-- 数据库连接池状态
-- Redis连接状态
-- 错误率统计
-
-## 🧪 测试
-
-```bash
-# 运行所有测试
-pytest
-
-# 运行特定测试
-pytest tests/test_api.py
-
-# 生成覆盖率报告
-pytest --cov=app tests/
-```
-
-## 🔄 数据库迁移
-
-```bash
-# 创建新迁移
-alembic revision --autogenerate -m "Add user table"
-
-# 升级到最新版本
-alembic upgrade head
-
-# 降级到指定版本
-alembic downgrade -1
-
-# 查看迁移历史
-alembic history
-```
-
-## 📈 性能优化
-
-### 数据库优化
-- 使用异步连接池
-- 适当的索引策略
-- 查询优化和分页
-
-### 缓存策略
-- Redis缓存热点数据
-- 合理的缓存过期时间
-- 缓存预热和更新
-
-### 异步处理
-- 使用async/await
-- 异步数据库操作
-- 异步HTTP客户端
-
-## 🛡️ 安全最佳实践
-
-- JWT令牌安全管理
-- API访问权限控制
-- 敏感信息环境变量存储
-- HTTPS强制使用
-- 输入验证和SQL注入防护
-
-## 📚 技术栈
-
-| 类别 | 技术选择 | 版本 | 说明 |
-|------|----------|------|------|
-| Web框架 | FastAPI | 0.115.6 | 高性能异步Web框架 |
-| ORM | SQLAlchemy | 2.0.36 | 现代化异步ORM |
-| 数据验证 | Pydantic | 2.10.4 | 类型安全的数据验证 |
-| 数据库 | MySQL | 8.0+ | 关系型数据库 |
-| 缓存 | Redis | 5.2.1+ | 内存数据库 |
-| 服务器 | Uvicorn | 0.21.0 | ASGI服务器 |
-| 迁移 | Alembic | 1.13.1 | 数据库迁移工具 |
-| 容器化 | Docker | - | 应用容器化 |
-
-## 🤝 贡献指南
-
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
-
-## 📝 更新日志
-
-### v1.0.0 (2024-01-15)
-- ✅ 初始脚手架发布
-- ✅ 双端API架构
-- ✅ JWT双重认证
-- ✅ 异步数据库支持
-- ✅ Redis缓存集成
-- ✅ 完整的日志系统
-- ✅ Docker容器化支持
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
-
-## 💬 技术支持
-
-[//]: # (- 📧 技术问题: [issues]&#40;https://github.com/your-org/ms-image/issues&#41;)
-
-[//]: # (- 📖 文档: [Wiki]&#40;https://github.com/your-org/ms-image/wiki&#41;)
-
-[//]: # (- 💡 特性建议: [discussions]&#40;https://github.com/your-org/ms-image/discussions&#41;)
-
----
-
-**MS-Scaffold** - 让微服务开发更简单 🚀
+- 用户 API（应用程序接口）：`http://localhost:8000/docs`
+- 管理 API：`http://localhost:8001/docs`
+- 用户健康检查：`http://localhost:8000/api/v1/health`
+
+不要把服务成功启动、请求成功或工程测试通过解释为 XRay 医学准确率已经提高。

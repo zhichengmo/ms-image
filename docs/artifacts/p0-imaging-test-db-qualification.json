@@ -1,0 +1,44 @@
+{
+  "date": "2026-08-10",
+  "database": "ms_image_imaging_test",
+  "server": "local MySQL 9.3",
+  "original_database_modified": false,
+  "real_provider_called": false,
+  "medical_verdict_produced": false,
+  "worker_path": "XRayRunService -> DalBase/MySQL -> Outbox -> XRayTechnicalWorker -> StubAIProvider",
+  "result": "PASS-LOCAL",
+  "run_execution_status": "completed",
+  "run_ai_medical_status": "not_produced",
+  "run_delivery_status": "not_published",
+  "run_engineering_eligibility": "clean",
+  "checkpoint_status": "completed",
+  "outbox_publish_status": "published",
+  "model_call_provider_key": "stub/replay",
+  "schema_contract": {
+    "tables": 6,
+    "foreign_key_count": 0,
+    "empty_required_comments": 0,
+    "single_source_status_fields": {
+      "run_execution_mode": true,
+      "run_cancel_requested_column": false,
+      "trace_late_flag_column": false
+    }
+  },
+  "tenant_scoped_counts": {
+    "xray_accuracy_run": 1,
+    "xray_accuracy_request_snapshot": 1,
+    "xray_accuracy_stage_checkpoint": 1,
+    "xray_accuracy_model_call": 1,
+    "xray_accuracy_trace_event": 2,
+    "xray_accuracy_outbox": 1
+  },
+  "foreign_key_count": 0,
+  "schema_change_backup": "docs/artifacts/ms_image_imaging_test-before-schema-change.sql",
+  "limitations": [
+    "direct local socket qualification, not API TCP deployment",
+    "no RabbitMQ/Celery broker qualification",
+    "no real Provider qualification",
+    "no Alembic revision or production schema",
+    "test row is retained only in the isolated test database"
+  ]
+}

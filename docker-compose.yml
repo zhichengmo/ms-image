@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   app:
     build: .
@@ -7,11 +5,108 @@ services:
       - "8000:8000"
     environment:
       - ENV=dev
+      - BROKER_ENABLED=${BROKER_ENABLED:-false}
+      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
+      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
+      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
     env_file:
-      - .env
+      - path: .env.example
+        required: true
+      - path: .env-01
+        required: false
     depends_on:
-      - mysql
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  admin:
+    build: .
+    command: ["uvicorn", "main:admin_app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - ENV=dev
+      - BROKER_ENABLED=${BROKER_ENABLED:-false}
+      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
+      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
+      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env-01
+        required: false
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      # Liveness must remain independent from the protected control-plane
+      # readiness probe; readiness is checked by an authenticated operator.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  xray-relay:
+    profiles: ["xray-broker"]
+    build: .
+    command:
+      ["sh", "-c", "if [ \"$$BROKER_ENABLED\" != \"true\" ]; then echo broker_disabled; exit 0; fi; exec python -m workers.xray_accuracy_worker.outbox_relay"]
+    environment:
+      - ENV=dev
+      - BROKER_ENABLED=${BROKER_ENABLED:-false}
+      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
+      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
+      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env-01
+        required: false
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+
+  xray-worker:
+    profiles: ["xray-broker"]
+    build: .
+    command:
+      ["sh", "-c", "if [ \"$$BROKER_ENABLED\" != \"true\" ]; then echo broker_disabled; exit 0; fi; exec celery -A workers.xray_accuracy_worker.celery_app:celery_app worker --loglevel=INFO --queues=xray.stage.requested --concurrency=2"]
+    environment:
+      - ENV=dev
+      - BROKER_ENABLED=${BROKER_ENABLED:-false}
+      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
+      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
+      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file:
+      - path: .env.example
+        required: true
+      - path: .env-01
+        required: false
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - ./logs:/app/logs
 
@@ -21,18 +116,46 @@ services:
       MYSQL_ROOT_PASSWORD: password
       MYSQL_DATABASE: ms_image
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ppassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    profiles: ["xray-broker"]
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: password
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
 
 volumes:
   mysql_data:
   redis_data:
+  rabbitmq_data:

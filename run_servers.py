@@ -14,17 +14,35 @@ def run_admin_api():
 
 
 if __name__ == "__main__":
-    # 启动用户端API进程
-    user_process = Process(target=run_user_api)
-    user_process.start()
+    processes = [
+        Process(target=run_user_api, name="ms-image-user"),
+        Process(target=run_admin_api, name="ms-image-admin"),
+    ]
+    for process in processes:
+        process.start()
 
-    # 启动管理员API进程
-    admin_process = Process(target=run_admin_api)
-    admin_process.start()
-
+    exit_code = 0
     try:
-        user_process.join()
-        admin_process.join()
+        # A two-process launcher must not leave the other plane serving after
+        # one plane has exited.  Polling also makes the failing exit code
+        # observable to the container/orchestrator.
+        while True:
+            finished = next(
+                (process for process in processes if not process.is_alive()),
+                None,
+            )
+            if finished is not None:
+                exit_code = finished.exitcode or 0
+                break
+            for process in processes:
+                process.join(timeout=0.2)
     except KeyboardInterrupt:
-        user_process.terminate()
-        admin_process.terminate()
+        exit_code = 130
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+        for process in processes:
+            process.join(timeout=5)
+
+    raise SystemExit(exit_code)

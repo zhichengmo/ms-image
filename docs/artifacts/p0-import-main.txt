@@ -1,0 +1,15 @@
+Phase 0 import artifact
+
+Captured at (UTC): 2026-08-09T17:22:39Z
+Interpreter: /opt/homebrew/anaconda3/bin/python
+Python: 3.12.7
+
+import main: OK
+app=main:app
+admin_app=main:admin_app
+user_root_path=/ms-image
+admin_root_path=/ms-image/admin
+compileall=PASS
+
+This artifact proves import-time construction only. It does not prove that
+MySQL, Redis, RabbitMQ, or an external reverse proxy is available.
