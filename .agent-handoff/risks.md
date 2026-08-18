@@ -10,12 +10,13 @@
 - `.env.example` 曾在本地工作树包含看起来可用的 OSS/STS/Gemini 凭据；现已清空且从未进入当前 Git 历史，但仍需凭据持有人完成轮换。
 - 后续禁止 `git add -A`；必须逐路径暂存并在每次提交前复核 Secret，防止新的本地配置进入版本控制。
 - 旧 AI 模型设计含明文 API key 字段，迁移不当会泄漏 Secret。
-- 当前 Worker 的外部 I/O 与事务边界需要重审，否则可能扩大锁和重复 Provider 调用。
+- 当前 `ingest_asset_in_db` 和 XRay technical worker 仍可能在数据库事务期间执行对象存储或 Provider I/O；P1C 必须改为短事务 claim、事务外校验、新短事务 CAS 回写，完成前不得复用为目标 Image Worker。
 - 删除现有 TraceEvent 前若 AuditSink 未资格化，会丢失技术审计事实。
 - 旧 `xray_accuracy_*` 表和 PASS-LOCAL Artifact 容易被误解为目标 schema 已实现。
 - 过早启用 FamilyRouting/TargetedReview 会同时改变选择和模型调用，难以归因准确率。
 - 多模态若只按 XRay 抽象扩展，可能持续污染公共表。
 - 直接删除当前 tenant dependency 会削弱旧 API 授权；tenant claim 只能在目标 owner 授权闭环后退出。
+- 目标 owner 授权的生产 subject/service identity 映射仍未知；P1 使用已验证 JWT subject/scope 与资源 `requester_id/subject_id` 校验，不删除旧 tenant compatibility dependency。
 - 新旧 OSS key 过渡若另建 Gateway 或盲目重写对象，会产生双事实源、对象丢失和 owner 错配。
 - 只完成 P1A 就宣称影像模块闭环，会遗漏 Image validate Outbox/Worker、故障恢复和 revision CAS。
 

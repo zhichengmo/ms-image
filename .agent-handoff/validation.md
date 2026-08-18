@@ -59,6 +59,9 @@
 | 2026-08-18 | 资产基线全工作树 `git diff --check` | `passed` | 已跟踪差异无 whitespace error |
 | 2026-08-18 | P0 Handoff maintenance | `passed` | `changed=0 warnings=0 unresolved=0` |
 | 2026-08-18 | 资产 checkpoint 暂存区复核 | `passed` | 175 个资产文件；`git diff --cached --check` 通过，`.env` 未暂存，常见云密钥/私钥扫描零命中 |
+| 2026-08-18 | P0 事务边界核对 | `deferred to P1C` | 旧 ingest/technical worker 存在事务期间外部 I/O；不阻止纯数据库 P1A，但禁止直接作为目标 Image Worker |
+| 2026-08-18 | P0 身份与授权核对 | `passed for P1` | JWT subject/scope 强校验可复用；目标资源 owner 校验放在 Service，旧 tenant dependency 暂不删除 |
+| 2026-08-18 | P0 Broker/Trace/启动核对 | `passed for code implementation` | Broker/readiness/Celery 和 API/Admin 启动入口可装载；TraceEvent 在 AuditSink 资格化前保留，未做真实 Broker 运行验证 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

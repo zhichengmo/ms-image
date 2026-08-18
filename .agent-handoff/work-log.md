@@ -7,6 +7,11 @@
   - 清空 `.env.example` 中 OSS/STS/Gemini 和示例 Mongo 密码值；脱敏扫描未发现其他常见云密钥或私钥。
   - 创建 `codex/ms-image-refactor`；后续按 Session、Study+Series、Image、API、Gateway、异步校验垂直切片提交并立即推送。
   - 真实凭据轮换仍由凭据持有人完成；本轮未执行外部凭据操作。
+- P0 有界工程核对：
+  - 确认旧 ingest/technical worker 的外部 I/O 事务边界不符合目标合同，归入 P1C 明确替换，禁止直接复用。
+  - 确认 JWT subject/scope、Broker/readiness、API/Admin/Celery 启动入口可作为 P1 代码基线；生产运行仍未验证。
+  - 保留旧 tenant compatibility dependency 和 TraceEvent，分别等待目标 owner 授权与 AuditSink 资格闭环。
+  - 结论：无 P1A 硬阻断，下一切片为 Session 分层。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

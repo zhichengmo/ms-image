@@ -3,7 +3,7 @@
 ## 下一会话优先级
 
 - [x] P0 首项：本地 `.env` 已退出版本控制候选；`.env.example` 已脱敏，Secret 扫描未发现其他常见凭据；资产 checkpoint 使用 `codex/ms-image-refactor`，禁止 `git add -A`、reset 或 clean。
-- [ ] 有界核对 P0 工程阻断：Secret、事务内外部 I/O、身份、Broker、Trace/Audit、启动合同和证据新鲜度；不要停留在纯审计。
+- [x] 有界核对 P0 工程阻断：无 P1A 硬阻断；事务内外部 I/O 由 P1C 替换，旧 tenant/Trace 保留到目标 owner/Audit 合同闭环。
 - [ ] 内部代码完全重构及开始实现已由新会话提示词明确授权；迁移脚本、新建测试脚本、真实数据库操作和生产发布仍分别确认。
 - [ ] 实现 P1A：Session/Study/Series/Image 的 Model（数据模型） -> Schema（接口结构） -> DAL（数据访问层） -> Service（业务服务层）。
 - [ ] 实现 P1B：API、dependency injection（依赖注入）和 route registration（路由注册），资源 ID 只使用 query/body。
