@@ -17,6 +17,11 @@
   - 新增 `Session -> session_record`、Create/Update/Query/Response Schema、`SessionDal` 和 `SessionService`。
   - 实现 request/source 双幂等、requester owner 校验、CAS 状态推进、空会话取消与 completed 关闭；需要子资源事实的动作保持 fail-closed。
   - 未新增迁移或测试脚本，未连接真实数据库。
+- P1A Study+Series 垂直切片：
+  - 新增 `Study -> study_record`、`Series -> series_record`、对应 Schema 和 `StudyDal/SeriesDal`。
+  - 新增唯一 `StudyService`，实现 owner 校验、Study/Series 双幂等、稳定 source ID、稳定 Series 排序和 Session processing CAS。
+  - Study 当前 revision 头和 Series manifest 字段已建模；没有 ready Image 前禁止伪造 finalize/ready。
+  - 抽取共享 schema UTC/text 规范化 helper；未新增 SeriesService、迁移或测试脚本。
 
 - 目标：整理全部历史文档，建立详细重构文档包和跨会话交接机制。
 - 修改：

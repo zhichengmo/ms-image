@@ -1,0 +1,252 @@
+import hashlib
+import json
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.crud.series import SeriesDal
+from app.crud.session import SessionDal
+from app.crud.study import StudyDal
+from app.models.imaging_base import new_opaque_id
+from app.models.series import Series
+from app.models.study import Study
+from app.schemas.study import (
+    SeriesCreate,
+    SeriesResponse,
+    StudyCreate,
+    StudyDetailResponse,
+    StudyResponse,
+)
+from app.service.session_service import (
+    SessionAccessDeniedError,
+    SessionNotFoundError,
+    SessionStateConflictError,
+)
+
+
+class StudyServiceError(ValueError):
+    pass
+
+
+class StudyNotFoundError(StudyServiceError):
+    pass
+
+
+class StudyAccessDeniedError(StudyServiceError):
+    pass
+
+
+class StudyIdempotencyConflictError(StudyServiceError):
+    pass
+
+
+class StudyStateConflictError(StudyServiceError):
+    pass
+
+
+class SeriesNotFoundError(StudyServiceError):
+    pass
+
+
+class StudyService:
+    def __init__(self, db: AsyncSession):
+        self.session_dal = SessionDal(db)
+        self.study_dal = StudyDal(db)
+        self.series_dal = SeriesDal(db)
+
+    @staticmethod
+    def _study_response(study: Study) -> StudyResponse:
+        return StudyResponse.model_validate(study)
+
+    @staticmethod
+    def _series_response(series: Series) -> SeriesResponse:
+        return SeriesResponse.model_validate(series)
+
+    @staticmethod
+    def _source_study_id(payload: StudyCreate) -> str:
+        if payload.source_study_id:
+            return payload.source_study_id
+        stable = payload.model_dump(mode="json", exclude={"source_study_id"})
+        digest = hashlib.sha256(
+            json.dumps(stable, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return f"generated:{digest[:48]}"
+
+    async def create_study(
+        self, *, payload: StudyCreate, requester_id: str
+    ) -> StudyResponse:
+        session = await self._owned_session(
+            session_id=payload.session_id, requester_id=requester_id
+        )
+        if session.status not in {"open", "processing"}:
+            raise StudyStateConflictError("session_not_accepting_studies")
+
+        source_study_id = self._source_study_id(payload)
+        existing = await self.study_dal.get_by_source(
+            session_id=session.id, source_study_id=source_study_id
+        )
+        values = {
+            "session_id": session.id,
+            "source_study_id": source_study_id,
+            "modality_type": payload.modality_type,
+            "dicom_study_uid": payload.dicom_study_uid,
+            "body_part": payload.body_part,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "revision_no": 1,
+            "revision_id": new_opaque_id(),
+            "revision_reason": "initial",
+            "revision_changed_at": datetime.utcnow(),
+            "expected_image_count": payload.expected_image_count,
+            "expected_manifest_sha256": payload.expected_manifest_sha256,
+            "completeness_status": "unknown",
+            "completeness_attested_by": payload.completeness_attested_by,
+            "identity_status": payload.identity_status,
+            "status": "ingesting",
+            "state_version": 0,
+            "technical_metadata_json": payload.technical_metadata,
+            "acquired_at": payload.acquired_at,
+        }
+        if existing is not None:
+            self._assert_study_match(existing, values)
+            return self._study_response(existing)
+
+        created = await self.study_dal.create_idempotent(values)
+        if created is None:
+            existing = await self.study_dal.get_by_source(
+                session_id=session.id, source_study_id=source_study_id
+            )
+            if existing is None:
+                raise StudyStateConflictError("study_create_race")
+            self._assert_study_match(existing, values)
+            created = existing
+
+        if session.status == "open":
+            updated_session = await self.session_dal.cas_update(
+                session_id=session.id,
+                expected_version=session.state_version,
+                values={"status": "processing"},
+            )
+            if updated_session is None:
+                raise SessionStateConflictError("session_state_conflict")
+        return self._study_response(created)
+
+    async def create_series(
+        self, *, payload: SeriesCreate, requester_id: str
+    ) -> SeriesResponse:
+        study = await self._owned_study(
+            study_id=payload.study_id, requester_id=requester_id
+        )
+        session = await self._owned_session(
+            session_id=study.session_id, requester_id=requester_id
+        )
+        if session.status not in {"open", "processing"} or study.status == "invalid":
+            raise StudyStateConflictError("study_not_accepting_series")
+        values = {
+            "study_id": study.id,
+            "series_key": payload.series_key,
+            "dicom_series_uid": payload.dicom_series_uid,
+            "series_no": payload.series_no,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "expected_image_count": payload.expected_image_count,
+            "actual_image_count": 0,
+            "status": "ingesting",
+            "state_version": 0,
+            "technical_metadata_json": payload.technical_metadata,
+            "acquired_at": payload.acquired_at,
+        }
+        existing = await self.series_dal.get_by_key(
+            study_id=study.id, series_key=payload.series_key
+        )
+        if existing is not None:
+            self._assert_series_match(existing, values)
+            return self._series_response(existing)
+        created = await self.series_dal.create_idempotent(values)
+        if created is None:
+            existing = await self.series_dal.get_by_key(
+                study_id=study.id, series_key=payload.series_key
+            )
+            if existing is None:
+                raise StudyStateConflictError("series_create_race")
+            self._assert_series_match(existing, values)
+            created = existing
+        return self._series_response(created)
+
+    async def get_study(
+        self, *, study_id: str, requester_id: str
+    ) -> StudyDetailResponse:
+        study = await self._owned_study(study_id=study_id, requester_id=requester_id)
+        series = await self.series_dal.list_for_study(study.id)
+        series.sort(
+            key=lambda item: (
+                item.series_no is None,
+                item.series_no if item.series_no is not None else 0,
+                item.series_key,
+            )
+        )
+        return StudyDetailResponse(
+            study=self._study_response(study),
+            series=[self._series_response(item) for item in series],
+        )
+
+    async def _owned_session(self, *, session_id: str, requester_id: str):
+        session = await self.session_dal.get_by_id(session_id.strip())
+        if session is None:
+            raise SessionNotFoundError("session_not_found")
+        if session.requester_id != requester_id.strip():
+            raise SessionAccessDeniedError("session_access_denied")
+        return session
+
+    async def _owned_study(self, *, study_id: str, requester_id: str) -> Study:
+        study = await self.study_dal.get_by_id(study_id.strip())
+        if study is None:
+            raise StudyNotFoundError("study_not_found")
+        await self._owned_session(
+            session_id=study.session_id, requester_id=requester_id
+        )
+        return study
+
+    @staticmethod
+    def _assert_study_match(study: Study, values: dict[str, Any]) -> None:
+        fields = (
+            "session_id",
+            "source_study_id",
+            "modality_type",
+            "dicom_study_uid",
+            "body_part",
+            "metadata_schema_version",
+            "expected_image_count",
+            "expected_manifest_sha256",
+            "completeness_attested_by",
+            "identity_status",
+            "technical_metadata_json",
+            "acquired_at",
+        )
+        if any(getattr(study, field) != values[field] for field in fields):
+            raise StudyIdempotencyConflictError("study_idempotency_conflict")
+
+    @staticmethod
+    def _assert_series_match(series: Series, values: dict[str, Any]) -> None:
+        fields = (
+            "study_id",
+            "series_key",
+            "dicom_series_uid",
+            "series_no",
+            "metadata_schema_version",
+            "expected_image_count",
+            "technical_metadata_json",
+            "acquired_at",
+        )
+        if any(getattr(series, field) != values[field] for field in fields):
+            raise StudyIdempotencyConflictError("series_idempotency_conflict")
+
+
+__all__ = [
+    "SeriesNotFoundError",
+    "StudyAccessDeniedError",
+    "StudyIdempotencyConflictError",
+    "StudyNotFoundError",
+    "StudyService",
+    "StudyServiceError",
+    "StudyStateConflictError",
+]

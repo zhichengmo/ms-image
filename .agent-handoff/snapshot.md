@@ -5,9 +5,9 @@
 - 最后更新：2026-08-18
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前目标：以已冻结的 Canonical XRay Chain（X 光权威主链）开始目标架构重构；先完成有界 P0 核对，再按 P1A -> P1B -> P1C 实施通用影像底座。
-- 当前状态：`p1a_session_implemented / study_series_next`（P1A Session 已实现/下一切片为 Study+Series）
+- 当前状态：`p1a_study_series_implemented / image_next`（P1A Study+Series 已实现/下一切片为 Image）
 - 当前分支：`codex/ms-image-refactor`；所有后续工作按业务 owner 垂直切片提交，每次验证后立即推送并核对远端 SHA，推送失败不得进入下一切片。
-- 下一步：实施 P1A Study+Series Model -> Schema -> StudyDal/SeriesDal -> StudyService；建立 revision/manifest/完整性与 Session processing CAS。
+- 下一步：实施 P1A Image Model -> Schema -> ImageDal -> ImageService；先建立上传/版本/租约事实，随后在 P1C 接入 Gateway 和 validate Outbox/Worker。
 - 活动入口：
   - `docs/refactor/README.md`
   - `docs/refactor/10-xray-detailed-flow.md`
@@ -42,6 +42,7 @@
 - 用户已确认使用 `codex/ms-image-refactor` 和垂直切片提交；每个切片必须独立验证、提交、推送，不 amend/rebase 已推送提交。
 - P0 有界工程核对无 P1A 硬阻断：旧事务内外部 I/O 延后到 P1C 替换；JWT subject/scope、Broker/readiness、启动入口可复用；TraceEvent 在 AuditSink 资格化前保留。
 - P1A Session 已实现：`session_record`、Session Schema、`SessionDal(DalBase)` 和 `SessionService`；依赖子资源事实的 complete/processing cancel 保持 fail-closed，待 Study/Image DAL 到位后闭环。
+- P1A Study+Series 已实现：`study_record/series_record`、Schema、`StudyDal/SeriesDal` 和唯一 `StudyService`；Study 创建与 Session processing CAS 同事务，Image 尚未完成前不伪造 finalize/ready。
 - `AGENT_SESSION_PROMPTS.md` 的“开启新的重构会话”已更新为执行型最终入口：先解决 `.env`/checkpoint，再直接实施 P1A -> P1B -> P1C，并按逐层 I/O 合同验收。
 - 本轮只修改文档和交接状态，没有修改业务代码、数据库、迁移或测试脚本。
 - 本文件是替换式当前快照，不追加旧聊天记录。

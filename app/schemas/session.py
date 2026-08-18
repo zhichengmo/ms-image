@@ -1,22 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.imaging_common import normalize_required_text, normalize_utc_datetime
+
 
 SESSION_STATUSES = frozenset({"open", "processing", "completed", "closed", "cancelled"})
-
-
-def _required_text(value: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError("value_must_not_be_blank")
-    return normalized
-
-
-def _utc_datetime(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("datetime_timezone_required")
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class SessionCreate(BaseModel):
@@ -32,7 +21,7 @@ class SessionCreate(BaseModel):
     @field_validator("source_system", "source_session_id", "subject_id", "request_id")
     @classmethod
     def validate_required_text(cls, value: str) -> str:
-        return _required_text(value)
+        return normalize_required_text(value)
 
     @field_validator("source_medical_record_id")
     @classmethod
@@ -45,7 +34,7 @@ class SessionCreate(BaseModel):
     @field_validator("started_at")
     @classmethod
     def normalize_started_at(cls, value: datetime) -> datetime:
-        return _utc_datetime(value)
+        return normalize_utc_datetime(value)
 
 
 class SessionUpdate(BaseModel):
@@ -62,7 +51,7 @@ class SessionUpdate(BaseModel):
     @field_validator("status")
     @classmethod
     def validate_status(cls, value: str) -> str:
-        normalized = _required_text(value)
+        normalized = normalize_required_text(value)
         if normalized not in SESSION_STATUSES:
             raise ValueError("session_status_invalid")
         return normalized
@@ -70,7 +59,7 @@ class SessionUpdate(BaseModel):
     @field_validator("completed_at", "closed_at", "cancelled_at")
     @classmethod
     def normalize_event_time(cls, value: datetime | None) -> datetime | None:
-        return _utc_datetime(value) if value is not None else None
+        return normalize_utc_datetime(value) if value is not None else None
 
     @field_validator("cancelled_by_id", "cancel_reason")
     @classmethod
@@ -89,7 +78,7 @@ class SessionQuery(BaseModel):
     @field_validator("id")
     @classmethod
     def normalize_id(cls, value: str) -> str:
-        return _required_text(value)
+        return normalize_required_text(value)
 
 
 class SessionResponse(BaseModel):

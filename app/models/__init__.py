@@ -1,5 +1,7 @@
 from .ai_runtime import AiApiConnection, AiConfig, AiModelPool, AiPromptTemplate, GptConfigItem
 from .session import Session
+from .series import Series
+from .study import Study
 from .xray_accuracy.model_call import XRayModelCall
 from .xray_accuracy.outbox import XRayOutbox
 from .xray_accuracy.request_snapshot import XRayRequestSnapshot
@@ -15,5 +17,5 @@ __all__ = [
     "AiApiConnection", "AiConfig", "AiModelPool", "AiPromptTemplate", "GptConfigItem",
     "XRayModelCall", "XRayOutbox", "XRayRequestSnapshot", "XRayRun",
     "XRayStageCheckpoint", "XRayTraceEvent", "XRaySession", "XRaySessionEvent",
-    "XRayStudySnapshot", "XRayImageAsset", "Session",
+    "XRayStudySnapshot", "XRayImageAsset", "Session", "Series", "Study",
 ]
