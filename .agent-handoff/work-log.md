@@ -149,3 +149,9 @@
 - 新增 multipart prepare、part signing、complete-upload；abort 对 multipart 先事务外终止 OSS session，再短事务隔离 Image。
 - initiate/bind 采用补偿语义，DB bind 失败时 best-effort abort；part-manifest SHA 持久化到技术元数据并用于重复 complete 冲突检查。
 - 未创建迁移或测试脚本，未访问真实 DB/OSS/Broker。
+
+## 2026-08-19 — P1B/P1C 原子 Image replace
+
+- 新增 direct replace API；新行继承旧 Series/logical slot/role，使用新 version/generation/key，失败版本不覆盖旧 ready。
+- Worker 终态事务按新 ready、旧 superseded、Series/Study revision CAS 推进；任一步失败由外层事务整体回滚。
+- 未创建迁移或测试脚本，未访问真实 DB/OSS/Broker。

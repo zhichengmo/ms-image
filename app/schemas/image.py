@@ -303,6 +303,53 @@ class ImageCompleteUploadRequest(BaseModel):
         return sorted(value, key=lambda item: item.part_number)
 
 
+class ImageReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    old_image_id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    source_image_id: str | None = Field(default=None, max_length=128)
+    metadata_schema_version: str = Field(min_length=1, max_length=64)
+    file_format: str = Field(min_length=1, max_length=32)
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_size_bytes: int = Field(ge=1, le=MAX_IMAGE_BYTES)
+    declared_content_type: str = Field(min_length=1, max_length=128)
+    technical_metadata: dict[str, Any] | None = None
+
+    @field_validator("old_image_id", "metadata_schema_version")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("source_image_id")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("file_format")
+    @classmethod
+    def validate_format(cls, value: str) -> str:
+        normalized = normalize_required_text(value).lower()
+        if normalized not in QUALIFIED_UPLOAD_FORMATS:
+            raise ValueError("image_format_not_qualified")
+        return normalized
+
+    @field_validator("declared_content_type")
+    @classmethod
+    def normalize_content_type(cls, value: str) -> str:
+        normalized = normalize_required_text(value).casefold()
+        return "image/jpeg" if normalized == "image/jpg" else normalized
+
+    @model_validator(mode="after")
+    def validate_replace_contract(self):
+        if QUALIFIED_CONTENT_TYPES[self.file_format] != self.declared_content_type:
+            raise ValueError("image_format_content_type_mismatch")
+        return self
+
+
 class ImageAbortCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -377,6 +424,7 @@ __all__ = [
     "ImagePreparePartsRequest",
     "ImagePrepareUploadRequest",
     "ImageResponse",
+    "ImageReplaceRequest",
     "ImageSignedPart",
     "ImageUploadTicket",
     "ImageUpdate",

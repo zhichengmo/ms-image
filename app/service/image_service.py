@@ -23,6 +23,7 @@ from app.schemas.image import (
     ImageMultipartPartReceipt,
     ImagePrepareMultipartRequest,
     ImagePrepareUploadRequest,
+    ImageReplaceRequest,
     ImageResponse,
 )
 from app.schemas.outbox import ValidateImageMessage
@@ -378,6 +379,91 @@ class ImageService:
             raise ImageStateConflictError("image_prepare_race")
         self._assert_multipart_prepare_match(latest, payload, profile)
         return self._response(latest)
+
+    async def prepare_direct_replacement(
+        self,
+        *,
+        payload: ImageReplaceRequest,
+        requester_id: str,
+        storage_profile: str,
+        upload_expires_at: datetime,
+    ) -> ImageResponse:
+        old = await self._owned_image(
+            image_id=payload.old_image_id, requester_id=requester_id
+        )
+        if old.status != "ready" or old.state_version != payload.expected_state_version:
+            raise ImageStateConflictError("image_replace_source_conflict")
+        profile = storage_profile.strip()
+        if profile != old.storage_profile:
+            raise ImageStateConflictError("image_storage_profile_conflict")
+        latest = await self.image_dal.get_latest_logical(
+            series_id=old.series_id,
+            logical_image_key=old.logical_image_key,
+        )
+        if latest is not None and latest.id != old.id:
+            if latest.status == "uploading" and latest.supersedes_image_id == old.id:
+                self._assert_replacement_match(latest, old, payload, profile)
+                refreshed = await self.image_dal.refresh_upload_expiry(
+                    image_id=latest.id,
+                    expected_version=latest.state_version,
+                    upload_expires_at=upload_expires_at,
+                )
+                if refreshed is None:
+                    raise ImageStateConflictError("image_replace_prepare_conflict")
+                return self._response(refreshed)
+            if latest.status == "validating" and latest.supersedes_image_id == old.id:
+                raise ImageStateConflictError("image_validation_in_progress")
+            if not (
+                latest.status == "quarantined"
+                and latest.supersedes_image_id == old.id
+            ):
+                raise ImageStateConflictError("image_replace_source_stale")
+        version = max(
+            old.image_version_no,
+            latest.image_version_no if latest is not None else old.image_version_no,
+        ) + 1
+        image_id = new_opaque_id()
+        values: dict[str, Any] = {
+            "id": image_id,
+            "series_id": old.series_id,
+            "source_image_id": payload.source_image_id or old.source_image_id,
+            "logical_image_key": old.logical_image_key,
+            "image_version_no": version,
+            "supersedes_image_id": old.id,
+            "source_manifest_json": old.source_manifest_json,
+            "sequence_no": old.sequence_no,
+            "image_role": old.image_role,
+            "image_kind": old.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": profile,
+            "object_key": OSSObjectStore.new_image_object_key(
+                image_id=image_id,
+                generation=version,
+                file_format=payload.file_format,
+            ),
+            "file_format": payload.file_format,
+            "upload_mode": "direct_put",
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+            "status": "uploading",
+            "state_version": 0,
+            "validation_lease_generation": 0,
+            "validation_attempt_count": 0,
+            "upload_expires_at": upload_expires_at,
+        }
+        created = await self.image_dal.create_idempotent(values)
+        if created is None:
+            latest = await self.image_dal.get_latest_logical(
+                series_id=old.series_id,
+                logical_image_key=old.logical_image_key,
+            )
+            if latest is None or latest.supersedes_image_id != old.id:
+                raise ImageStateConflictError("image_replace_prepare_race")
+            self._assert_replacement_match(latest, old, payload, profile)
+            created = latest
+        return self._response(created)
 
     async def bind_multipart_upload_session(
         self,
@@ -1012,6 +1098,16 @@ class ImageService:
             raise ImageStateConflictError("image_validation_storage_profile_conflict")
         if validation.object_ref.object_key != image.object_key:
             raise ImageStateConflictError("image_validation_object_key_conflict")
+        old_image = None
+        if image.supersedes_image_id:
+            old_image = await self.image_dal.get_by_id(image.supersedes_image_id)
+            if (
+                old_image is None
+                or old_image.status != "ready"
+                or old_image.series_id != image.series_id
+                or old_image.logical_image_key != image.logical_image_key
+            ):
+                raise ImageStateConflictError("image_replace_source_conflict")
         metadata = dict(image.technical_metadata_json or {})
         metadata.update(
             {
@@ -1040,6 +1136,14 @@ class ImageService:
         )
         if updated is None:
             raise ImageStateConflictError("image_validation_lease_lost")
+        if old_image is not None:
+            superseded = await self.image_dal.cas_update(
+                image_id=old_image.id,
+                expected_version=old_image.state_version,
+                values={"status": "superseded"},
+            )
+            if superseded is None:
+                raise ImageStateConflictError("image_replace_source_cas_conflict")
         try:
             await self.study_service.recompute_after_image_change(
                 series_id=claim.series_id,
@@ -1137,6 +1241,33 @@ class ImageService:
             image.upload_mode != "multipart"
             or image.expected_part_count != payload.expected_part_count
         ):
+            raise ImageIdempotencyConflictError("image_idempotency_conflict")
+
+    @staticmethod
+    def _assert_replacement_match(
+        image: Image,
+        old: Image,
+        payload: ImageReplaceRequest,
+        storage_profile: str,
+    ) -> None:
+        expected = {
+            "series_id": old.series_id,
+            "source_image_id": payload.source_image_id or old.source_image_id,
+            "logical_image_key": old.logical_image_key,
+            "supersedes_image_id": old.id,
+            "sequence_no": old.sequence_no,
+            "image_role": old.image_role,
+            "image_kind": old.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": storage_profile,
+            "file_format": payload.file_format,
+            "upload_mode": "direct_put",
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+        }
+        if any(getattr(image, field) != value for field, value in expected.items()):
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
 
     @staticmethod

@@ -22,6 +22,7 @@ from app.schemas.image import (
     ImagePrepareMultipartRequest,
     ImagePreparePartsRequest,
     ImagePrepareUploadRequest,
+    ImageReplaceRequest,
     ImageResponse,
     ImageSignedPart,
     ImageUploadTicket,
@@ -78,6 +79,49 @@ async def prepare_upload(
     except Exception as exc:
         return await rollback_and_map(dependencies.db, exc)
     return GenericResponse(message="Image 上传已准备", data=data)
+
+
+@router.post(
+    "/replace",
+    response_model=GenericResponse[ImageUploadTicket],
+    status_code=status.HTTP_201_CREATED,
+)
+async def replace_image(
+    payload: ImageReplaceRequest,
+    context: dict = Depends(resource_context),
+    dependencies: ImageStorageDependencies = Depends(get_image_storage_dependencies),
+):
+    try:
+        gateway = dependencies.gateway_factory()
+        ttl_seconds = int(settings.OSS_SIGNED_URL_TTL_SECONDS)
+        if ttl_seconds < 1:
+            raise ObjectStoreError("object_signed_url_ttl_invalid")
+        expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+        async with dependencies.db.begin():
+            image = await dependencies.service.prepare_direct_replacement(
+                payload=payload,
+                requester_id=context["subject"],
+                storage_profile=gateway.storage_profile,
+                upload_expires_at=expires_at,
+            )
+        grant = await gateway.prepare_direct_upload(
+            object_key=image.object_key,
+            content_type=payload.declared_content_type,
+            expires_seconds=ttl_seconds,
+        )
+        if grant.object_key != image.object_key or grant.upload_mode != "direct_put":
+            raise ObjectStoreError("object_upload_grant_identity_conflict")
+        data = ImageUploadTicket(
+            image=image,
+            generation=image.image_version_no,
+            upload_mode="direct_put",
+            required_headers=grant.required_headers,
+            expires_at=expires_at,
+            signed_url=grant.signed_url,
+        )
+    except Exception as exc:
+        return await rollback_and_map(dependencies.db, exc)
+    return GenericResponse(message="Image 替换上传已准备", data=data)
 
 
 @router.post(

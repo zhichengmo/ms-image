@@ -21,6 +21,8 @@
 - [x] P1C Image reconcile：已恢复 expired validating lease 和到期 validation event；过期 upload 有对象时补建 validating+Outbox、无对象时隔离；指定 ready Image 可执行完整漂移核查并原子失效 Study revision。
 - [x] P1B/P1C direct prepare API：已由服务端生成 Image ID/version/object key，短事务创建 uploading Image，事务外生成 direct PUT grant；相同 uploading 载荷幂等返回并刷新 expiry。
 - [x] P1B/P1C multipart/complete/abort API：已实现事务外 initiate/sign/complete/abort/HEAD，短事务绑定 upload session 或执行 uploading->validating+Outbox；part manifest SHA 防止重复 complete 漂移。
+- [x] P1B/P1C Image replace：已创建新 version/key 并绑定 supersedes；Worker 同事务完成新 ready、旧 superseded 和 Study revision CAS，失败保留旧 ready。
+- [ ] P1B Study finalize：当前 revision 上验证 owner、identity、count/manifest/quarantine/conflict 后 CAS completeness/status/ready_at，不创建 Task。
 - [ ] P1C 代码完成后按授权如实标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不得提前通过 G4。
 - [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。
 - [ ] P2 复用 P1C 的同一 Outbox/Relay，实现 Task + first Stage + Outbox 原子事务和零模型 replay。
