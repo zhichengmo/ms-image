@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.admin_v1.endpoints.control_plane_errors import (
     rollback_and_map_control_plane,
 )
-from app.api.deps import require_control_plane_scope
+from app.api.deps import require_control_plane_any_scope, require_control_plane_scope
 from app.core.async_db import (
     get_evaluation_async_session,
     get_explicit_evaluation_transaction_session,
@@ -34,7 +34,11 @@ from app.service.evaluation_service import EvaluationService
 
 
 router = APIRouter(prefix="/evaluation", tags=["Evaluation ControlPlane"])
-control = require_control_plane_scope(settings.EVALUATION_REQUIRED_SCOPE)
+control_read = require_control_plane_any_scope(
+    settings.EVALUATION_READ_SCOPE,
+    settings.EVALUATION_WRITE_SCOPE,
+)
+control_write = require_control_plane_scope(settings.EVALUATION_WRITE_SCOPE)
 
 
 async def get_service(
@@ -68,7 +72,7 @@ async def get_export_dependencies(
 )
 async def create_job(
     payload: EvaluationJobCreate,
-    context: ControlPlaneContext = Depends(control),
+    context: ControlPlaneContext = Depends(control_write),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -86,7 +90,7 @@ async def create_job(
 )
 async def export_job(
     payload: EvaluationExportJobCreate,
-    context: ControlPlaneContext = Depends(control),
+    context: ControlPlaneContext = Depends(control_write),
     dependencies: EvaluationExportDependencies = Depends(get_export_dependencies),
 ):
     service = EvaluationExportService(
@@ -108,7 +112,7 @@ async def export_job(
 @router.get("/jobs", response_model=GenericResponse[EvaluationJobResponse])
 async def get_job(
     job_id: str = Query(..., alias="id", min_length=1, max_length=64),
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_read),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -122,7 +126,7 @@ async def get_job(
 @router.post("/jobs/cancel", response_model=GenericResponse[EvaluationJobResponse])
 async def cancel_job(
     payload: EvaluationJobStateRequest,
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_write),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -136,7 +140,7 @@ async def cancel_job(
 @router.post("/runs", response_model=GenericResponse[EvaluationRunResponse])
 async def create_run(
     payload: EvaluationRunCreate,
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_write),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -150,7 +154,7 @@ async def create_run(
 @router.get("/runs", response_model=GenericResponse[list[EvaluationRunResponse]])
 async def list_runs(
     job_id: str = Query(..., min_length=1, max_length=64),
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_read),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -164,7 +168,7 @@ async def list_runs(
 @router.get("/runs/detail", response_model=GenericResponse[EvaluationRunResponse])
 async def get_run(
     run_id: str = Query(..., alias="id", min_length=1, max_length=64),
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_read),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -181,7 +185,7 @@ async def get_run(
 )
 async def list_artifacts(
     job_id: str = Query(..., min_length=1, max_length=64),
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_read),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):
@@ -198,7 +202,7 @@ async def list_artifacts(
 )
 async def get_artifact(
     artifact_id: str = Query(..., alias="id", min_length=1, max_length=64),
-    _: ControlPlaneContext = Depends(control),
+    _: ControlPlaneContext = Depends(control_read),
     service: EvaluationService = Depends(get_service),
     db: AsyncSession = Depends(get_evaluation_async_session),
 ):

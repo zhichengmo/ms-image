@@ -261,6 +261,19 @@ def require_control_plane_scope(*required_scopes: str):
     return dependency
 
 
+def require_control_plane_any_scope(*allowed_scopes: str):
+    scopes = frozenset(scope for scope in allowed_scopes if scope)
+    if not scopes:
+        raise ValueError("control_plane_scope_required")
+
+    def dependency(context: ControlPlaneContext = Depends(get_control_plane_context)) -> ControlPlaneContext:
+        if context.scopes.isdisjoint(scopes):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient control-plane scope")
+        return context
+
+    return dependency
+
+
 def require_resource_scope(*required_scopes: str):
     scopes = tuple(required_scopes)
 
@@ -422,7 +435,7 @@ def ms_api_key_verified(
         decrypted_data = rsa.decrypt(base64.b64decode(authorization), private_key).decode()
         decrypted_json = json.loads(decrypted_data)
         key_time = int(decrypted_json['timestamp'])
-    except:
+    except Exception:
         raise HTTPException(
             status_code=401,
             detail='Invalid API key'
