@@ -4,6 +4,8 @@ from .outbox import Outbox
 from .session import Session
 from .series import Series
 from .study import Study
+from .task import Task
+from .stage_checkpoint import StageCheckpoint
 from .xray_accuracy.model_call import XRayModelCall
 from .xray_accuracy.outbox import XRayOutbox
 from .xray_accuracy.request_snapshot import XRayRequestSnapshot
@@ -19,5 +21,5 @@ __all__ = [
     "AiApiConnection", "AiConfig", "AiModelPool", "AiPromptTemplate", "GptConfigItem",
     "XRayModelCall", "XRayOutbox", "XRayRequestSnapshot", "XRayRun",
     "XRayStageCheckpoint", "XRayTraceEvent", "XRaySession", "XRaySessionEvent",
-    "XRayStudySnapshot", "XRayImageAsset", "Image", "Outbox", "Session", "Series", "Study",
+    "XRayStudySnapshot", "XRayImageAsset", "Image", "Outbox", "Session", "Series", "Study", "Task", "StageCheckpoint",
 ]
