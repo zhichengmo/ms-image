@@ -143,3 +143,9 @@
 - DB 短事务提交 uploading Image 后才调用 Gateway 生成 direct PUT grant；签名失败保留可幂等重试的 uploading 事实。
 - 相同 uploading 载荷复用行并刷新 expiry；载荷漂移冲突，validating 不重签，ready logical key 必须使用 replace。
 - 首期仅允许 DICOM/JPEG/PNG 且不超过 64 MiB；未创建迁移或测试脚本，未访问真实 DB/OSS。
+
+## 2026-08-19 — P1B/P1C multipart、complete 与 abort API
+
+- 新增 multipart prepare、part signing、complete-upload；abort 对 multipart 先事务外终止 OSS session，再短事务隔离 Image。
+- initiate/bind 采用补偿语义，DB bind 失败时 best-effort abort；part-manifest SHA 持久化到技术元数据并用于重复 complete 冲突检查。
+- 未创建迁移或测试脚本，未访问真实 DB/OSS/Broker。

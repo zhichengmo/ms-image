@@ -225,6 +225,41 @@ class ImageDal(DalBase):
             v_expire_all=True,
         )
 
+    async def bind_multipart_upload_session(
+        self,
+        *,
+        image_id: str,
+        expected_version: int,
+        upload_session_ref: str,
+        upload_expires_at: datetime,
+    ) -> Image | None:
+        reference = upload_session_ref.strip()
+        if not reference or len(reference) > 256:
+            raise ValueError("multipart_upload_session_invalid")
+        bound = await self.conditional_update(
+            v_where=[
+                self.model.id == image_id,
+                self.model.status == "uploading",
+                self.model.state_version == expected_version,
+                self.model.upload_mode == "multipart",
+                or_(
+                    self.model.upload_session_ref.is_(None),
+                    self.model.upload_session_ref == reference,
+                ),
+            ],
+            data={
+                "upload_session_ref": reference,
+                "upload_expires_at": upload_expires_at,
+            },
+        )
+        if not bound:
+            return None
+        return await self.get_data(
+            data_id=image_id,
+            v_return_none=True,
+            v_expire_all=True,
+        )
+
     async def heartbeat_validation_lease(
         self,
         *,

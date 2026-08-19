@@ -4,7 +4,13 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.imaging.object_store import OSSObjectStore, ObjectHead, ObjectValidation
+from app.core.imaging.object_store import (
+    MultipartPart,
+    OSSObjectStore,
+    ObjectHead,
+    ObjectValidation,
+)
+from app.core.imaging.manifest import canonical_json_bytes
 from app.crud.image import ImageDal
 from app.crud.outbox import OutboxDal
 from app.crud.series import SeriesDal
@@ -12,7 +18,13 @@ from app.crud.session import SessionDal
 from app.crud.study import StudyDal
 from app.models.image import Image
 from app.models.imaging_base import new_opaque_id
-from app.schemas.image import ImageCreate, ImagePrepareUploadRequest, ImageResponse
+from app.schemas.image import (
+    ImageCreate,
+    ImageMultipartPartReceipt,
+    ImagePrepareMultipartRequest,
+    ImagePrepareUploadRequest,
+    ImageResponse,
+)
 from app.schemas.outbox import ValidateImageMessage
 from app.service.session_service import SessionAccessDeniedError, SessionNotFoundError
 from app.service.study_service import StudyService, StudyStateConflictError
@@ -73,6 +85,20 @@ class ImageObjectCandidate:
     declared_content_type: str | None
     expected_sha256: str | None
     expected_size_bytes: int | None
+
+
+@dataclass(frozen=True)
+class ImageUploadOperationCandidate:
+    image_id: str
+    state_version: int
+    generation: int
+    status: str
+    storage_profile: str
+    object_key: str
+    upload_mode: str
+    upload_session_ref: str | None
+    expected_part_count: int | None
+    declared_content_type: str | None
 
 
 class ImageService:
@@ -258,14 +284,258 @@ class ImageService:
         self._assert_prepare_match(latest, payload, profile)
         return self._response(latest)
 
+    async def prepare_multipart_upload(
+        self,
+        *,
+        payload: ImagePrepareMultipartRequest,
+        requester_id: str,
+        storage_profile: str,
+        upload_expires_at: datetime,
+    ) -> ImageResponse:
+        profile = storage_profile.strip()
+        if not profile or len(profile) > 40:
+            raise ImageStateConflictError("image_storage_profile_invalid")
+        series = await self.series_dal.get_by_id(payload.series_id)
+        if series is None:
+            raise ImageNotFoundError("series_not_found")
+        study = await self.study_dal.get_by_id(series.study_id)
+        if study is None:
+            raise ImageNotFoundError("study_not_found")
+        session = await self._owned_session(
+            session_id=study.session_id, requester_id=requester_id
+        )
+        if session.status != "processing" or study.status == "invalid":
+            raise ImageStateConflictError("study_not_accepting_images")
+        try:
+            current_ready = await self.image_dal.get_ready_logical(
+                series_id=series.id,
+                logical_image_key=payload.logical_image_key,
+            )
+        except ValueError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        if current_ready is not None:
+            raise ImageStateConflictError("image_replace_required")
+        latest = await self.image_dal.get_latest_logical(
+            series_id=series.id,
+            logical_image_key=payload.logical_image_key,
+        )
+        if latest is not None and latest.status == "uploading":
+            self._assert_multipart_prepare_match(latest, payload, profile)
+            refreshed = await self.image_dal.refresh_upload_expiry(
+                image_id=latest.id,
+                expected_version=latest.state_version,
+                upload_expires_at=upload_expires_at,
+            )
+            if refreshed is None:
+                raise ImageStateConflictError("image_prepare_conflict")
+            return self._response(refreshed)
+        if latest is not None and latest.status == "validating":
+            raise ImageStateConflictError("image_validation_in_progress")
+
+        image_version_no = 1 if latest is None else latest.image_version_no + 1
+        image_id = new_opaque_id()
+        object_key = OSSObjectStore.new_image_object_key(
+            image_id=image_id,
+            generation=image_version_no,
+            file_format=payload.file_format,
+        )
+        values: dict[str, Any] = {
+            "id": image_id,
+            "series_id": series.id,
+            "source_image_id": payload.source_image_id,
+            "logical_image_key": payload.logical_image_key,
+            "image_version_no": image_version_no,
+            "supersedes_image_id": None,
+            "source_manifest_json": payload.source_manifest,
+            "sequence_no": payload.sequence_no,
+            "image_role": payload.image_role,
+            "image_kind": payload.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": profile,
+            "object_key": object_key,
+            "file_format": payload.file_format,
+            "upload_mode": "multipart",
+            "upload_session_ref": None,
+            "expected_part_count": payload.expected_part_count,
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+            "status": "uploading",
+            "state_version": 0,
+            "validation_lease_generation": 0,
+            "validation_attempt_count": 0,
+            "upload_expires_at": upload_expires_at,
+        }
+        created = await self.image_dal.create_idempotent(values)
+        if created is not None:
+            return self._response(created)
+        latest = await self.image_dal.get_latest_logical(
+            series_id=series.id,
+            logical_image_key=payload.logical_image_key,
+        )
+        if latest is None or latest.status != "uploading":
+            raise ImageStateConflictError("image_prepare_race")
+        self._assert_multipart_prepare_match(latest, payload, profile)
+        return self._response(latest)
+
+    async def bind_multipart_upload_session(
+        self,
+        *,
+        image_id: str,
+        requester_id: str,
+        expected_state_version: int,
+        generation: int | None,
+        upload_session_ref: str,
+        upload_expires_at: datetime,
+    ) -> ImageResponse:
+        image = await self._owned_image(image_id=image_id, requester_id=requester_id)
+        self._validate_upload_operation(
+            image=image,
+            expected_state_version=expected_state_version,
+            generation=generation,
+            required_mode="multipart",
+        )
+        if image.upload_session_ref:
+            if image.upload_session_ref != upload_session_ref:
+                raise ImageStateConflictError("multipart_upload_session_conflict")
+            return self._response(image)
+        updated = await self.image_dal.bind_multipart_upload_session(
+            image_id=image.id,
+            expected_version=expected_state_version,
+            upload_session_ref=upload_session_ref,
+            upload_expires_at=upload_expires_at,
+        )
+        if updated is None:
+            raise ImageStateConflictError("multipart_upload_bind_conflict")
+        return self._response(updated)
+
+    async def get_upload_operation_candidate(
+        self,
+        *,
+        image_id: str,
+        requester_id: str,
+        expected_state_version: int,
+        generation: int | None,
+        operation: str,
+    ) -> ImageUploadOperationCandidate:
+        image = await self._owned_image(image_id=image_id, requester_id=requester_id)
+        if generation is not None and image.image_version_no != generation:
+            raise ImageStateConflictError("image_generation_conflict")
+        if operation == "parts":
+            if generation is None:
+                raise ImageStateConflictError("image_generation_required")
+            self._validate_upload_operation(
+                image=image,
+                expected_state_version=expected_state_version,
+                generation=generation,
+                required_mode="multipart",
+            )
+            if not image.upload_session_ref:
+                raise ImageStateConflictError("multipart_upload_session_missing")
+        elif operation == "multipart_prepare":
+            if generation is None:
+                raise ImageStateConflictError("image_generation_required")
+            self._validate_upload_operation(
+                image=image,
+                expected_state_version=expected_state_version,
+                generation=generation,
+                required_mode="multipart",
+            )
+        elif operation == "complete":
+            if generation is None:
+                raise ImageStateConflictError("image_generation_required")
+            if image.status == "uploading":
+                if image.state_version != expected_state_version:
+                    raise ImageStateConflictError("image_upload_state_conflict")
+                if image.upload_mode == "multipart" and not image.upload_session_ref:
+                    raise ImageStateConflictError("multipart_upload_session_missing")
+            elif image.status == "validating":
+                if image.state_version != expected_state_version + 1:
+                    raise ImageStateConflictError("image_complete_conflict")
+            else:
+                raise ImageStateConflictError("image_complete_conflict")
+        elif operation == "abort":
+            if image.status != "uploading" or image.state_version != expected_state_version:
+                raise ImageStateConflictError("image_abort_conflict")
+        else:
+            raise ImageStateConflictError("image_upload_operation_invalid")
+        if image.state_version not in {expected_state_version, expected_state_version + 1}:
+            raise ImageStateConflictError("image_upload_state_conflict")
+        return ImageUploadOperationCandidate(
+            image_id=image.id,
+            state_version=image.state_version,
+            generation=image.image_version_no,
+            status=image.status,
+            storage_profile=image.storage_profile,
+            object_key=image.object_key,
+            upload_mode=image.upload_mode,
+            upload_session_ref=image.upload_session_ref,
+            expected_part_count=image.expected_part_count,
+            declared_content_type=image.declared_content_type,
+        )
+
+    @staticmethod
+    def validate_multipart_part_numbers(
+        candidate: ImageUploadOperationCandidate, part_numbers: list[int]
+    ) -> list[int]:
+        expected = candidate.expected_part_count
+        if candidate.upload_mode != "multipart" or expected is None:
+            raise ImageStateConflictError("multipart_upload_contract_missing")
+        if any(number < 1 or number > expected for number in part_numbers):
+            raise ImageStateConflictError("multipart_part_number_invalid")
+        return sorted(part_numbers)
+
+    @staticmethod
+    def build_multipart_completion_parts(
+        candidate: ImageUploadOperationCandidate,
+        receipts: list[ImageMultipartPartReceipt] | None,
+    ) -> list[MultipartPart]:
+        if candidate.upload_mode == "direct_put":
+            if receipts:
+                raise ImageStateConflictError("direct_upload_parts_forbidden")
+            return []
+        if candidate.upload_mode != "multipart" or candidate.expected_part_count is None:
+            raise ImageStateConflictError("multipart_upload_contract_missing")
+        if not receipts or len(receipts) != candidate.expected_part_count:
+            raise ImageStateConflictError("multipart_part_count_mismatch")
+        numbers = [item.part_number for item in receipts]
+        if numbers != list(range(1, candidate.expected_part_count + 1)):
+            raise ImageStateConflictError("multipart_part_manifest_invalid")
+        return [
+            MultipartPart(
+                part_number=item.part_number,
+                etag=item.etag,
+                size_bytes=item.size_bytes,
+            )
+            for item in receipts
+        ]
+
+    @staticmethod
+    def multipart_manifest_sha256(parts: list[MultipartPart]) -> str:
+        import hashlib
+
+        manifest = [
+            {
+                "part_number": item.part_number,
+                "etag": item.etag,
+                "size_bytes": item.size_bytes,
+            }
+            for item in parts
+        ]
+        return hashlib.sha256(canonical_json_bytes(manifest)).hexdigest()
+
     async def abort_upload(
         self,
         *,
         image_id: str,
         requester_id: str,
         expected_state_version: int,
+        generation: int | None = None,
     ) -> ImageResponse:
         image = await self._owned_image(image_id=image_id, requester_id=requester_id)
+        if generation is not None and image.image_version_no != generation:
+            raise ImageStateConflictError("image_generation_conflict")
         if image.status == "quarantined" and image.error_code == "upload_aborted":
             return self._response(image)
         if image.status != "uploading" or image.state_version != expected_state_version:
@@ -292,6 +562,7 @@ class ImageService:
         expected_state_version: int,
         object_head: ObjectHead,
         trace_id: str,
+        multipart_manifest_sha256: str | None = None,
     ) -> ImageResponse:
         image = await self._owned_image(image_id=image_id, requester_id=requester_id)
         return await self._accept_upload_complete_for_image(
@@ -299,6 +570,7 @@ class ImageService:
             expected_state_version=expected_state_version,
             object_head=object_head,
             trace_id=trace_id,
+            multipart_manifest_sha256=multipart_manifest_sha256,
         )
 
     async def accept_reconciled_upload(
@@ -308,6 +580,7 @@ class ImageService:
         expected_state_version: int,
         object_head: ObjectHead,
         trace_id: str,
+        multipart_manifest_sha256: str | None = None,
     ) -> ImageResponse:
         image = await self.image_dal.get_by_id(image_id.strip())
         if image is None:
@@ -317,6 +590,7 @@ class ImageService:
             expected_state_version=expected_state_version,
             object_head=object_head,
             trace_id=trace_id,
+            multipart_manifest_sha256=multipart_manifest_sha256,
         )
 
     async def _accept_upload_complete_for_image(
@@ -326,13 +600,26 @@ class ImageService:
         expected_state_version: int,
         object_head: ObjectHead,
         trace_id: str,
+        multipart_manifest_sha256: str | None,
     ) -> ImageResponse:
         self._validate_head(image, object_head)
+        if image.upload_mode == "multipart" and multipart_manifest_sha256 is not None:
+            if len(multipart_manifest_sha256) != 64:
+                raise ImageStateConflictError("multipart_manifest_sha256_invalid")
+        elif image.upload_mode != "multipart" and multipart_manifest_sha256 is not None:
+            raise ImageStateConflictError("direct_upload_manifest_forbidden")
         if image.status == "validating":
             if image.state_version != expected_state_version + 1:
                 raise ImageStateConflictError("image_complete_conflict")
             if image.object_version_id != object_head.object_version_id:
                 raise ImageStateConflictError("image_object_version_conflict")
+            stored_manifest = (image.technical_metadata_json or {}).get(
+                "multipart_manifest_sha256"
+            )
+            if multipart_manifest_sha256 is not None and (
+                stored_manifest != multipart_manifest_sha256
+            ):
+                raise ImageStateConflictError("multipart_manifest_conflict")
             event_key = f"image:{image.id}:validate:{image.state_version}"
             existing = await self.outbox_dal.get_by_event_key(event_key)
             if existing is None:
@@ -344,6 +631,11 @@ class ImageService:
             return self._response(image)
         if image.status != "uploading" or image.state_version != expected_state_version:
             raise ImageStateConflictError("image_complete_conflict")
+        technical_metadata = dict(image.technical_metadata_json or {})
+        if multipart_manifest_sha256 is not None:
+            technical_metadata["multipart_manifest_sha256"] = (
+                multipart_manifest_sha256
+            )
         updated = await self.image_dal.cas_update(
             image_id=image.id,
             expected_version=expected_state_version,
@@ -351,6 +643,7 @@ class ImageService:
                 "status": "validating",
                 "object_version_id": object_head.object_version_id,
                 "upload_session_ref": None,
+                "technical_metadata_json": technical_metadata,
                 "next_validation_at": datetime.utcnow(),
                 "error_code": None,
             },
@@ -809,6 +1102,7 @@ class ImageService:
         image: Image,
         payload: ImagePrepareUploadRequest,
         storage_profile: str,
+        upload_mode: str = "direct_put",
     ) -> None:
         expected = {
             "series_id": payload.series_id,
@@ -821,7 +1115,7 @@ class ImageService:
             "metadata_schema_version": payload.metadata_schema_version,
             "storage_profile": storage_profile,
             "file_format": payload.file_format,
-            "upload_mode": "direct_put",
+            "upload_mode": upload_mode,
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
@@ -829,6 +1123,36 @@ class ImageService:
         }
         if any(getattr(image, field) != value for field, value in expected.items()):
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
+
+    @staticmethod
+    def _assert_multipart_prepare_match(
+        image: Image,
+        payload: ImagePrepareMultipartRequest,
+        storage_profile: str,
+    ) -> None:
+        ImageService._assert_prepare_match(
+            image, payload, storage_profile, upload_mode="multipart"
+        )
+        if (
+            image.upload_mode != "multipart"
+            or image.expected_part_count != payload.expected_part_count
+        ):
+            raise ImageIdempotencyConflictError("image_idempotency_conflict")
+
+    @staticmethod
+    def _validate_upload_operation(
+        *,
+        image: Image,
+        expected_state_version: int,
+        generation: int,
+        required_mode: str,
+    ) -> None:
+        if image.image_version_no != generation:
+            raise ImageStateConflictError("image_generation_conflict")
+        if image.upload_mode != required_mode:
+            raise ImageStateConflictError("image_upload_mode_conflict")
+        if image.status != "uploading" or image.state_version != expected_state_version:
+            raise ImageStateConflictError("image_upload_state_conflict")
 
     @staticmethod
     def _validate_head(image: Image, head: ObjectHead) -> None:
@@ -870,4 +1194,5 @@ __all__ = [
     "ImageValidationClaim",
     "ImageValidationEventCandidate",
     "ImageObjectCandidate",
+    "ImageUploadOperationCandidate",
 ]

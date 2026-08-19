@@ -361,9 +361,16 @@ class OSSObjectStore:
     ) -> None:
         object_key = validate_object_key(object_key)
         upload_id = _validate_upload_session_ref(upload_session_ref)
-        await asyncio.to_thread(
-            self._bucket.abort_multipart_upload, object_key, upload_id
-        )
+
+        def _abort() -> None:
+            try:
+                self._bucket.abort_multipart_upload(object_key, upload_id)
+            except oss2.exceptions.NoSuchUpload:
+                return
+            except oss2.exceptions.OssError as exc:
+                raise ObjectStoreError("multipart_abort_failed") from exc
+
+        await asyncio.to_thread(_abort)
 
     async def head_object(self, *, object_key: str) -> ObjectHead:
         object_key = validate_object_key(object_key)

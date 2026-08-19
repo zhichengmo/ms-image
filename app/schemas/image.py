@@ -197,6 +197,10 @@ class ImagePrepareUploadRequest(BaseModel):
         return self
 
 
+class ImagePrepareMultipartRequest(ImagePrepareUploadRequest):
+    expected_part_count: int = Field(ge=1, le=10000)
+
+
 class ImageUploadTicket(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -208,11 +212,103 @@ class ImageUploadTicket(BaseModel):
     signed_url: str = Field(repr=False)
 
 
+class ImageMultipartUploadTicket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    image: "ImageResponse"
+    generation: int = Field(ge=1)
+    upload_mode: str
+    required_headers: dict[str, str]
+    expires_at: datetime
+    upload_session_ref: str = Field(min_length=1, max_length=256, repr=False)
+
+
+class ImagePreparePartsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    generation: int = Field(ge=1)
+    part_numbers: list[int] = Field(min_length=1, max_length=1000)
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("part_numbers")
+    @classmethod
+    def validate_parts(cls, value: list[int]) -> list[int]:
+        if any(item < 1 or item > 10000 for item in value):
+            raise ValueError("multipart_part_number_invalid")
+        if len(set(value)) != len(value):
+            raise ValueError("multipart_part_number_duplicate")
+        return sorted(value)
+
+
+class ImageSignedPart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    part_number: int = Field(ge=1)
+    signed_url: str = Field(repr=False)
+
+
+class ImageMultipartPartsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    generation: int = Field(ge=1)
+    parts: list[ImageSignedPart]
+
+
+class ImageMultipartPartReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    part_number: int = Field(ge=1, le=10000)
+    etag: str = Field(min_length=1, max_length=256)
+    size_bytes: int | None = Field(default=None, ge=1)
+
+    @field_validator("etag")
+    @classmethod
+    def normalize_etag(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
+class ImageCompleteUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    generation: int = Field(ge=1)
+    trace_id: str = Field(min_length=1, max_length=128)
+    parts: list[ImageMultipartPartReceipt] | None = Field(
+        default=None, max_length=10000
+    )
+
+    @field_validator("id", "trace_id")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("parts")
+    @classmethod
+    def validate_part_receipts(
+        cls, value: list[ImageMultipartPartReceipt] | None
+    ) -> list[ImageMultipartPartReceipt] | None:
+        if value is None:
+            return None
+        numbers = [item.part_number for item in value]
+        if len(set(numbers)) != len(numbers):
+            raise ValueError("multipart_part_number_duplicate")
+        return sorted(value, key=lambda item: item.part_number)
+
+
 class ImageAbortCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1, max_length=64)
     expected_state_version: int = Field(ge=0)
+    generation: int | None = Field(default=None, ge=1)
 
     @field_validator("id")
     @classmethod
@@ -272,9 +368,16 @@ __all__ = [
     "QUALIFIED_UPLOAD_FORMATS",
     "UPLOAD_MODES",
     "ImageAbortCommand",
+    "ImageCompleteUploadRequest",
     "ImageCreate",
+    "ImageMultipartPartReceipt",
+    "ImageMultipartPartsResponse",
+    "ImageMultipartUploadTicket",
+    "ImagePrepareMultipartRequest",
+    "ImagePreparePartsRequest",
     "ImagePrepareUploadRequest",
     "ImageResponse",
+    "ImageSignedPart",
     "ImageUploadTicket",
     "ImageUpdate",
 ]

@@ -112,6 +112,8 @@
 | 2026-08-18 | P1B direct prepare 事务边界 | `passed in memory` | fake DB/Gateway 断言 Service 创建行时 TX 活跃、生成 signed PUT grant 时 TX 为 0 |
 | 2026-08-18 | P1B direct prepare 幂等/owner | `passed in memory` | 服务端生成 `image/{image_id}/{version}/source.png`；同 uploading 载荷返回同 ID/key，载荷变化冲突，ready logical key 要求 replace |
 | 2026-08-18 | P1B direct prepare 安全门禁 | `passed in memory` | signed URL 从 repr 隐藏且无持久化字段；MP4 和超过 64 MiB 请求在 Schema 层 fail closed |
+| 2026-08-19 | P1B multipart/complete/abort | `passed in memory` | fake DB/Gateway 覆盖 initiate、part signing、complete、abort、bind 失败补偿；全部 OSS I/O 在 TX 外，part/session URL 从 repr 隐藏 |
+| 2026-08-19 | P1B multipart 幂等合同 | `passed in memory` | 规范 part-manifest SHA 写入技术元数据；重复 complete 的 manifest 漂移被拒；NoSuchUpload abort 幂等成功 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 
