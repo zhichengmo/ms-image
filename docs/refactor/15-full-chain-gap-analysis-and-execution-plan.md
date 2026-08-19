@@ -4,7 +4,7 @@
 
 日期：2026-08-19
 
-代码基线：`1a0646d80a39989beb8f82edde51ffc3bd823d80`
+代码基线：`836e72efacdf75af15c6be7dcc5f1af07d96ba01`
 
 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 
@@ -57,10 +57,10 @@ Service -> ObjectStorageGateway/Broker/Provider（数据库事务外）
 | 维度 | 当前完成度 | 说明 |
 |---|---:|---|
 | 核心功能代码 | 约 85% | 在线链、Report、Exporter、Evaluation Worker/Scorer 已实现 |
-| 跨模块工程集成 | 约 82% | provider-disabled 组合 fake 与双 DB/双 queue readiness 已通过，指标、权限和真实环境仍缺 |
+| 跨模块工程集成 | 约 85% | provider-disabled 组合 fake、双 DB/双 queue readiness、Operational Status 与 Evaluation read/write scope 已通过，告警和真实环境仍缺 |
 | 真实运行资格 | 约 35% | 未迁移、未连接真实 DB/OSS/Broker |
 | 医学发布资格 | 约 15% | 无 trusted Gold、真实 Provider、Holdout 与审批 |
-| 综合完成度 | 约 70% | 组合链与 Evaluation readiness 通过后按工程、运行和医学门禁重新加权 |
+| 综合完成度 | 约 72% | 组合链、运行状态聚合和基础 scope 矩阵通过后按工程、运行和医学门禁重新加权 |
 
 ---
 
@@ -273,12 +273,18 @@ Evaluation readiness 基础已在提交 `1a0646d` 完成：
 - 工程 readiness 不再被真实 Provider qualification 错误绑死。
 - `/health` 和 `/version` 已改为 MS-Image 文案。
 
+已完成的运行指标：
+
+- `/api/v1/operations/status`：在线 Outbox、Stage、AI Call、Report、Evaluation Job/Outbox/Run 的聚合 counts、expired lease 和 oldest active age。
+- Evaluation metrics 聚合：missing row、coverage loss、technical failure、invalid comparison、Artifact drift。
+- readiness 中的 Imaging/Evaluation queue message depth、DLQ depth 和 consumer count。
+- RabbitMQ AMQP 不支持可靠 oldest-message age 时显式输出 `oldest_message_age_supported=false`，不伪造数值。
+
 仍缺：
 
-- Relay lease age/stuck Job 指标。
-- Imaging/Evaluation DLQ depth 和 oldest-message age。
-- missing row、invalid comparison、Artifact drift 计数和告警。
-- Prometheus/OpenTelemetry 或现有指标平台接入。
+- 指标平台/告警规则（Prometheus/OpenTelemetry 或现有平台）。
+- Relay lease age/stuck Job 的阈值与告警路由。
+- missing/invalid/Artifact drift 的阈值、通知和 Runbook。
 - Evaluation Worker graceful shutdown、并发和滚动升级 readiness。
 
 ### 6.3 API 与权限缺口
@@ -615,10 +621,14 @@ Phase 1 只证明 provider-disabled 工程闭环，不证明真实 Provider 或�
 | 工程/医学 readiness 正交 | `PASSED` | Provider 未资格化时工程链可 ready，`medical_provider_ready=false` |
 | API-only 语义 | `PASSED` | Broker disabled 时 `service_mode=api_only` 且 top-level worker ready=false |
 | health/version 文案 | `PASSED` | 已改为 MS-Image |
-| 运行指标与告警 | `PENDING` | 下一执行切片 |
-| scope/权限矩阵 | `PENDING` | Phase 2 后续切片 |
+| Operational Status 聚合 | `PASSED` | `d4082ad`：counts、lease、run metrics、Artifact drift |
+| Broker queue/DLQ/consumer depth | `PASSED` | `c8e9ad2`：AMQP depth；oldest age 明确不支持 |
+| Evaluation read/write scope | `PASSED` | `836e72e`：read 或 write 可读、仅 write 可变更、Admin operations 独立 |
+| 告警出口与阈值 | `PENDING` | 需要接入指标平台/Runbook |
+| 越权“不存在”跨 DB 回归 | `PENDING` | Phase 2 后续切片 |
+| Worker graceful shutdown/rolling upgrade | `PENDING` | Phase 2 后续切片 |
 
-提交：`1a0646d80a39989beb8f82edde51ffc3bd823d80`。
+提交：`1a0646d80a39989beb8f82edde51ffc3bd823d80`、`d4082adbe4aafdff9030ba0005678c645de1167b`、`c8e9ad222314696a19923dde5088fbe66bbf1770`、`836e72efacdf75af15c6be7dcc5f1af07d96ba01`。
 
 ## Phase 3：Dataset、Truth、Experiment 与 Approval
 
@@ -798,7 +808,7 @@ provider/connection/schedule
 | 阶段 | 状态 | 当前提交/证据 | 下一动作 |
 |---|---|---|---|
 | Phase 1 全链 fake | `PASSED` | 组合 fixture、实际 Task/Stage/Call/Report 服务链、故障矩阵；`fc5f52d` | 进入 Phase 2 |
-| Phase 2 readiness/权限 | `IN_PROGRESS` | DB/queue readiness 已通过；`1a0646d` | 增加指标/告警和 scope 矩阵 |
+| Phase 2 readiness/权限 | `IN_PROGRESS` | readiness、Operational Status、Broker depth、read/write scope 已通过；`d4082ad/c8e9ad2/836e72e` | 告警、越权不存在回归、Worker lifecycle |
 | Phase 3 治理 | `PENDING` | 无实现 | Dataset/Truth/Experiment/Approval |
 | Phase 4 Provider | `PENDING` | provider-disabled | Prompt bundle/qualification |
 | Phase 5 迁移 | `BLOCKED_BY_AUTHORIZATION` | Alembic 无 versions | 单独授权 |
