@@ -116,6 +116,9 @@
 | 2026-08-19 | P1B multipart 幂等合同 | `passed in memory` | 规范 part-manifest SHA 写入技术元数据；重复 complete 的 manifest 漂移被拒；NoSuchUpload abort 幂等成功 |
 | 2026-08-19 | P1B Image replace | `passed in memory` | 新 version/key 继承旧 logical slot；prepare/失败期间旧 ready 不变；终态顺序为新 ready、旧 superseded、Study revision，外层 TX 可整体回滚 |
 | 2026-08-19 | P1B Study finalize | `passed in memory` | 成功与重复 finalize、revision 不变、identity 未确认 fail closed 均通过；新增 body-ID 路由后应用共 42 条路由 |
+| 2026-08-19 | P1 最终编译/Ruff/OpenAPI | `passed` | `compileall app workers`、目标文件 Ruff、应用导入成功；42 条路由，7 个目标上传/替换/finalize 路由均无 path ID，imaging task 已注册 |
+| 2026-08-19 | P1 最终分层/Secret/范围 | `passed` | API/Service/Worker 无直接 SQL；`.env` ignored 且未跟踪；新增行 Secret 扫描为 0；未新增迁移或测试脚本 |
+| 2026-08-19 | P1 真实 MySQL/OSS/RabbitMQ | `not run` | 未获授权；并发 CAS、真实 lease/heartbeat、publisher confirm、multipart、对象漂移和迁移后 DDL 均未运行验证 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

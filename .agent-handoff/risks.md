@@ -2,6 +2,7 @@
 
 ## 当前阻断
 
+- P1 目标代码已实现，但没有 Alembic 迁移或真实 MySQL/OSS/RabbitMQ 演练；并发 CAS、lease 时钟、multipart 和对象漂移仅有静态/内存证据，当前为 `NOT_MIGRATED / NOT_RUNTIME_VALIDATED`。
 - 目标在线 10 表、评测 4 表和 5 个 Stage Service 尚未实现。
 - 稳定 Provider（AI 服务提供方）资格、Secret 外置和医学发布证据未闭环，当前仍为 `NO-GO`。
 

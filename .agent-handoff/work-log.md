@@ -161,3 +161,9 @@
 - 新增 body-ID finalize API；StudyService 验证 identity、Series ready、Image 进行中状态、count 和 expected/resolved manifest。
 - 成功只在当前 revision 上 CAS completeness/status/ready_at，revision ID/no 不变，不创建 Task。
 - 未创建迁移或测试脚本，未访问真实数据库。
+
+## 2026-08-19 — P1 最终代码门禁
+
+- 全量目标模块 compile/Ruff/import/OpenAPI 通过；应用 42 条路由，7 个上传/替换/finalize 路由无 path ID。
+- API/Service/Worker 无直接 SQL，`.env` 未跟踪，新增行 Secret 扫描为 0；未新增迁移或测试脚本。
+- 当前只标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`；未连接真实 MySQL/OSS/RabbitMQ，不宣称 G4 或运行闭环通过。
