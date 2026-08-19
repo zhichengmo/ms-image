@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
-import hashlib
-import json
 from typing import Any, Callable
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.evaluation import JsonArtifactStore
 from app.core.imaging.object_store import (
     OSSObjectStore,
     ObjectStorageGateway,
     ObjectStoreError,
-    validate_object_key,
 )
 from app.schemas.evaluation_execution import EvaluationInputManifest
 from app.service.evaluation_execution_service import (
@@ -84,14 +82,12 @@ class EvaluationExecutionWorker:
             )
         )
         try:
-            gateway = self.gateway_factory()
-            manifest_data = await self._load_verified_json(
-                gateway=gateway,
+            artifact_store = JsonArtifactStore(self.gateway_factory())
+            manifest_data = await artifact_store.load_verified_json(
                 object_ref=claim.input_manifest_object_ref,
                 expected_sha256=claim.input_manifest_sha256,
             )
-            sanitization_data = await self._load_verified_json(
-                gateway=gateway,
+            sanitization_data = await artifact_store.load_verified_json(
                 object_ref=claim.sanitization_object_ref,
                 expected_sha256=claim.sanitization_sha256,
             )
@@ -113,13 +109,13 @@ class EvaluationExecutionWorker:
             )
             stored = [
                 await self._store_artifact(
-                    gateway=gateway,
+                    artifact_store=artifact_store,
                     claim=claim,
                     artifact=artifact,
                 )
                 for artifact in bundle.artifacts
             ]
-        except (EvaluationScoringError, ValidationError, json.JSONDecodeError) as exc:
+        except (EvaluationScoringError, ValidationError) as exc:
             return await self._finish_failure(
                 claim=claim,
                 owner_id=owner_id,
@@ -130,11 +126,15 @@ class EvaluationExecutionWorker:
             error_code = self._safe_object_error(exc)
             if error_code in {
                 "evaluation_artifact_ref_invalid",
+                "evaluation_artifact_content_empty",
+                "evaluation_artifact_serialization_failed",
+                "evaluation_artifact_json_invalid",
                 "object_storage_profile_mismatch",
                 "evaluation_artifact_profile_drift",
                 "evaluation_artifact_version_drift",
                 "evaluation_artifact_size_drift",
                 "evaluation_artifact_content_type_invalid",
+                "evaluation_artifact_content_type_drift",
                 "evaluation_artifact_hash_drift",
                 "evaluation_output_artifact_profile_drift",
                 "evaluation_output_artifact_content_type_drift",
@@ -293,97 +293,22 @@ class EvaluationExecutionWorker:
             "error_code": error_code,
         }
 
-    async def _load_verified_json(
-        self,
-        *,
-        gateway: ObjectStorageGateway,
-        object_ref: dict[str, Any],
-        expected_sha256: str,
-    ) -> Any:
-        required = {
-            "storage_profile",
-            "object_key",
-            "sha256",
-            "size_bytes",
-            "content_type",
-        }
-        if not required.issubset(object_ref):
-            raise ObjectStoreError("evaluation_artifact_ref_invalid")
-        if gateway.storage_profile != object_ref["storage_profile"]:
-            raise ObjectStoreError("object_storage_profile_mismatch")
-        object_key = validate_object_key(str(object_ref["object_key"]))
-        head = await gateway.head_object(object_key=object_key)
-        if head.storage_profile != object_ref["storage_profile"]:
-            raise ObjectStoreError("evaluation_artifact_profile_drift")
-        expected_version = object_ref.get("object_version_id")
-        if expected_version and head.object_version_id != expected_version:
-            raise ObjectStoreError("evaluation_artifact_version_drift")
-        if head.size_bytes != int(object_ref["size_bytes"]):
-            raise ObjectStoreError("evaluation_artifact_size_drift")
-        if str(object_ref["content_type"]).casefold() != "application/json":
-            raise ObjectStoreError("evaluation_artifact_content_type_invalid")
-        if (
-            head.content_type
-            and head.content_type.split(";", 1)[0].casefold() != "application/json"
-        ):
-            raise ObjectStoreError("evaluation_artifact_content_type_invalid")
-        content = await gateway.get_bytes(object_key=object_key)
-        digest = hashlib.sha256(content).hexdigest()
-        if (
-            digest != expected_sha256
-            or digest != object_ref["sha256"]
-            or len(content) != int(object_ref["size_bytes"])
-        ):
-            raise ObjectStoreError("evaluation_artifact_hash_drift")
-        return json.loads(content.decode("utf-8"))
-
     async def _store_artifact(
         self,
         *,
-        gateway: ObjectStorageGateway,
+        artifact_store: JsonArtifactStore,
         claim: EvaluationExecutionClaim,
         artifact: ScoredArtifact,
     ) -> StoredEvaluationArtifact:
-        object_key = validate_object_key(
-            f"evaluation/{claim.job_id}/{claim.run_id}/"
-            f"{artifact.artifact_kind}-{artifact.content_sha256}.json"
+        stored = await artifact_store.store_bytes(
+            object_key=(
+                f"evaluation/{claim.job_id}/{claim.run_id}/"
+                f"{artifact.artifact_kind}-{artifact.content_sha256}.json"
+            ),
+            content=artifact.content,
         )
-        try:
-            await gateway.head_object(object_key=object_key)
-        except ObjectStoreError as exc:
-            if str(exc) != "object_not_found":
-                raise
-            await gateway.put_bytes(
-                object_key=object_key,
-                content=artifact.content,
-                mime_type="application/json",
-            )
-        else:
-            existing = await gateway.get_bytes(object_key=object_key)
-            if hashlib.sha256(existing).hexdigest() != artifact.content_sha256:
-                raise ObjectStoreError("evaluation_output_artifact_hash_drift")
-        head = await gateway.head_object(object_key=object_key)
-        if head.storage_profile != gateway.storage_profile:
-            raise ObjectStoreError("evaluation_output_artifact_profile_drift")
-        if (
-            head.content_type
-            and head.content_type.split(";", 1)[0].casefold() != "application/json"
-        ):
-            raise ObjectStoreError("evaluation_output_artifact_content_type_drift")
-        if head.size_bytes != len(artifact.content):
-            raise ObjectStoreError("evaluation_output_artifact_size_drift")
-        verified = await gateway.get_bytes(object_key=object_key)
-        if hashlib.sha256(verified).hexdigest() != artifact.content_sha256:
+        if stored.content_sha256 != artifact.content_sha256:
             raise ObjectStoreError("evaluation_output_artifact_hash_drift")
-        object_ref = {
-            "storage_profile": head.storage_profile,
-            "object_key": head.object_key,
-            "object_version_id": head.object_version_id,
-            "sha256": artifact.content_sha256,
-            "size_bytes": head.size_bytes,
-            "content_type": "application/json",
-            "kms_key_version": head.kms_key_version,
-        }
         provenance = {
             "producer": "fake_evaluation_scorer",
             "schema_version": artifact.schema_version,
@@ -397,8 +322,8 @@ class EvaluationExecutionWorker:
         }
         return StoredEvaluationArtifact(
             artifact_kind=artifact.artifact_kind,
-            object_ref=object_ref,
-            content_sha256=artifact.content_sha256,
+            object_ref=stored.object_ref,
+            content_sha256=stored.content_sha256,
             provenance=provenance,
         )
 
