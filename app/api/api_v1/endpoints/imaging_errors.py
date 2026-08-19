@@ -21,6 +21,12 @@ from app.service.study_service import (
     StudyNotFoundError,
     StudyStateConflictError,
 )
+from app.service.task_service import (
+    TaskAccessDeniedError,
+    TaskIdempotencyConflictError,
+    TaskNotFoundError,
+    TaskStateConflictError,
+)
 
 
 def _response(status_code: int, error_code: int, message: str) -> JSONResponse:
@@ -41,7 +47,7 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
     if isinstance(exc, SessionAccessDeniedError):
         return _response(404, 4041, "资源不存在")
     if isinstance(
-        exc, (SessionNotFoundError, StudyNotFoundError, SeriesNotFoundError, ImageNotFoundError)
+        exc, (SessionNotFoundError, StudyNotFoundError, SeriesNotFoundError, ImageNotFoundError, TaskNotFoundError, TaskAccessDeniedError)
     ):
         return _response(404, 4041, "资源不存在")
     if isinstance(
@@ -50,11 +56,12 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
             SessionIdempotencyConflictError,
             StudyIdempotencyConflictError,
             ImageIdempotencyConflictError,
+            TaskIdempotencyConflictError,
         ),
     ):
         return _response(409, 4091, "幂等请求内容冲突")
     if isinstance(
-        exc, (SessionStateConflictError, StudyStateConflictError, ImageStateConflictError)
+        exc, (SessionStateConflictError, StudyStateConflictError, ImageStateConflictError, TaskStateConflictError)
     ):
         return _response(409, 4092, "资源状态冲突")
     raise exc
