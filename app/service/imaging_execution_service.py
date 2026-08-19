@@ -45,6 +45,10 @@ class ImagingExecutionService:
         if task.execution_status in {"cancelled", "failed", "dead_letter"} or task.cancel_requested_at is not None:
             raise StageExecutionStateConflict("task_not_executable")
         claimed = await self.stage_dal.claim(checkpoint_id=stage.id, expected_version=parsed.expected_state_version, owner_id=owner_id, now=datetime.utcnow(), lease_expires_at=datetime.utcnow() + timedelta(seconds=lease_seconds))
+        if claimed is not None and task.execution_status == "queued":
+            running = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "running", "started_at": task.started_at or datetime.utcnow()})
+            if running is None:
+                raise StageExecutionStateConflict("task_start_conflict")
         return claimed
 
     async def complete_study_preparation(self, *, stage, owner_id: str) -> dict[str, Any]:
@@ -67,10 +71,73 @@ class ImagingExecutionService:
         completed = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "completed", "output_json": output, "output_sha256": output_sha, "finished_at": now})
         if completed is None:
             raise StageExecutionStateConflict("stage_complete_conflict")
-        updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "completed", "ai_medical_status": "not_produced", "finished_at": now})
-        if updated is None:
-            raise StageExecutionStateConflict("task_complete_conflict")
+        await self._schedule_next_or_complete(task=task, stage=completed, output=output, output_sha=output_sha, now=now)
         return output
+
+    async def _schedule_next_or_complete(self, *, task, stage, output: dict[str, Any], output_sha: str, now: datetime) -> None:
+        snapshot = task.request_snapshot_json or {}
+        contract = snapshot.get("compiled_profile") or {}
+        stages = contract.get("stages") or []
+        try:
+            current_index = next(index for index, item in enumerate(stages) if item.get("stage_key") == stage.stage_key)
+        except StopIteration as exc:
+            raise StageExecutionStateConflict("compiled_profile_stage_missing") from exc
+        if current_index + 1 >= len(stages):
+            updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "completed", "ai_medical_status": "not_produced", "finished_at": now})
+            if updated is None:
+                raise StageExecutionStateConflict("task_complete_conflict")
+            return
+        definition = stages[current_index + 1]
+        next_stage_id = new_opaque_id()
+        next_input = {
+            "task_id": task.id,
+            "study_revision_id": task.study_revision_id,
+            "manifest_sha256": snapshot.get("resolved_manifest_sha256"),
+            "previous_stage_id": stage.id,
+            "previous_output_sha256": output_sha,
+            "previous_output": output,
+            "compiled_pipeline_sha256": task.compiled_pipeline_sha256,
+        }
+        input_sha = hashlib.sha256(json.dumps(next_input, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        next_stage = await self.stage_dal.create_idempotent({
+            "id": next_stage_id,
+            "task_id": task.id,
+            "task_attempt_no": task.attempt_no,
+            "stage_instance_key": f"{definition['stage_key']}:1",
+            "stage_no": current_index + 2,
+            "stage_key": definition["stage_key"],
+            "handler_key": definition["handler_key"],
+            "handler_version": definition["handler_version"],
+            "status": "queued",
+            "state_version": 0,
+            "lease_generation": 0,
+            "input_json": next_input,
+            "input_sha256": input_sha,
+            "retry_count": 0,
+        })
+        if next_stage is None:
+            raise StageExecutionStateConflict("next_stage_create_conflict")
+        message = {"task_id": task.id, "stage_checkpoint_id": next_stage.id, "expected_state_version": next_stage.state_version, "trace_id": task.trace_id}
+        event = await self.outbox_dal.create_idempotent({
+            "id": new_opaque_id(),
+            "aggregate_type": "stage",
+            "aggregate_id": next_stage.id,
+            "aggregate_version": next_stage.state_version,
+            "event_key": f"stage:{next_stage.id}:execute:{next_stage.state_version}",
+            "event_type": "execute_stage",
+            "destination_key": OutboxDal.STAGE_DESTINATION_KEY,
+            "trace_id": task.trace_id,
+            "message_version": OutboxDal.STAGE_MESSAGE_VERSION,
+            "message_json": message,
+            "message_sha256": OutboxDal.message_sha256(message),
+            "publish_status": "pending",
+            "publish_attempt_count": 0,
+        })
+        if event is None:
+            raise StageExecutionStateConflict("next_stage_event_conflict")
+        updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "queued", "ai_medical_status": "not_produced"})
+        if updated is None:
+            raise StageExecutionStateConflict("task_schedule_conflict")
 
     async def reconcile_expired_stages(self, *, now: datetime, limit: int, max_attempts: int) -> dict[str, int]:
         rows = await self.stage_dal.list_expired_running(now=now, limit=limit)
