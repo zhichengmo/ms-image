@@ -115,6 +115,7 @@
 | 2026-08-19 | P1B multipart/complete/abort | `passed in memory` | fake DB/Gateway 覆盖 initiate、part signing、complete、abort、bind 失败补偿；全部 OSS I/O 在 TX 外，part/session URL 从 repr 隐藏 |
 | 2026-08-19 | P1B multipart 幂等合同 | `passed in memory` | 规范 part-manifest SHA 写入技术元数据；重复 complete 的 manifest 漂移被拒；NoSuchUpload abort 幂等成功 |
 | 2026-08-19 | P1B Image replace | `passed in memory` | 新 version/key 继承旧 logical slot；prepare/失败期间旧 ready 不变；终态顺序为新 ready、旧 superseded、Study revision，外层 TX 可整体回滚 |
+| 2026-08-19 | P1B Study finalize | `passed in memory` | 成功与重复 finalize、revision 不变、identity 未确认 fail closed 均通过；新增 body-ID 路由后应用共 42 条路由 |
 | 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
 | 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
 

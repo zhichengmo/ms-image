@@ -5,7 +5,14 @@ from app.api.api_v1.endpoints.imaging_errors import rollback_and_map
 from app.api.deps import get_async_session, get_study_service, require_resource_scope
 from app.core.config import settings
 from app.schemas.base import GenericResponse
-from app.schemas.study import SeriesCreate, SeriesResponse, StudyCreate, StudyDetailResponse, StudyResponse
+from app.schemas.study import (
+    SeriesCreate,
+    SeriesResponse,
+    StudyCreate,
+    StudyDetailResponse,
+    StudyFinalizeRequest,
+    StudyResponse,
+)
 from app.service.study_service import StudyService
 
 
@@ -39,6 +46,22 @@ async def get_study(
     except Exception as exc:
         return await rollback_and_map(db, exc)
     return GenericResponse(message="Study 查询成功", data=data)
+
+
+@router.post("/studies/finalize", response_model=GenericResponse[StudyResponse])
+async def finalize_study(
+    payload: StudyFinalizeRequest,
+    context: dict = Depends(resource_context),
+    service: StudyService = Depends(get_study_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await service.finalize_study(
+            payload=payload, requester_id=context["subject"]
+        )
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return GenericResponse(message="Study 已完成", data=data)
 
 
 @router.post("/series", response_model=GenericResponse[SeriesResponse], status_code=status.HTTP_201_CREATED)

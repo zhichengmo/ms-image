@@ -85,6 +85,19 @@ class StudyUpdate(BaseModel):
     current_revision_id: str = Field(min_length=1, max_length=64)
 
 
+class StudyFinalizeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    current_revision_id: str = Field(min_length=1, max_length=64)
+
+    @field_validator("id", "current_revision_id")
+    @classmethod
+    def normalize_ids(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
 class SeriesCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -187,6 +200,7 @@ __all__ = [
     "SeriesUpdate",
     "StudyCreate",
     "StudyDetailResponse",
+    "StudyFinalizeRequest",
     "StudyResponse",
     "StudyUpdate",
 ]

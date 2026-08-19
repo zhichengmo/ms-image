@@ -24,6 +24,7 @@ from app.schemas.study import (
     SeriesResponse,
     StudyCreate,
     StudyDetailResponse,
+    StudyFinalizeRequest,
     StudyResponse,
 )
 from app.service.session_service import (
@@ -204,6 +205,67 @@ class StudyService:
             study=self._study_response(study),
             series=[self._series_response(item) for item in series],
         )
+
+    async def finalize_study(
+        self, *, payload: StudyFinalizeRequest, requester_id: str
+    ) -> StudyResponse:
+        study = await self._owned_study(study_id=payload.id, requester_id=requester_id)
+        if study.status == "ready":
+            if (
+                study.revision_id == payload.current_revision_id
+                and study.state_version == payload.expected_state_version + 1
+            ):
+                return self._study_response(study)
+            raise StudyStateConflictError("study_finalize_conflict")
+        if (
+            study.state_version != payload.expected_state_version
+            or study.revision_id != payload.current_revision_id
+        ):
+            raise StudyStateConflictError("study_finalize_conflict")
+        if study.identity_status != "confirmed":
+            raise StudyStateConflictError("study_identity_not_confirmed")
+        series_rows = await self.series_dal.list_for_study(study.id)
+        if not series_rows:
+            raise StudyStateConflictError("study_series_missing")
+        if any(series.status != "ready" for series in series_rows):
+            raise StudyStateConflictError("study_series_not_ready")
+        if any(
+            series.expected_image_count is not None
+            and series.actual_image_count != series.expected_image_count
+            for series in series_rows
+        ):
+            raise StudyStateConflictError("study_series_count_conflict")
+        for series in series_rows:
+            images = await self.image_dal.list_for_series(series.id)
+            if any(image.status in {"uploading", "validating"} for image in images):
+                raise StudyStateConflictError("study_image_in_progress")
+        actual_count = sum(series.actual_image_count for series in series_rows)
+        if (
+            study.expected_image_count is not None
+            and actual_count != study.expected_image_count
+        ):
+            raise StudyStateConflictError("study_image_count_conflict")
+        if not study.resolved_manifest_sha256:
+            raise StudyStateConflictError("study_manifest_unresolved")
+        if study.expected_manifest_sha256 and (
+            study.expected_manifest_sha256 != study.resolved_manifest_sha256
+        ):
+            raise StudyStateConflictError("study_manifest_conflict")
+        if study.completeness_status != "complete":
+            raise StudyStateConflictError("study_incomplete")
+        updated = await self.study_dal.cas_finalize(
+            study_id=study.id,
+            expected_version=study.state_version,
+            current_revision_id=study.revision_id,
+            values={
+                "completeness_status": "complete",
+                "status": "ready",
+                "ready_at": datetime.utcnow(),
+            },
+        )
+        if updated is None:
+            raise StudyStateConflictError("study_finalize_conflict")
+        return self._study_response(updated)
 
     async def recompute_after_image_change(
         self,

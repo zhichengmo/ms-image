@@ -155,3 +155,9 @@
 - 新增 direct replace API；新行继承旧 Series/logical slot/role，使用新 version/generation/key，失败版本不覆盖旧 ready。
 - Worker 终态事务按新 ready、旧 superseded、Series/Study revision CAS 推进；任一步失败由外层事务整体回滚。
 - 未创建迁移或测试脚本，未访问真实 DB/OSS/Broker。
+
+## 2026-08-19 — P1B Study finalize
+
+- 新增 body-ID finalize API；StudyService 验证 identity、Series ready、Image 进行中状态、count 和 expected/resolved manifest。
+- 成功只在当前 revision 上 CAS completeness/status/ready_at，revision ID/no 不变，不创建 Task。
+- 未创建迁移或测试脚本，未访问真实数据库。

@@ -70,5 +70,23 @@ class StudyDal(DalBase):
             v_where=[self.model.revision_id == current_revision_id],
         )
 
+    async def cas_finalize(
+        self,
+        *,
+        study_id: str,
+        expected_version: int,
+        current_revision_id: str,
+        values: dict[str, Any],
+    ) -> Study | None:
+        allowed = {"completeness_status", "status", "ready_at"}
+        if not values or not set(values).issubset(allowed):
+            raise ValueError("study_finalize_fields_invalid")
+        return await self.cas_put_data(
+            data_id=study_id,
+            expected_version=expected_version,
+            data=values,
+            v_where=[self.model.revision_id == current_revision_id],
+        )
+
 
 __all__ = ["StudyDal"]
