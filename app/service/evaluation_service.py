@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,21 +156,44 @@ class EvaluationService:
         job = await self.job_dal.get_by_id(job_id)
         if job is None:
             raise EvaluationNotFoundError("evaluation_job_not_found")
-        if job.status in {"completed", "failed", "cancelled"}:
+        if job.status in self.job_dal.TERMINAL_STATUSES:
             return EvaluationJobResponse.model_validate(job)
-        updated = await self.job_dal.cas_update(
+        updated = await self.job_dal.cancel(
             job_id=job.id,
             expected_version=expected_version,
-            values={"status": "cancelled", "error_code": "cancelled_by_control_plane"},
+            cancelled_at=datetime.utcnow(),
+            error_code="cancelled_by_control_plane",
         )
         if updated is None:
             raise EvaluationStateConflictError("evaluation_job_cancel_conflict")
+        for run in await self.run_dal.list_for_job(job.id):
+            if run.status == "started":
+                cancelled = await self.run_dal.cas_update(
+                    run_id=run.id,
+                    expected_version=run.state_version,
+                    values={
+                        "status": "cancelled",
+                        "error_code": "cancelled_by_control_plane",
+                        "error_message": None,
+                        "finished_at": updated.finished_at,
+                    },
+                )
+                if cancelled is None:
+                    raise EvaluationStateConflictError("evaluation_run_cancel_conflict")
         return EvaluationJobResponse.model_validate(updated)
 
     async def create_run(self, job_id: str) -> EvaluationRunResponse:
         job = await self.job_dal.get_by_id(job_id)
-        if job is None or job.status == "cancelled":
+        if job is None or job.status in self.job_dal.TERMINAL_STATUSES:
             raise EvaluationStateConflictError("evaluation_job_not_runnable")
+        input_artifact = await self.artifact_dal.get_by_id(
+            job.input_manifest_artifact_id
+        )
+        sanitization_artifact = await self.artifact_dal.get_by_id(
+            job.sanitization_artifact_id
+        )
+        if input_artifact is None or sanitization_artifact is None:
+            raise EvaluationStateConflictError("evaluation_input_artifact_not_found")
         rows = await self.run_dal.list_for_job(job.id)
         run = await self.run_dal.create_idempotent(
             {
@@ -179,8 +203,14 @@ class EvaluationService:
                 "dataset_fingerprint": job.dataset_fingerprint,
                 "gold_fingerprint": job.gold_fingerprint,
                 "scorer_fingerprint": job.scorer_fingerprint,
-                "status": "pending",
+                "experiment_fingerprint": job.experiment_fingerprint,
+                "case_split_sha256": self._sha(job.case_split_json),
+                "denominator_contract_sha256": self._sha(job.denominator_contract_json),
+                "input_manifest_artifact_sha256": input_artifact.content_sha256,
+                "sanitization_artifact_sha256": sanitization_artifact.content_sha256,
+                "status": "started",
                 "state_version": 0,
+                "started_at": datetime.utcnow(),
             }
         )
         if run is None:

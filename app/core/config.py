@@ -162,6 +162,14 @@ class Settings(BaseSettings):
     IMAGING_RELAY_LEASE_SECONDS: int = 120
     IMAGING_WORKER_LEASE_SECONDS: int = 120
     IMAGING_WORKER_MAX_ATTEMPTS: int = 5
+    EVALUATION_BROKER_EXCHANGE: str = "evaluation.v1"
+    EVALUATION_BROKER_QUEUE: str = "evaluation.job.execute"
+    EVALUATION_BROKER_ROUTING_KEY: str = "evaluation.job.execute"
+    EVALUATION_BROKER_DLQ: str = "evaluation.job.dlq"
+    EVALUATION_RELAY_POLL_SECONDS: float = 1.0
+    EVALUATION_RELAY_LEASE_SECONDS: int = 120
+    EVALUATION_WORKER_LEASE_SECONDS: int = 120
+    EVALUATION_WORKER_MAX_ATTEMPTS: int = 5
     READINESS_TIMEOUT_SECONDS: float = 3.0
 
     # AI transport is selected by the database-backed OpenAI-compatible

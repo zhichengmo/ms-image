@@ -12,6 +12,39 @@ class EvaluationArtifactInput(BaseModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     provenance: dict[str, Any]
 
+    @field_validator("object_ref")
+    @classmethod
+    def validate_object_ref(cls, value: dict[str, Any]) -> dict[str, Any]:
+        required = {
+            "storage_profile",
+            "object_key",
+            "sha256",
+            "size_bytes",
+            "content_type",
+        }
+        allowed = required | {"object_version_id", "kms_key_version"}
+        if set(value) - allowed or not required.issubset(value):
+            raise ValueError("evaluation_object_ref_fields_invalid")
+        object_key = str(value["object_key"])
+        if (
+            not str(value["storage_profile"]).strip()
+            or not object_key
+            or "://" in object_key
+            or object_key.startswith("/")
+            or ".." in object_key.split("/")
+        ):
+            raise ValueError("evaluation_object_ref_identity_invalid")
+        if value["content_type"] != "application/json":
+            raise ValueError("evaluation_object_ref_content_type_invalid")
+        if (
+            not isinstance(value["size_bytes"], int)
+            or not 0 < value["size_bytes"] <= 64 * 1024 * 1024
+        ):
+            raise ValueError("evaluation_object_ref_size_invalid")
+        if not isinstance(value["sha256"], str) or len(value["sha256"]) != 64:
+            raise ValueError("evaluation_object_ref_sha_invalid")
+        return value
+
 
 class EvaluationJobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -47,7 +80,17 @@ class EvaluationJobResponse(BaseModel):
     sanitization_artifact_id: str
     status: str
     state_version: int
+    lease_owner_id: str | None = None
+    lease_generation: int = 0
+    lease_expires_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    retry_count: int = 0
+    next_retry_at: datetime | None = None
+    result_artifact_id: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     error_code: str | None = None
+    error_message: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -60,10 +103,18 @@ class EvaluationRunResponse(BaseModel):
     dataset_fingerprint: str
     gold_fingerprint: str
     scorer_fingerprint: str
+    experiment_fingerprint: str
+    case_split_sha256: str
+    denominator_contract_sha256: str
+    input_manifest_artifact_sha256: str
+    sanitization_artifact_sha256: str
     status: str
     state_version: int
     summary_json: dict[str, Any] | None = None
     error_code: str | None = None
+    error_message: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

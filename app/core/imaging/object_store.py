@@ -119,6 +119,10 @@ class ObjectStorageGateway(Protocol):
         self, *, object_key: str, upload_session_ref: str
     ) -> None: ...
 
+    async def put_bytes(
+        self, *, object_key: str, content: bytes, mime_type: str
+    ) -> None: ...
+
     async def head_object(self, *, object_key: str) -> ObjectHead: ...
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
@@ -208,7 +212,7 @@ class OSSObjectStore:
         normalized_mime = mime_type.casefold().strip()
         if normalized_mime not in {
             "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp",
-            "application/dicom",
+            "application/dicom", "application/json",
         }:
             raise ObjectStoreError("image_mime_invalid")
 

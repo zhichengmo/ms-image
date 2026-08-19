@@ -18,31 +18,310 @@ from app.schemas.evaluation import ExecuteEvaluationMessage
 
 
 class EvaluationJobDal(DalBase):
+    TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "dead_letter"})
+
     def __init__(self, db: AsyncSession):
         super().__init__(db=db, model=EvaluationJob)
 
-    async def create_idempotent(self, values: dict[str, Any]):
+    async def create_idempotent(self, values: dict[str, Any]) -> EvaluationJob | None:
         try:
             async with self.db.begin_nested():
                 return await self.create_data(values, v_return_obj=True)
-        except IntegrityError:
+        except IntegrityError as exc:
+            detail = str(getattr(exc, "orig", exc)).casefold()
+            if (
+                "uq_evaluation_job_business_key" not in detail
+                and "business_key" not in detail
+            ):
+                raise
             return None
 
-    async def get_by_id(self, job_id: str):
+    async def get_by_id(self, job_id: str) -> EvaluationJob | None:
         return await self.get_data(data_id=job_id, v_return_none=True)
 
-    async def get_by_business_key(self, key: str):
+    async def get_by_business_key(self, key: str) -> EvaluationJob | None:
         return await self.get_data(business_key=key, v_return_none=True)
+
+    async def claim_execution(
+        self,
+        *,
+        job_id: str,
+        expected_version: int,
+        owner_id: str,
+        claimed_at: datetime,
+        lease_expires_at: datetime,
+        max_attempts: int,
+    ) -> EvaluationJob | None:
+        normalized_owner_id = owner_id.strip()
+        if (
+            not normalized_owner_id
+            or expected_version < 0
+            or max_attempts < 1
+            or lease_expires_at <= claimed_at
+        ):
+            raise ValueError("evaluation_job_claim_contract_invalid")
+        row = await self.get_by_id(job_id)
+        if row is None or row.state_version != expected_version:
+            return None
+        changed = await self.conditional_update(
+            v_where=[
+                self.model.id == job_id,
+                self.model.state_version == expected_version,
+                self.model.status.in_(("queued", "retry_wait")),
+                self.model.retry_count < max_attempts,
+                or_(
+                    self.model.next_retry_at.is_(None),
+                    self.model.next_retry_at <= claimed_at,
+                ),
+                or_(
+                    self.model.lease_owner_id.is_(None),
+                    self.model.lease_expires_at <= claimed_at,
+                ),
+            ],
+            data={
+                "status": "running",
+                "state_version": expected_version + 1,
+                "lease_owner_id": normalized_owner_id,
+                "lease_generation": row.lease_generation + 1,
+                "lease_expires_at": lease_expires_at,
+                "heartbeat_at": claimed_at,
+                "retry_count": row.retry_count + 1,
+                "next_retry_at": None,
+                "started_at": row.started_at or claimed_at,
+                "finished_at": None,
+                "error_code": None,
+                "error_message": None,
+            },
+        )
+        return await self.get_by_id(job_id) if changed else None
+
+    async def heartbeat_execution(
+        self,
+        *,
+        job_id: str,
+        owner_id: str,
+        lease_generation: int,
+        heartbeat_at: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        normalized_owner_id = owner_id.strip()
+        if (
+            not normalized_owner_id
+            or lease_generation < 1
+            or lease_expires_at <= heartbeat_at
+        ):
+            raise ValueError("evaluation_job_heartbeat_contract_invalid")
+        return await self.conditional_update(
+            v_where=[
+                self.model.id == job_id,
+                self.model.status == "running",
+                self.model.lease_owner_id == normalized_owner_id,
+                self.model.lease_generation == lease_generation,
+                self.model.lease_expires_at > heartbeat_at,
+            ],
+            data={
+                "heartbeat_at": heartbeat_at,
+                "lease_expires_at": lease_expires_at,
+            },
+        )
+
+    async def cancel(
+        self,
+        *,
+        job_id: str,
+        expected_version: int,
+        cancelled_at: datetime,
+        error_code: str,
+    ) -> EvaluationJob | None:
+        normalized_error_code = error_code.strip()
+        if not normalized_error_code or len(normalized_error_code) > 80:
+            raise ValueError("evaluation_job_cancel_error_invalid")
+        changed = await self.conditional_update(
+            v_where=[
+                self.model.id == job_id,
+                self.model.state_version == expected_version,
+                self.model.status.notin_(tuple(self.TERMINAL_STATUSES)),
+            ],
+            data={
+                "status": "cancelled",
+                "state_version": expected_version + 1,
+                "lease_owner_id": None,
+                "lease_expires_at": None,
+                "heartbeat_at": None,
+                "next_retry_at": None,
+                "finished_at": cancelled_at,
+                "error_code": normalized_error_code,
+                "error_message": None,
+            },
+        )
+        return await self.get_by_id(job_id) if changed else None
+
+    async def release_retry(
+        self,
+        *,
+        job_id: str,
+        expected_version: int,
+        owner_id: str,
+        lease_generation: int,
+        released_at: datetime,
+        next_retry_at: datetime,
+        error_code: str,
+        error_message: str,
+    ) -> EvaluationJob | None:
+        if next_retry_at <= released_at:
+            raise ValueError("evaluation_job_retry_time_invalid")
+        return await self._finish_execution(
+            job_id=job_id,
+            expected_version=expected_version,
+            owner_id=owner_id,
+            lease_generation=lease_generation,
+            finished_at=released_at,
+            status="retry_wait",
+            next_retry_at=next_retry_at,
+            result_artifact_id=None,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    async def finish_execution(
+        self,
+        *,
+        job_id: str,
+        expected_version: int,
+        owner_id: str,
+        lease_generation: int,
+        finished_at: datetime,
+        status: str,
+        result_artifact_id: str | None,
+        error_code: str | None,
+        error_message: str | None,
+    ) -> EvaluationJob | None:
+        if status not in {"completed", "failed", "dead_letter", "cancelled"}:
+            raise ValueError("evaluation_job_terminal_status_invalid")
+        if status == "completed" and not result_artifact_id:
+            raise ValueError("evaluation_job_result_artifact_required")
+        return await self._finish_execution(
+            job_id=job_id,
+            expected_version=expected_version,
+            owner_id=owner_id,
+            lease_generation=lease_generation,
+            finished_at=finished_at,
+            status=status,
+            next_retry_at=None,
+            result_artifact_id=result_artifact_id,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    async def reconcile_expired_execution_leases(
+        self, *, now: datetime, max_attempts: int, limit: int = 100
+    ) -> dict[str, Any]:
+        if max_attempts < 1 or limit < 1:
+            raise ValueError("evaluation_job_reconcile_contract_invalid")
+        rows = await self.get_datas(
+            page=1,
+            limit=limit,
+            v_where=[
+                self.model.status == "running",
+                self.model.lease_expires_at <= now,
+            ],
+            v_order_field="created_at",
+            v_return_objs=True,
+        )
+        result: dict[str, Any] = {
+            "retry_wait": 0,
+            "dead_lettered": 0,
+            "dead_letter_job_ids": [],
+        }
+        for row in rows:
+            exhausted = row.retry_count >= max_attempts
+            changed = await self.conditional_update(
+                v_where=[
+                    self.model.id == row.id,
+                    self.model.status == "running",
+                    self.model.state_version == row.state_version,
+                    self.model.lease_owner_id == row.lease_owner_id,
+                    self.model.lease_generation == row.lease_generation,
+                    self.model.lease_expires_at == row.lease_expires_at,
+                ],
+                data={
+                    "status": "dead_letter" if exhausted else "retry_wait",
+                    "state_version": row.state_version + 1,
+                    "lease_owner_id": None,
+                    "lease_expires_at": None,
+                    "heartbeat_at": None,
+                    "next_retry_at": None if exhausted else now,
+                    "finished_at": now if exhausted else None,
+                    "error_code": "evaluation_worker_lease_expired",
+                    "error_message": "evaluation worker lease expired before writeback",
+                },
+            )
+            key = "dead_lettered" if exhausted else "retry_wait"
+            result[key] += int(changed)
+            if exhausted and changed:
+                result["dead_letter_job_ids"].append(row.id)
+        return result
 
     async def cas_update(
         self, *, job_id: str, expected_version: int, values: dict[str, Any]
-    ):
-        allowed = {"status", "error_code"}
+    ) -> EvaluationJob | None:
+        allowed = {
+            "status",
+            "result_artifact_id",
+            "next_retry_at",
+            "finished_at",
+            "error_code",
+            "error_message",
+        }
         if not values or not set(values).issubset(allowed):
             raise ValueError("evaluation_job_update_fields_invalid")
         return await self.cas_put_data(
             data_id=job_id, expected_version=expected_version, data=values
         )
+
+    async def _finish_execution(
+        self,
+        *,
+        job_id: str,
+        expected_version: int,
+        owner_id: str,
+        lease_generation: int,
+        finished_at: datetime,
+        status: str,
+        next_retry_at: datetime | None,
+        result_artifact_id: str | None,
+        error_code: str | None,
+        error_message: str | None,
+    ) -> EvaluationJob | None:
+        normalized_owner_id = owner_id.strip()
+        if not normalized_owner_id or lease_generation < 1:
+            raise ValueError("evaluation_job_finish_identity_invalid")
+        safe_error_code = error_code.strip() if error_code else None
+        if safe_error_code and len(safe_error_code) > 80:
+            raise ValueError("evaluation_job_error_code_invalid")
+        changed = await self.conditional_update(
+            v_where=[
+                self.model.id == job_id,
+                self.model.status == "running",
+                self.model.state_version == expected_version,
+                self.model.lease_owner_id == normalized_owner_id,
+                self.model.lease_generation == lease_generation,
+                self.model.lease_expires_at > finished_at,
+            ],
+            data={
+                "status": status,
+                "state_version": expected_version + 1,
+                "lease_owner_id": None,
+                "lease_expires_at": None,
+                "heartbeat_at": None,
+                "next_retry_at": next_retry_at,
+                "result_artifact_id": result_artifact_id,
+                "finished_at": finished_at if status != "retry_wait" else None,
+                "error_code": safe_error_code,
+                "error_message": (error_message or "").strip()[:500] or None,
+            },
+        )
+        return await self.get_by_id(job_id) if changed else None
 
 
 class EvaluationOutboxDal(DalBase):
@@ -353,19 +632,43 @@ class EvaluationRunDal(DalBase):
     def __init__(self, db: AsyncSession):
         super().__init__(db=db, model=EvaluationRun)
 
-    async def create_idempotent(self, values: dict[str, Any]):
+    async def create_idempotent(self, values: dict[str, Any]) -> EvaluationRun | None:
         try:
             async with self.db.begin_nested():
                 return await self.create_data(values, v_return_obj=True)
-        except IntegrityError:
+        except IntegrityError as exc:
+            detail = str(getattr(exc, "orig", exc)).casefold()
+            if "uq_evaluation_run_job_no" not in detail and "job_id" not in detail:
+                raise
             return None
 
-    async def get_by_id(self, run_id: str):
+    async def get_by_id(self, run_id: str) -> EvaluationRun | None:
         return await self.get_data(data_id=run_id, v_return_none=True)
 
-    async def list_for_job(self, job_id: str):
+    async def get_by_job_run_no(
+        self, *, job_id: str, run_no: int
+    ) -> EvaluationRun | None:
+        return await self.get_data(job_id=job_id, run_no=run_no, v_return_none=True)
+
+    async def list_for_job(self, job_id: str) -> list[EvaluationRun]:
         return await self.get_datas(
             limit=0, job_id=job_id, v_order_field="run_no", v_return_objs=True
+        )
+
+    async def cas_update(
+        self, *, run_id: str, expected_version: int, values: dict[str, Any]
+    ) -> EvaluationRun | None:
+        allowed = {
+            "status",
+            "summary_json",
+            "error_code",
+            "error_message",
+            "finished_at",
+        }
+        if not values or not set(values).issubset(allowed):
+            raise ValueError("evaluation_run_update_fields_invalid")
+        return await self.cas_put_data(
+            data_id=run_id, expected_version=expected_version, data=values
         )
 
 
@@ -376,12 +679,40 @@ class EvaluationArtifactDal(DalBase):
     async def create_append_only(self, values: dict[str, Any]):
         return await self.create_data(values, v_return_obj=True)
 
-    async def get_by_id(self, artifact_id: str):
+    async def create_output_idempotent(
+        self, values: dict[str, Any]
+    ) -> EvaluationArtifact | None:
+        try:
+            async with self.db.begin_nested():
+                return await self.create_data(values, v_return_obj=True)
+        except IntegrityError as exc:
+            detail = str(getattr(exc, "orig", exc)).casefold()
+            if (
+                "uq_evaluation_artifact_run_kind" not in detail
+                and "artifact_kind" not in detail
+            ):
+                raise
+            return None
+
+    async def get_by_id(self, artifact_id: str) -> EvaluationArtifact | None:
         return await self.get_data(data_id=artifact_id, v_return_none=True)
 
-    async def list_for_job(self, job_id: str):
+    async def get_for_run_kind(
+        self, *, job_id: str, run_id: str, artifact_kind: str
+    ) -> EvaluationArtifact | None:
+        return await self.get_data(
+            job_id=job_id,
+            run_id=run_id,
+            artifact_kind=artifact_kind,
+            v_return_none=True,
+        )
+
+    async def list_for_job(self, job_id: str) -> list[EvaluationArtifact]:
         return await self.get_datas(
-            limit=0, job_id=job_id, v_order_field="created_at", v_return_objs=True
+            limit=0,
+            job_id=job_id,
+            v_order_field="created_at",
+            v_return_objs=True,
         )
 
 

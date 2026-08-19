@@ -94,6 +94,15 @@ def topology_for(
             dead_letter_queue=dead_letter_queue or _read(source, "IMAGING_BROKER_DLQ"),
             task_name=task_name or "imaging.validate_image",
         )
+    if normalized == "evaluation":
+        return BrokerTopology(
+            domain="evaluation",
+            exchange=exchange or _read(source, "EVALUATION_BROKER_EXCHANGE"),
+            queue=queue or _read(source, "EVALUATION_BROKER_QUEUE"),
+            routing_key=routing_key or _read(source, "EVALUATION_BROKER_ROUTING_KEY"),
+            dead_letter_queue=dead_letter_queue or _read(source, "EVALUATION_BROKER_DLQ"),
+            task_name=task_name or "evaluation.execute_job",
+        )
     # Future modalities get isolated names while reusing this same runtime.
     return BrokerTopology(
         domain=normalized,
