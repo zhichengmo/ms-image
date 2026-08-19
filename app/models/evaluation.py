@@ -32,7 +32,21 @@ class EvaluationJob(ImagingRecordBase):
 
 class EvaluationOutbox(ImagingRecordBase):
     __tablename__ = "evaluation_outbox_record"
-    __table_args__ = (UniqueConstraint("event_key", name="uq_evaluation_outbox_event_key"), Index("ix_evaluation_outbox_status", "publish_status", "next_retry_at"))
+    __table_args__ = (
+        UniqueConstraint("event_key", name="uq_evaluation_outbox_event_key"),
+        Index(
+            "ix_evaluation_outbox_status",
+            "publish_status",
+            "next_retry_at",
+            "created_at",
+        ),
+        Index(
+            "ix_evaluation_outbox_lease",
+            "publish_status",
+            "relay_lease_expires_at",
+        ),
+        Index("ix_evaluation_outbox_job", "job_id", "created_at"),
+    )
     job_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): EvaluationJob ID")
     aggregate_version: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="BIGINT: Job 版本")
     event_key: Mapped[str] = mapped_column(String(160), nullable=False, comment="VARCHAR(160): 事件幂等键")
@@ -42,7 +56,7 @@ class EvaluationOutbox(ImagingRecordBase):
     message_version: Mapped[str] = mapped_column(String(32), nullable=False, comment="VARCHAR(32): Evaluation 消息合同版本")
     message_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="JSON: opaque ID/version/trace")
     message_sha256: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): 消息摘要")
-    publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default=text("'pending'"), comment="VARCHAR(32): pending/published/retry_wait/dead_letter")
+    publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default=text("'pending'"), comment="VARCHAR(32): pending/publishing/published/retry_wait/dead_letter/cancelled")
     relay_owner_id: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="VARCHAR(128)|NULL: Relay lease owner")
     relay_lease_expires_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: Relay lease 到期")
     publish_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"), comment="INT: 发布尝试次数")
