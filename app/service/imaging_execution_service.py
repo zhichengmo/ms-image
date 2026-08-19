@@ -99,6 +99,26 @@ class ImagingExecutionService:
             output={"route_signal": "primary_final", "source_primary_output_sha256": stage.input_json.get("previous_output_sha256"), "source_primary_call_id": (stage.input_json.get("previous_output") or {}).get("source_call_id")},
         )
 
+    async def complete_targeted_review(self, *, stage, owner_id: str) -> dict[str, Any]:
+        if stage.stage_key != "targeted_review" or stage.status != "running":
+            raise StageExecutionStateConflict("targeted_review_stage_invalid")
+        call = await AIRequestService(self.outbox_dal.db).prepare_provider_disabled_call(
+            task_id=stage.task_id,
+            stage_checkpoint_id=stage.id,
+            prompt_sha256=hashlib.sha256(b"targeted-review-disabled.v1").hexdigest(),
+            schema_sha256=hashlib.sha256(b"targeted-candidate.v1").hexdigest(),
+        )
+        output = {
+            "candidate_kind": "targeted",
+            "medical_status": "not_produced",
+            "source_call_id": call["call_id"],
+            "error_code": call["error_code"],
+            "source_route_sha256": stage.input_json.get("previous_output_sha256"),
+        }
+        if output["error_code"]:
+            raise StageExecutionStateConflict("targeted_review_provider_disabled")
+        return await self._complete_provider_disabled_stage(stage=stage, owner_id=owner_id, output=output)
+
     async def complete_decision_finalization(self, *, stage, owner_id: str) -> dict[str, Any]:
         if stage.stage_key != "decision_finalization" or stage.status != "running":
             raise StageExecutionStateConflict("decision_finalization_stage_invalid")
@@ -132,16 +152,34 @@ class ImagingExecutionService:
         snapshot = task.request_snapshot_json or {}
         contract = snapshot.get("compiled_profile") or {}
         stages = contract.get("stages") or []
-        try:
-            current_index = next(index for index, item in enumerate(stages) if item.get("stage_key") == stage.stage_key)
-        except StopIteration as exc:
-            raise StageExecutionStateConflict("compiled_profile_stage_missing") from exc
-        if current_index + 1 >= len(stages):
+        if stage.stage_key == "family_routing" and output.get("route_signal") == "targeted_review":
+            dynamic = contract.get("dynamic_stage_definitions") or []
+            if len(dynamic) != 1 or dynamic[0].get("stage_key") != "targeted_review":
+                raise StageExecutionStateConflict("targeted_review_contract_missing")
+            definition = dynamic[0]
+            next_stage_no = stage.stage_no + 1
+        elif stage.stage_key == "targeted_review":
+            definition = next((item for item in stages if item.get("stage_key") == "decision_finalization"), None)
+            if definition is None:
+                raise StageExecutionStateConflict("decision_finalization_contract_missing")
+            next_stage_no = stage.stage_no + 1
+        else:
+            try:
+                current_index = next(index for index, item in enumerate(stages) if item.get("stage_key") == stage.stage_key)
+            except StopIteration as exc:
+                raise StageExecutionStateConflict("compiled_profile_stage_missing") from exc
+            if current_index + 1 >= len(stages):
+                updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "completed", "ai_medical_status": "not_produced", "finished_at": now})
+                if updated is None:
+                    raise StageExecutionStateConflict("task_complete_conflict")
+                return
+            definition = stages[current_index + 1]
+            next_stage_no = stage.stage_no + 1
+        if definition is None:
             updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "completed", "ai_medical_status": "not_produced", "finished_at": now})
             if updated is None:
                 raise StageExecutionStateConflict("task_complete_conflict")
             return
-        definition = stages[current_index + 1]
         next_stage_id = new_opaque_id()
         next_input = {
             "task_id": task.id,
@@ -158,7 +196,7 @@ class ImagingExecutionService:
             "task_id": task.id,
             "task_attempt_no": task.attempt_no,
             "stage_instance_key": f"{definition['stage_key']}:1",
-            "stage_no": current_index + 2,
+            "stage_no": next_stage_no,
             "stage_key": definition["stage_key"],
             "handler_key": definition["handler_key"],
             "handler_version": definition["handler_version"],

@@ -23,6 +23,7 @@ class StageExecutionWorker:
                         "study_preparation": service.complete_study_preparation,
                         "joint_primary_reader": service.complete_joint_primary_reader,
                         "family_routing": service.complete_family_routing,
+                        "targeted_review": service.complete_targeted_review,
                         "decision_finalization": service.complete_decision_finalization,
                     }.get(stage.stage_key)
                     if handler is None:
