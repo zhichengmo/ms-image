@@ -68,7 +68,7 @@ def build_default_registry() -> StageRegistry:
     return registry
 
 
-def compile_profile(profile_key: str, registry: StageRegistry) -> tuple[list[StageDefinition], str]:
+def compile_profile_contract(profile_key: str, registry: StageRegistry) -> tuple[dict[str, Any], str]:
     paths = {
         ZERO_MODEL_PROFILE: [("study_preparation", "v1")],
         "xray_primary_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("decision_finalization", "v1")],
@@ -82,8 +82,51 @@ def compile_profile(profile_key: str, registry: StageRegistry) -> tuple[list[Sta
     definitions = [registry.resolve(handler_key=key, handler_version=version) for key, version in requested]
     if profile_key == ZERO_MODEL_PROFILE and any(item.provider_required for item in definitions):
         raise PipelineContractError("zero_model_profile_provider_forbidden")
-    payload = [{"stage_key": item.stage_key, "handler_key": item.handler_key, "handler_version": item.handler_version} for item in definitions]
-    return definitions, hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    contract: dict[str, Any] = {
+        "profile_key": profile_key,
+        "stages": [
+            {
+                "stage_key": item.stage_key,
+                "handler_key": item.handler_key,
+                "handler_version": item.handler_version,
+                "provider_required": item.provider_required,
+            }
+            for item in definitions
+        ],
+        "conditional_edges": [],
+        "dynamic_stage_definitions": [],
+    }
+    if profile_key == "xray_targeted_review_v1":
+        targeted = registry.resolve(handler_key="targeted_review", handler_version="v1")
+        contract["conditional_edges"] = [
+            {"from": "family_routing", "signal": "primary_final", "to": "decision_finalization"},
+            {"from": "family_routing", "signal": "targeted_review", "to": "targeted_review"},
+            {"from": "targeted_review", "signal": "completed", "to": "decision_finalization"},
+        ]
+        contract["dynamic_stage_definitions"] = [
+            {
+                "stage_key": targeted.stage_key,
+                "handler_key": targeted.handler_key,
+                "handler_version": targeted.handler_version,
+                "provider_required": targeted.provider_required,
+                "max_instances": 1,
+            }
+        ]
+    digest = hashlib.sha256(
+        json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return contract, digest
 
 
-__all__ = ["PipelineContractError", "StageContext", "StageDefinition", "StageRegistry", "StageResult", "ZERO_MODEL_PROFILE", "build_default_registry", "compile_profile"]
+def compile_profile(profile_key: str, registry: StageRegistry) -> tuple[list[StageDefinition], str]:
+    contract, digest = compile_profile_contract(profile_key, registry)
+    definitions = [
+        registry.resolve(
+            handler_key=item["handler_key"], handler_version=item["handler_version"]
+        )
+        for item in contract["stages"]
+    ]
+    return definitions, digest
+
+
+__all__ = ["PipelineContractError", "StageContext", "StageDefinition", "StageRegistry", "StageResult", "ZERO_MODEL_PROFILE", "build_default_registry", "compile_profile", "compile_profile_contract"]

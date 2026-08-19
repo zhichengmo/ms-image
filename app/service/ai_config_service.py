@@ -2,7 +2,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.pipeline import StageRegistry, build_default_registry, compile_profile
+from app.core.pipeline import StageRegistry, build_default_registry, compile_profile_contract
 from app.crud.ai_config_record import AIConfigRecordDal
 from app.models.ai_config_record import AIConfigRecord
 from app.models.imaging_base import new_opaque_id
@@ -41,8 +41,7 @@ class AIConfigService:
     def _compile(self, payload: AIConfigCreate) -> tuple[dict[str, Any], str]:
         if payload.capability_manifest.get("provider_disabled") is not True or payload.provider_plan.get("enabled") is not False:
             raise AIConfigValidationError("provider_disabled_required")
-        definitions, digest = compile_profile(payload.profile_key, self.registry)
-        return ({"profile_key": payload.profile_key, "stages": [item.__dict__ for item in definitions]}, digest)
+        return compile_profile_contract(payload.profile_key, self.registry)
 
     async def create(self, payload: AIConfigCreate) -> AIConfigResponse:
         compiled, digest = self._compile(payload)
