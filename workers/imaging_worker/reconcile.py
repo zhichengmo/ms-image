@@ -166,7 +166,24 @@ class ImageReconciler:
         for image in images:
             if not await self._heartbeat_cursor(cursor=cursor, owner_id=owner, lease_seconds=lease_seconds):
                 return {"cursor_lease_lost": 1}
-            outcome = await self.verify_ready_image(image_id=image.id)
+            stop_heartbeat = asyncio.Event()
+            lease_lost = asyncio.Event()
+            heartbeat = asyncio.create_task(
+                self._heartbeat_cursor_loop(
+                    cursor=cursor,
+                    owner_id=owner,
+                    lease_seconds=lease_seconds,
+                    stop=stop_heartbeat,
+                    lease_lost=lease_lost,
+                )
+            )
+            try:
+                outcome = await self.verify_ready_image(image_id=image.id)
+            finally:
+                stop_heartbeat.set()
+                await heartbeat
+            if lease_lost.is_set():
+                return {"cursor_lease_lost": 1}
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
             if not await self._heartbeat_cursor(cursor=cursor, owner_id=owner, lease_seconds=lease_seconds):
                 return {"cursor_lease_lost": 1}
@@ -192,6 +209,30 @@ class ImageReconciler:
                     now=now,
                     lease_expires_at=now + timedelta(seconds=lease_seconds),
                 )
+
+    async def _heartbeat_cursor_loop(
+        self,
+        *,
+        cursor,
+        owner_id: str,
+        lease_seconds: int,
+        stop: asyncio.Event,
+        lease_lost: asyncio.Event,
+    ) -> None:
+        interval = max(1.0, min(30.0, lease_seconds / 3))
+        while True:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except asyncio.TimeoutError:
+                pass
+            if not await self._heartbeat_cursor(
+                cursor=cursor,
+                owner_id=owner_id,
+                lease_seconds=lease_seconds,
+            ):
+                lease_lost.set()
+                return
 
     async def verify_ready_image(self, *, image_id: str) -> str:
         async with self.session_factory() as session:
