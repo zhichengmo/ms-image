@@ -56,4 +56,8 @@ class AIConfigActivateRequest(BaseModel):
         return normalize_required_text(value)
 
 
-__all__ = ["AIConfigActivateRequest", "AIConfigCreate", "AIConfigResponse"]
+class AIConfigStateRequest(AIConfigActivateRequest):
+    pass
+
+
+__all__ = ["AIConfigActivateRequest", "AIConfigCreate", "AIConfigResponse", "AIConfigStateRequest"]
