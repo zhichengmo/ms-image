@@ -109,7 +109,8 @@ class EvaluationService:
         )
         if job is None:
             raise EvaluationStateConflictError("evaluation_job_create_conflict")
-        message = {"job_id": job.id, "expected_state_version": job.state_version}
+        trace_id = f"evaluation:{job.id}:{job.state_version}"
+        message = {"job_id": job.id, "expected_state_version": job.state_version, "trace_id": trace_id}
         outbox = await self.outbox_dal.create_idempotent(
             {
                 "id": new_opaque_id(),
@@ -117,9 +118,13 @@ class EvaluationService:
                 "aggregate_version": job.state_version,
                 "event_key": f"evaluation:{job.id}:execute:{job.state_version}",
                 "event_type": "execute_evaluation",
+                "destination_key": "evaluation.job.execute",
+                "trace_id": trace_id,
+                "message_version": "evaluation-execution.v1",
                 "message_json": message,
                 "message_sha256": self._sha(message),
                 "publish_status": "pending",
+                "publish_attempt_count": 0,
             }
         )
         if outbox is None:

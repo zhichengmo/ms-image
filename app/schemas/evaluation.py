@@ -88,6 +88,18 @@ class EvaluationJobStateRequest(BaseModel):
         return normalize_required_text(value)
 
 
+class ExecuteEvaluationMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    trace_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("job_id", "trace_id")
+    @classmethod
+    def normalize_message_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
 class EvaluationArtifactResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -112,4 +124,5 @@ __all__ = [
     "EvaluationJobStateRequest",
     "EvaluationRunResponse",
     "EvaluationRunCreate",
+    "ExecuteEvaluationMessage",
 ]

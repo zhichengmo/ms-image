@@ -32,11 +32,20 @@ class EvaluationOutbox(ImagingRecordBase):
     aggregate_version: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="BIGINT: Job 版本")
     event_key: Mapped[str] = mapped_column(String(160), nullable=False, comment="VARCHAR(160): 事件幂等键")
     event_type: Mapped[str] = mapped_column(String(48), nullable=False, comment="VARCHAR(48): execute_evaluation")
+    destination_key: Mapped[str] = mapped_column(String(128), nullable=False, comment="VARCHAR(128): Evaluation queue 配置键")
+    trace_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="VARCHAR(128): 跨边界 trace ID")
+    message_version: Mapped[str] = mapped_column(String(32), nullable=False, comment="VARCHAR(32): Evaluation 消息合同版本")
     message_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="JSON: opaque ID/version/trace")
     message_sha256: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): 消息摘要")
     publish_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default=text("'pending'"), comment="VARCHAR(32): pending/published/retry_wait/dead_letter")
+    relay_owner_id: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="VARCHAR(128)|NULL: Relay lease owner")
+    relay_lease_expires_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: Relay lease 到期")
+    publish_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"), comment="INT: 发布尝试次数")
     next_retry_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: 下次重试")
+    broker_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, comment="VARCHAR(128)|NULL: Broker message ID")
+    published_at: Mapped[datetime | None] = mapped_column(DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: publisher confirm 时间")
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True, comment="VARCHAR(80)|NULL: 稳定错误码")
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True, comment="VARCHAR(500)|NULL: 脱敏错误摘要")
 
 
 class EvaluationRun(ImagingRecordBase):
