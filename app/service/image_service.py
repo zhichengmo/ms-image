@@ -519,6 +519,17 @@ class ImageService:
             )
             if not image.upload_session_ref:
                 raise ImageStateConflictError("multipart_upload_session_missing")
+        elif operation == "list_parts":
+            if generation is None:
+                raise ImageStateConflictError("image_generation_required")
+            self._validate_upload_operation(
+                image=image,
+                expected_state_version=expected_state_version,
+                generation=generation,
+                required_mode="multipart",
+            )
+            if not image.upload_session_ref:
+                raise ImageStateConflictError("multipart_upload_session_missing")
         elif operation == "multipart_prepare":
             if generation is None:
                 raise ImageStateConflictError("image_generation_required")

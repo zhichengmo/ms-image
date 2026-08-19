@@ -17,6 +17,8 @@ from app.schemas.base import GenericResponse
 from app.schemas.image import (
     ImageAbortCommand,
     ImageCompleteUploadRequest,
+    ImageListMultipartPartsRequest,
+    ImageMultipartPartReceipt,
     ImageMultipartPartsResponse,
     ImageMultipartUploadTicket,
     ImagePrepareMultipartRequest,
@@ -241,6 +243,44 @@ async def prepare_upload_parts(
     except Exception as exc:
         return await rollback_and_map(dependencies.db, exc)
     return GenericResponse(message="Image 分片上传地址已准备", data=data)
+
+
+@router.post(
+    "/list-upload-parts",
+    response_model=GenericResponse[list[ImageMultipartPartReceipt]],
+)
+async def list_upload_parts(
+    payload: ImageListMultipartPartsRequest,
+    context: dict = Depends(resource_context),
+    dependencies: ImageStorageDependencies = Depends(get_image_storage_dependencies),
+):
+    try:
+        gateway = dependencies.gateway_factory()
+        async with dependencies.db.begin():
+            candidate = await dependencies.service.get_upload_operation_candidate(
+                image_id=payload.id,
+                requester_id=context["subject"],
+                expected_state_version=payload.expected_state_version,
+                generation=payload.generation,
+                operation="list_parts",
+            )
+        if gateway.storage_profile != candidate.storage_profile:
+            raise ObjectStoreError("object_storage_profile_mismatch")
+        parts = await gateway.list_multipart_parts(
+            object_key=candidate.object_key,
+            upload_session_ref=str(candidate.upload_session_ref),
+        )
+        data = [
+            ImageMultipartPartReceipt(
+                part_number=item.part_number,
+                etag=item.etag,
+                size_bytes=item.size_bytes,
+            )
+            for item in parts
+        ]
+    except Exception as exc:
+        return await rollback_and_map(dependencies.db, exc)
+    return GenericResponse(message="Image 已上传分片查询成功", data=data)
 
 
 @router.post(

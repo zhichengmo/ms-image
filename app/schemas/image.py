@@ -246,6 +246,19 @@ class ImagePreparePartsRequest(BaseModel):
         return sorted(value)
 
 
+class ImageListMultipartPartsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=64)
+    expected_state_version: int = Field(ge=0)
+    generation: int = Field(ge=1)
+
+    @field_validator("id")
+    @classmethod
+    def normalize_id(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+
 class ImageSignedPart(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -420,6 +433,7 @@ __all__ = [
     "ImageMultipartPartReceipt",
     "ImageMultipartPartsResponse",
     "ImageMultipartUploadTicket",
+    "ImageListMultipartPartsRequest",
     "ImagePrepareMultipartRequest",
     "ImagePreparePartsRequest",
     "ImagePrepareUploadRequest",
