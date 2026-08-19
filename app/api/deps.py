@@ -17,6 +17,7 @@ from app.core.imaging.object_store import (
     OSSObjectStore,
     ObjectStorageGateway,
 )
+from app.core.contexts import CallerContext, ControlPlaneContext
 
 if TYPE_CHECKING:
     from app.service.image_service import ImageService
@@ -225,6 +226,39 @@ def get_resource_context(jwt_data: dict = Depends(get_jwt_data)) -> dict:
         "subject": subject.strip(),
         "scopes": sorted(_scopes(jwt_data)),
     }
+
+
+def get_caller_context(jwt_data: dict = Depends(get_jwt_data)) -> CallerContext:
+    subject = jwt_data.get("sub")
+    if not isinstance(subject, str) or not subject.strip():
+        raise _unauthorized("Subject is required")
+    return CallerContext(subject_id=subject.strip(), scopes=frozenset(_scopes(jwt_data)))
+
+
+def require_caller_scope(*required_scopes: str):
+    scopes = frozenset(required_scopes)
+
+    def dependency(context: CallerContext = Depends(get_caller_context)) -> CallerContext:
+        if scopes and not scopes.issubset(context.scopes):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient caller scope")
+        return context
+
+    return dependency
+
+
+def get_control_plane_context(payload: dict = Depends(get_admin_jwt_data)) -> ControlPlaneContext:
+    return ControlPlaneContext(subject_id=payload["sub"], scopes=frozenset(_scopes(payload)))
+
+
+def require_control_plane_scope(*required_scopes: str):
+    scopes = frozenset(required_scopes) or frozenset({settings.ADMIN_REQUIRED_WRITE_SCOPE})
+
+    def dependency(context: ControlPlaneContext = Depends(get_control_plane_context)) -> ControlPlaneContext:
+        if not scopes.issubset(context.scopes):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient control-plane scope")
+        return context
+
+    return dependency
 
 
 def require_resource_scope(*required_scopes: str):
