@@ -36,6 +36,7 @@ class EvaluationJobResponse(BaseModel):
     id: str
     requester_id: str
     business_key: str
+    request_payload_sha256: str
     dataset_fingerprint: str
     gold_fingerprint: str
     scorer_fingerprint: str

@@ -12,6 +12,11 @@ class EvaluationJob(ImagingRecordBase):
     __table_args__ = (UniqueConstraint("business_key", name="uq_evaluation_job_business_key"), Index("ix_evaluation_job_status", "status", "created_at"))
     requester_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="VARCHAR(128): Evaluation/ControlPlane requester ID")
     business_key: Mapped[str] = mapped_column(String(200), nullable=False, comment="VARCHAR(200): Job 幂等键")
+    request_payload_sha256: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment="CHAR(64): 规范化 Evaluation Job 创建请求 SHA256，用于完整 payload 幂等比对",
+    )
     dataset_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): 冻结 dataset 指纹")
     gold_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): 冻结 Gold 指纹")
     scorer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): scorer 指纹")

@@ -57,21 +57,48 @@ class EvaluationService:
         if payload.sanitization.provenance.get("sanitized") is not True:
             raise EvaluationValidationError("sanitization_proof_required")
 
-        canonical = payload.model_dump(mode="json")
+        request_payload_sha256 = self._sha(
+            self._normalized_request_payload(payload=payload, context=context)
+        )
         business_key = self._sha(
             {
-                "requester": context.subject_id,
+                "requester_id": context.subject_id,
                 "request_id": payload.request_id,
-                "payload": canonical,
             }
         )
         existing = await self.job_dal.get_by_business_key(business_key)
         if existing is not None:
+            self._ensure_idempotent_payload(existing, request_payload_sha256)
             return EvaluationJobResponse.model_validate(existing)
 
         job_id = new_opaque_id()
         input_id = new_opaque_id()
         sanitization_id = new_opaque_id()
+        job = await self.job_dal.create_idempotent(
+            {
+                "id": job_id,
+                "requester_id": context.subject_id,
+                "business_key": business_key,
+                "request_payload_sha256": request_payload_sha256,
+                "dataset_fingerprint": payload.dataset_fingerprint,
+                "gold_fingerprint": payload.gold_fingerprint,
+                "scorer_fingerprint": payload.scorer_fingerprint,
+                "experiment_fingerprint": payload.experiment_fingerprint,
+                "case_split_json": payload.case_split,
+                "denominator_contract_json": payload.denominator_contract,
+                "input_manifest_artifact_id": input_id,
+                "sanitization_artifact_id": sanitization_id,
+                "status": "queued",
+                "state_version": 0,
+            }
+        )
+        if job is None:
+            existing = await self.job_dal.get_by_business_key(business_key)
+            if existing is None:
+                raise EvaluationStateConflictError("evaluation_job_create_conflict")
+            self._ensure_idempotent_payload(existing, request_payload_sha256)
+            return EvaluationJobResponse.model_validate(existing)
+
         artifact_values = (
             (input_id, "input_manifest", payload.input_manifest),
             (sanitization_id, "sanitization", payload.sanitization),
@@ -90,27 +117,12 @@ class EvaluationService:
                     "status": "ready",
                 }
             )
-        job = await self.job_dal.create_idempotent(
-            {
-                "id": job_id,
-                "requester_id": context.subject_id,
-                "business_key": business_key,
-                "dataset_fingerprint": payload.dataset_fingerprint,
-                "gold_fingerprint": payload.gold_fingerprint,
-                "scorer_fingerprint": payload.scorer_fingerprint,
-                "experiment_fingerprint": payload.experiment_fingerprint,
-                "case_split_json": payload.case_split,
-                "denominator_contract_json": payload.denominator_contract,
-                "input_manifest_artifact_id": input_id,
-                "sanitization_artifact_id": sanitization_id,
-                "status": "queued",
-                "state_version": 0,
-            }
-        )
-        if job is None:
-            raise EvaluationStateConflictError("evaluation_job_create_conflict")
         trace_id = f"evaluation:{job.id}:{job.state_version}"
-        message = {"job_id": job.id, "expected_state_version": job.state_version, "trace_id": trace_id}
+        message = {
+            "job_id": job.id,
+            "expected_state_version": job.state_version,
+            "trace_id": trace_id,
+        }
         outbox = await self.outbox_dal.create_idempotent(
             {
                 "id": new_opaque_id(),
@@ -137,7 +149,9 @@ class EvaluationService:
             raise EvaluationNotFoundError("evaluation_job_not_found")
         return EvaluationJobResponse.model_validate(job)
 
-    async def cancel_job(self, job_id: str, expected_version: int) -> EvaluationJobResponse:
+    async def cancel_job(
+        self, job_id: str, expected_version: int
+    ) -> EvaluationJobResponse:
         job = await self.job_dal.get_by_id(job_id)
         if job is None:
             raise EvaluationNotFoundError("evaluation_job_not_found")
@@ -198,8 +212,40 @@ class EvaluationService:
         return EvaluationArtifactResponse.model_validate(artifact)
 
     @staticmethod
+    def _normalized_request_payload(
+        *, payload: EvaluationJobCreate, context: ControlPlaneContext
+    ) -> dict[str, Any]:
+        return {
+            "requester_id": context.subject_id,
+            "request_id": payload.request_id,
+            "dataset_fingerprint": payload.dataset_fingerprint,
+            "gold_fingerprint": payload.gold_fingerprint,
+            "scorer_fingerprint": payload.scorer_fingerprint,
+            "experiment_fingerprint": payload.experiment_fingerprint,
+            "case_split": payload.case_split,
+            "denominator_contract": payload.denominator_contract,
+            "input_manifest_artifact_sha256": payload.input_manifest.content_sha256,
+            "sanitization_artifact_sha256": payload.sanitization.content_sha256,
+            "input_manifest_object_ref": payload.input_manifest.object_ref,
+            "input_manifest_provenance": payload.input_manifest.provenance,
+            "sanitization_object_ref": payload.sanitization.object_ref,
+            "sanitization_provenance": payload.sanitization.provenance,
+        }
+
+    @staticmethod
+    def _ensure_idempotent_payload(job: Any, expected_sha256: str) -> None:
+        if job.request_payload_sha256 != expected_sha256:
+            raise EvaluationStateConflictError("evaluation_idempotency_conflict")
+
+    @staticmethod
     def _validate_artifact(ref: dict[str, Any], sha: str) -> None:
-        required = ("storage_profile", "object_key", "sha256", "size_bytes", "content_type")
+        required = (
+            "storage_profile",
+            "object_key",
+            "sha256",
+            "size_bytes",
+            "content_type",
+        )
         if any(not ref.get(key) for key in required) or ref.get("sha256") != sha:
             raise EvaluationValidationError("evaluation_artifact_invalid")
 
