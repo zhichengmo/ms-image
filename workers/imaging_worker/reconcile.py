@@ -161,18 +161,37 @@ class ImageReconciler:
         async with self.session_factory() as session:
             async with session.begin():
                 images = await ImageDal(session).list_ready_after(updated_at=cursor.last_ready_updated_at, image_id=cursor.last_ready_image_id, limit=limit)
+        images = images[:1]
         outcomes: dict[str, int] = {}
         for image in images:
+            if not await self._heartbeat_cursor(cursor=cursor, owner_id=owner, lease_seconds=lease_seconds):
+                return {"cursor_lease_lost": 1}
             outcome = await self.verify_ready_image(image_id=image.id)
             outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            if not await self._heartbeat_cursor(cursor=cursor, owner_id=owner, lease_seconds=lease_seconds):
+                return {"cursor_lease_lost": 1}
             if outcome == "retry":
                 break
         last = images[-1] if images and outcomes.get("retry", 0) == 0 else None
         async with self.session_factory() as session:
             async with session.begin():
                 cursors = ObjectReconcileCursorDal(session)
-                await cursors.advance(cursor_id=cursor.id, expected_version=cursor.state_version, owner_id=owner, lease_generation=cursor.lease_generation, now=datetime.utcnow(), last_ready_updated_at=last.updated_at if last else (cursor.last_ready_updated_at if images else None), last_ready_image_id=last.id if last else (cursor.last_ready_image_id if images else None), next_scan_at=datetime.utcnow() if last else datetime.utcnow() + timedelta(seconds=60))
+                advanced = await cursors.advance(cursor_id=cursor.id, expected_version=cursor.state_version, owner_id=owner, lease_generation=cursor.lease_generation, now=datetime.utcnow(), last_ready_updated_at=last.updated_at if last else (cursor.last_ready_updated_at if images else None), last_ready_image_id=last.id if last else (cursor.last_ready_image_id if images else None), next_scan_at=datetime.utcnow() if last else datetime.utcnow() + timedelta(seconds=60))
+        if advanced is None:
+            outcomes["cursor_advance_conflict"] = outcomes.get("cursor_advance_conflict", 0) + 1
         return outcomes
+
+    async def _heartbeat_cursor(self, *, cursor, owner_id: str, lease_seconds: int) -> bool:
+        now = datetime.utcnow()
+        async with self.session_factory() as session:
+            async with session.begin():
+                return await ObjectReconcileCursorDal(session).heartbeat(
+                    cursor_id=cursor.id,
+                    owner_id=owner_id,
+                    lease_generation=cursor.lease_generation,
+                    now=now,
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                )
 
     async def verify_ready_image(self, *, image_id: str) -> str:
         async with self.session_factory() as session:

@@ -28,6 +28,27 @@ class ObjectReconcileCursorDal(DalBase):
             return None
         return await self.get_data(cursor_key=cursor_key, v_return_none=True, v_expire_all=True)
 
+    async def heartbeat(
+        self,
+        *,
+        cursor_id: str,
+        owner_id: str,
+        lease_generation: int,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        if lease_generation < 1 or lease_expires_at <= now:
+            raise ValueError("object_reconcile_cursor_heartbeat_invalid")
+        return await self.conditional_update(
+            v_where=[
+                self.model.id == cursor_id,
+                self.model.lease_owner_id == owner_id,
+                self.model.lease_generation == lease_generation,
+                self.model.lease_expires_at > now,
+            ],
+            data={"lease_expires_at": lease_expires_at},
+        )
+
     async def advance(self, *, cursor_id: str, expected_version: int, owner_id: str, lease_generation: int, now: datetime, last_ready_updated_at: datetime | None, last_ready_image_id: str | None, next_scan_at: datetime) -> ObjectReconcileCursor | None:
         return await self.cas_put_data(data_id=cursor_id, expected_version=expected_version, data={"last_ready_updated_at": last_ready_updated_at, "last_ready_image_id": last_ready_image_id, "next_scan_at": next_scan_at, "lease_owner_id": None, "lease_expires_at": None, "error_code": None}, v_where=[self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now])
 
