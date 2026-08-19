@@ -13,6 +13,7 @@ from app.core.messaging.celery import create_celery_app
 from app.core.messaging.config import runtime_config, topology_for
 
 from .image_validation import ImageValidationWorker
+from .stage_execution import StageExecutionWorker
 
 
 runtime = runtime_config(source=settings, prefix="IMAGING")
@@ -78,4 +79,44 @@ def validate_image(self: Any, message: dict[str, Any]) -> None:
         raise Reject(str(result.get("error_code") or "image_validation_dead_letter"), requeue=False)
 
 
-__all__ = ["celery_app", "runtime", "topology", "validate_image"]
+@celery_app.task(
+    name="imaging.execute_stage",
+    bind=True,
+    ignore_result=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def execute_stage(self: Any, message: dict[str, Any]) -> None:
+    if not settings.BROKER_ENABLED:
+        raise Reject("imaging_broker_disabled", requeue=False)
+    if not isinstance(message, dict):
+        raise Reject("stage_execution_message_invalid", requeue=False)
+    event_id = str(self.request.id or "").strip()
+    headers = self.request.headers or {}
+    message_version = str(headers.get("message_version") or "").strip()
+    trace_id = str(headers.get("trace_id") or "").strip()
+    if not event_id or not message_version or not trace_id:
+        raise Reject("stage_execution_consumer_identity_missing", requeue=False)
+
+    async def run() -> dict[str, Any]:
+        try:
+            return await StageExecutionWorker(session_factory_=session_factory).execute(
+                event_id=event_id,
+                message=message,
+                message_version=message_version,
+                trace_id=trace_id,
+                owner_id=f"celery:{self.request.hostname or 'worker'}:{event_id}"[:128],
+                lease_seconds=runtime.worker_lease_seconds,
+            )
+        finally:
+            await async_engine.dispose()
+
+    try:
+        result = asyncio.run(run())
+    except Exception:
+        raise Reject("stage_execution_worker_error", requeue=False)
+    if result.get("outcome") == "conflict":
+        raise Reject(str(result.get("error_code") or "stage_execution_conflict"), requeue=False)
+
+
+__all__ = ["celery_app", "runtime", "topology", "validate_image", "execute_stage"]

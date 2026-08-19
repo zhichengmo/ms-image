@@ -1,5 +1,7 @@
+from datetime import datetime
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,15 @@ class StageCheckpointDal(DalBase):
         if not values or not set(values).issubset(allowed):
             raise ValueError("stage_checkpoint_update_fields_invalid")
         return await self.cas_put_data(data_id=checkpoint_id, expected_version=expected_version, data=values)
+
+    async def claim(self, *, checkpoint_id: str, expected_version: int, owner_id: str, now: datetime, lease_expires_at: datetime) -> StageCheckpoint | None:
+        claimed = await self.conditional_update(v_where=[self.model.id == checkpoint_id, self.model.status == "queued", self.model.state_version == expected_version, or_(self.model.lease_expires_at.is_(None), self.model.lease_expires_at <= now)], data={"status": "running", "lease_owner_id": owner_id, "lease_generation": self.model.lease_generation + 1, "lease_expires_at": lease_expires_at, "heartbeat_at": now, "started_at": now})
+        if not claimed:
+            return None
+        return await self.get_data(data_id=checkpoint_id, v_return_none=True, v_expire_all=True)
+
+    async def heartbeat(self, *, checkpoint_id: str, owner_id: str, lease_generation: int, now: datetime, lease_expires_at: datetime) -> bool:
+        return await self.conditional_update(v_where=[self.model.id == checkpoint_id, self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now], data={"heartbeat_at": now, "lease_expires_at": lease_expires_at})
 
 
 __all__ = ["StageCheckpointDal"]

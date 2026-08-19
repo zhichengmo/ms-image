@@ -1,0 +1,24 @@
+from __future__ import annotations
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.service.imaging_execution_service import ImagingExecutionService, StageExecutionStateConflict
+
+
+class StageExecutionWorker:
+    def __init__(self, *, session_factory_: async_sessionmaker[AsyncSession]):
+        self.session_factory = session_factory_
+
+    async def execute(self, *, event_id: str, message: dict, message_version: str, trace_id: str, owner_id: str, lease_seconds: int) -> dict:
+        async with self.session_factory() as session:
+            async with session.begin():
+                stage = await ImagingExecutionService(session).claim(event_id=event_id, message=message, message_version=message_version, trace_id=trace_id, owner_id=owner_id, lease_seconds=lease_seconds)
+        if stage is None:
+            return {"outcome": "already_applied", "event_id": event_id}
+        try:
+            async with self.session_factory() as session:
+                async with session.begin():
+                    output = await ImagingExecutionService(session).complete_study_preparation(stage=stage, owner_id=owner_id)
+        except StageExecutionStateConflict as exc:
+            return {"outcome": "conflict", "event_id": event_id, "error_code": str(exc)}
+        return {"outcome": "completed", "event_id": event_id, "output_sha256": __import__('hashlib').sha256(__import__('json').dumps(output, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
