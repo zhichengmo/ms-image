@@ -174,11 +174,23 @@ class EvaluationService:
             for item in await self.run_dal.list_for_job(job_id)
         ]
 
+    async def get_run(self, run_id: str) -> EvaluationRunResponse:
+        run = await self.run_dal.get_by_id(run_id)
+        if run is None:
+            raise EvaluationNotFoundError("evaluation_run_not_found")
+        return EvaluationRunResponse.model_validate(run)
+
     async def list_artifacts(self, job_id: str) -> list[EvaluationArtifactResponse]:
         return [
             EvaluationArtifactResponse.model_validate(item)
             for item in await self.artifact_dal.list_for_job(job_id)
         ]
+
+    async def get_artifact(self, artifact_id: str) -> EvaluationArtifactResponse:
+        artifact = await self.artifact_dal.get_by_id(artifact_id)
+        if artifact is None:
+            raise EvaluationNotFoundError("evaluation_artifact_not_found")
+        return EvaluationArtifactResponse.model_validate(artifact)
 
     @staticmethod
     def _validate_artifact(ref: dict[str, Any], sha: str) -> None:

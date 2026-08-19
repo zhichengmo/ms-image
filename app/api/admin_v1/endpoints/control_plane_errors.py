@@ -9,6 +9,7 @@ from app.service.ai_config_service import (
     AIConfigValidationError,
 )
 from app.service.report_service import ReportNotFoundError, ReportStateConflictError
+from app.service.evaluation_service import EvaluationNotFoundError, EvaluationStateConflictError, EvaluationValidationError
 
 
 def _response(status_code: int, error_code: int, message: str) -> JSONResponse:
@@ -32,6 +33,12 @@ async def rollback_and_map_control_plane(db: AsyncSession, exc: Exception) -> JS
         return _response(404, 4042, "Report 不存在")
     if isinstance(exc, ReportStateConflictError):
         return _response(409, 4092, "Report 状态冲突")
+    if isinstance(exc, EvaluationNotFoundError):
+        return _response(404, 4043, "Evaluation 资源不存在")
+    if isinstance(exc, EvaluationValidationError):
+        return _response(422, 4222, "Evaluation 合同无效")
+    if isinstance(exc, EvaluationStateConflictError):
+        return _response(409, 4093, "Evaluation 状态冲突")
     raise exc
 
 

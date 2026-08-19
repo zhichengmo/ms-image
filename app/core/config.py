@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     ADMIN_JWT_AUDIENCE: str = "ms-image-admin-api"
     ADMIN_REQUIRED_SCOPE: str = "xray:admin:read"
     ADMIN_REQUIRED_WRITE_SCOPE: str = "xray:admin:write"
+    EVALUATION_REQUIRED_SCOPE: str = "xray:evaluation:write"
     RSA_PUBLIC_KEY_PATH: str = "rsa_public.pem"
     TENANT_CLAIM: str = "tenant_id"
 
