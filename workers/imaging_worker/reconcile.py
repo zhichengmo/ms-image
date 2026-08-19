@@ -21,6 +21,7 @@ from app.core.messaging.config import runtime_config
 from app.crud.image import ImageDal
 from app.crud.object_reconcile_cursor import ObjectReconcileCursorDal
 from app.service.image_service import ImageService, ImageStateConflictError
+from app.service.imaging_execution_service import ImagingExecutionService
 
 from .image_validation import ImageValidationWorker
 
@@ -47,6 +48,9 @@ class ImageReconciler:
         if limit < 1:
             raise ValueError("image_reconcile_limit_invalid")
         now = datetime.utcnow()
+        async with self.session_factory() as session:
+            async with session.begin():
+                stage_reconcile = await ImagingExecutionService(session).reconcile_expired_stages(now=now, limit=limit, max_attempts=max_attempts)
         async with self.session_factory() as session:
             async with session.begin():
                 expired = await ImageService(session).recover_expired_validation_leases(
@@ -140,6 +144,7 @@ class ImageReconciler:
         for key, value in cursor_ready.items():
             ready_outcomes[key] = ready_outcomes.get(key, 0) + value
         return {
+            "stages": stage_reconcile,
             "expired_leases": expired,
             "validation": validation_outcomes,
             "uploads": upload_outcomes,

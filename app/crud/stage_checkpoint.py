@@ -52,5 +52,15 @@ class StageCheckpointDal(DalBase):
         terminal.update({"lease_owner_id": None, "lease_expires_at": None, "heartbeat_at": None, "next_retry_at": None})
         return await self.cas_put_data(data_id=checkpoint_id, expected_version=expected_version, data=terminal, v_where=[self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now])
 
+    async def list_expired_running(self, *, now: datetime, limit: int) -> list[StageCheckpoint]:
+        return await self.get_datas(page=1, limit=limit, v_where=[self.model.status == "running", self.model.lease_expires_at.is_not(None), self.model.lease_expires_at <= now], v_order_field="lease_expires_at", v_return_objs=True)
+
+    async def recover_expired(self, *, checkpoint_id: str, expected_version: int, lease_generation: int, now: datetime, max_attempts: int) -> StageCheckpoint | None:
+        row = await self.get_by_id(checkpoint_id)
+        if row is None:
+            return None
+        exhausted = row.retry_count + 1 >= max_attempts
+        return await self.cas_put_data(data_id=checkpoint_id, expected_version=expected_version, data={"status": "dead_letter" if exhausted else "queued", "lease_owner_id": None, "lease_expires_at": None, "heartbeat_at": None, "retry_count": row.retry_count + 1, "next_retry_at": None if exhausted else now, "error_code": "stage_attempts_exhausted" if exhausted else "stage_lease_expired", "finished_at": now if exhausted else None}, v_where=[self.model.status == "running", self.model.lease_generation == lease_generation, self.model.lease_expires_at <= now])
+
 
 __all__ = ["StageCheckpointDal"]

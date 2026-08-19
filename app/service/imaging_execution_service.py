@@ -9,6 +9,7 @@ from app.crud.outbox import OutboxDal
 from app.crud.stage_checkpoint import StageCheckpointDal
 from app.crud.task import TaskDal
 from app.schemas.outbox import ExecuteStageMessage
+from app.models.imaging_base import new_opaque_id
 
 
 class ImagingExecutionError(ValueError):
@@ -70,3 +71,29 @@ class ImagingExecutionService:
         if updated is None:
             raise StageExecutionStateConflict("task_complete_conflict")
         return output
+
+    async def reconcile_expired_stages(self, *, now: datetime, limit: int, max_attempts: int) -> dict[str, int]:
+        rows = await self.stage_dal.list_expired_running(now=now, limit=limit)
+        result = {"requeued": 0, "dead_letter": 0, "conflicted": 0}
+        for row in rows:
+            recovered = await self.stage_dal.recover_expired(checkpoint_id=row.id, expected_version=row.state_version, lease_generation=row.lease_generation, now=now, max_attempts=max_attempts)
+            if recovered is None:
+                result["conflicted"] += 1
+                continue
+            task = await self.task_dal.get_by_id(recovered.task_id)
+            if task is None:
+                await self.stage_dal.cas_update(checkpoint_id=recovered.id, expected_version=recovered.state_version, values={"status": "dead_letter", "error_code": "task_not_found", "finished_at": now})
+                result["dead_letter"] += 1
+                continue
+            if task.cancel_requested_at is not None or task.execution_status in {"cancelled", "failed", "completed", "dead_letter"}:
+                await self.stage_dal.cas_update(checkpoint_id=recovered.id, expected_version=recovered.state_version, values={"status": "cancelled", "error_code": "task_not_executable", "finished_at": now})
+                result["dead_letter"] += 1
+                continue
+            if recovered.status == "dead_letter":
+                await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "dead_letter", "ai_medical_status": "not_produced", "error_code": "stage_attempts_exhausted", "finished_at": now})
+                result["dead_letter"] += 1
+                continue
+            message = {"task_id": recovered.task_id, "stage_checkpoint_id": recovered.id, "expected_state_version": recovered.state_version, "trace_id": task.trace_id}
+            event = await self.outbox_dal.create_idempotent({"id": new_opaque_id(), "aggregate_type": "stage", "aggregate_id": recovered.id, "aggregate_version": recovered.state_version, "event_key": f"stage:{recovered.id}:execute:{recovered.state_version}", "event_type": "execute_stage", "destination_key": OutboxDal.STAGE_DESTINATION_KEY, "trace_id": message["trace_id"], "message_version": OutboxDal.STAGE_MESSAGE_VERSION, "message_json": message, "message_sha256": OutboxDal.message_sha256(message), "publish_status": "pending", "publish_attempt_count": 0})
+            result["requeued" if event is not None else "conflicted"] += 1
+        return result
