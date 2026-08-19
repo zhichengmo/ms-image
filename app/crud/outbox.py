@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crud import DalBase
 from app.models.outbox import Outbox
-from app.schemas.outbox import ValidateImageMessage
+from app.schemas.outbox import ExecuteStageMessage, ValidateImageMessage
 
 
 class OutboxDal(DalBase):
     IMAGE_MESSAGE_VERSION = "image-validation.v1"
     IMAGE_DESTINATION_KEY = "imaging.image.validate"
+    STAGE_MESSAGE_VERSION = "stage-execution.v1"
+    STAGE_DESTINATION_KEY = "imaging.stage.execute"
 
     def __init__(self, db: AsyncSession):
         super().__init__(db=db, model=Outbox)
@@ -52,9 +54,26 @@ class OutboxDal(DalBase):
         }
         return self._validate_event(values)
 
+    def validate_stage_event(self, event: Outbox) -> ExecuteStageMessage:
+        values = {
+            "aggregate_type": event.aggregate_type,
+            "aggregate_id": event.aggregate_id,
+            "aggregate_version": event.aggregate_version,
+            "event_key": event.event_key,
+            "event_type": event.event_type,
+            "destination_key": event.destination_key,
+            "trace_id": event.trace_id,
+            "message_version": event.message_version,
+            "message_json": event.message_json,
+            "message_sha256": event.message_sha256,
+        }
+        return self._validate_event(values)
+
     def validate_publish_event(self, event: Outbox) -> dict[str, Any]:
         if event.aggregate_type == "image" and event.event_type == "validate_image":
             return self.validate_image_event(event).model_dump()
+        if event.aggregate_type == "stage" and event.event_type == "execute_stage":
+            return self.validate_stage_event(event).model_dump()
         raise ValueError("outbox_publish_event_not_registered")
 
     async def get_by_id(self, event_id: str) -> Outbox | None:
@@ -286,21 +305,31 @@ class OutboxDal(DalBase):
             },
         )
 
-    def _validate_event(self, values: dict[str, Any]) -> ValidateImageMessage:
-        if values.get("aggregate_type") != "image" or values.get("event_type") != "validate_image":
-            raise ValueError("outbox_image_event_invalid")
-        if values.get("destination_key") != self.IMAGE_DESTINATION_KEY:
-            raise ValueError("outbox_destination_invalid")
-        if values.get("message_version") != self.IMAGE_MESSAGE_VERSION:
-            raise ValueError("outbox_message_version_invalid")
-        message = ValidateImageMessage.model_validate(values.get("message_json"))
-        if message.image_id != values.get("aggregate_id"):
-            raise ValueError("outbox_aggregate_identity_mismatch")
+    def _validate_event(self, values: dict[str, Any]) -> ValidateImageMessage | ExecuteStageMessage:
+        aggregate_type = values.get("aggregate_type")
+        event_type = values.get("event_type")
+        if aggregate_type == "image" and event_type == "validate_image":
+            if values.get("destination_key") != self.IMAGE_DESTINATION_KEY:
+                raise ValueError("outbox_destination_invalid")
+            if values.get("message_version") != self.IMAGE_MESSAGE_VERSION:
+                raise ValueError("outbox_message_version_invalid")
+            message = ValidateImageMessage.model_validate(values.get("message_json"))
+            if message.image_id != values.get("aggregate_id"):
+                raise ValueError("outbox_aggregate_identity_mismatch")
+            expected_event_key = f"image:{message.image_id}:validate:{message.expected_state_version}"
+        elif aggregate_type == "stage" and event_type == "execute_stage":
+            if values.get("destination_key") != self.STAGE_DESTINATION_KEY:
+                raise ValueError("outbox_destination_invalid")
+            if values.get("message_version") != self.STAGE_MESSAGE_VERSION:
+                raise ValueError("outbox_message_version_invalid")
+            message = ExecuteStageMessage.model_validate(values.get("message_json"))
+            if message.stage_checkpoint_id != values.get("aggregate_id"):
+                raise ValueError("outbox_aggregate_identity_mismatch")
+            expected_event_key = f"stage:{message.stage_checkpoint_id}:execute:{message.expected_state_version}"
+        else:
+            raise ValueError("outbox_event_not_registered")
         if message.expected_state_version != values.get("aggregate_version"):
             raise ValueError("outbox_aggregate_version_mismatch")
-        expected_event_key = (
-            f"image:{message.image_id}:validate:{message.expected_state_version}"
-        )
         if values.get("event_key") != expected_event_key:
             raise ValueError("outbox_event_key_mismatch")
         if message.trace_id != values.get("trace_id"):

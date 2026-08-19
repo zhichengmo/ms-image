@@ -16,10 +16,14 @@ from .celery_app import celery_app, runtime, topology
 
 
 def publish(envelope: OutboxPublishEnvelope) -> str:
-    if envelope.destination_key != OutboxDal.IMAGE_DESTINATION_KEY:
+    task_name = {
+        OutboxDal.IMAGE_DESTINATION_KEY: topology.task_name,
+        OutboxDal.STAGE_DESTINATION_KEY: "imaging.execute_stage",
+    }.get(envelope.destination_key)
+    if task_name is None:
         raise ValueError("outbox_destination_not_registered")
     result = celery_app.send_task(
-        topology.task_name,
+        task_name,
         args=[envelope.message],
         task_id=envelope.event_id,
         queue=topology.queue,
