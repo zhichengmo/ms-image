@@ -19,6 +19,14 @@ class TaskCreate(BaseModel):
     def normalize_text(cls, value: str) -> str:
         return normalize_required_text(value)
 
+    @field_validator("task_type")
+    @classmethod
+    def validate_task_type(cls, value: str) -> str:
+        normalized = normalize_required_text(value).lower()
+        if normalized not in {"replay", "diagnose"}:
+            raise ValueError("task_type_not_supported")
+        return normalized
+
 
 class TaskCancelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
