@@ -137,11 +137,28 @@ async def _provider_ready() -> dict[str, Any]:
 
 async def _broker_domain_ready(
     topology: BrokerTopology,
-) -> tuple[bool, str | None, str]:
+) -> tuple[bool, str | None, str, dict[str, int | bool | None]]:
+    unavailable_metrics = {
+        "consumer_count": None,
+        "queue_message_count": None,
+        "dead_letter_message_count": None,
+        # AMQP queue.declare exposes depth but not per-message timestamps.
+        "oldest_message_age_seconds": None,
+        "oldest_message_age_supported": False,
+    }
     if not settings.BROKER_ENABLED:
-        return True, None, "disabled"
+        return True, None, "disabled", unavailable_metrics
 
-    def ping() -> None:
+    def _declaration_counts(declaration: Any) -> tuple[int, int]:
+        try:
+            return int(declaration[1]), int(declaration[2])
+        except (IndexError, TypeError, ValueError):
+            return (
+                int(getattr(declaration, "message_count", 0) or 0),
+                int(getattr(declaration, "consumer_count", 0) or 0),
+            )
+
+    def ping() -> dict[str, int | bool | None]:
         from kombu import Connection, Exchange, Queue
 
         connection = Connection(
@@ -165,30 +182,40 @@ async def _broker_domain_ready(
                 },
             )
             worker_queue.maybe_bind(connection)
-            declaration = worker_queue.queue_declare()
-            try:
-                consumer_count = int(declaration[2])
-            except (IndexError, TypeError, ValueError):
-                consumer_count = int(getattr(declaration, "consumer_count", 0) or 0)
+            message_count, consumer_count = _declaration_counts(
+                worker_queue.queue_declare()
+            )
             if consumer_count < 1:
                 raise RuntimeError("worker_consumer_unavailable")
-            Queue(
+            dead_letter_queue = Queue(
                 topology.dead_letter_queue,
                 exchange=dead_exchange,
                 routing_key=topology.dead_letter_queue,
                 durable=True,
-            ).maybe_bind(connection).declare()
+            )
+            dead_letter_queue.maybe_bind(connection)
+            dead_letter_message_count, _ = _declaration_counts(
+                dead_letter_queue.queue_declare()
+            )
+            return {
+                "consumer_count": consumer_count,
+                "queue_message_count": message_count,
+                "dead_letter_message_count": dead_letter_message_count,
+                "oldest_message_age_seconds": None,
+                "oldest_message_age_supported": False,
+            }
         finally:
             connection.release()
 
     try:
-        await asyncio.to_thread(ping)
-        return True, None, "ready"
+        metrics = await asyncio.to_thread(ping)
+        return True, None, "ready", metrics
     except Exception:
         return (
             False,
             f"{topology.domain}_worker_consumer_unavailable",
             "worker_missing",
+            unavailable_metrics,
         )
 
 
@@ -231,28 +258,54 @@ async def build_readiness(redis_manager: RedisManager) -> dict[str, Any]:
             imaging_broker_ready,
             imaging_broker_error,
             imaging_broker_state,
+            imaging_broker_metrics,
         ) = await asyncio.wait_for(
             _broker_domain_ready(imaging_topology), timeout=timeout
         )
     except asyncio.TimeoutError:
-        imaging_broker_ready, imaging_broker_error, imaging_broker_state = (
+        (
+            imaging_broker_ready,
+            imaging_broker_error,
+            imaging_broker_state,
+            imaging_broker_metrics,
+        ) = (
             False,
             "imaging_broker_timeout",
             "timeout",
+            {
+                "consumer_count": None,
+                "queue_message_count": None,
+                "dead_letter_message_count": None,
+                "oldest_message_age_seconds": None,
+                "oldest_message_age_supported": False,
+            },
         )
     try:
         (
             evaluation_broker_ready,
             evaluation_broker_error,
             evaluation_broker_state,
+            evaluation_broker_metrics,
         ) = await asyncio.wait_for(
             _broker_domain_ready(evaluation_topology), timeout=timeout
         )
     except asyncio.TimeoutError:
-        evaluation_broker_ready, evaluation_broker_error, evaluation_broker_state = (
+        (
+            evaluation_broker_ready,
+            evaluation_broker_error,
+            evaluation_broker_state,
+            evaluation_broker_metrics,
+        ) = (
             False,
             "evaluation_broker_timeout",
             "timeout",
+            {
+                "consumer_count": None,
+                "queue_message_count": None,
+                "dead_letter_message_count": None,
+                "oldest_message_age_seconds": None,
+                "oldest_message_age_supported": False,
+            },
         )
 
     provider = await _provider_ready()
@@ -294,12 +347,14 @@ async def build_readiness(redis_manager: RedisManager) -> dict[str, Any]:
                 "required": settings.BROKER_ENABLED,
                 "state": imaging_broker_state,
                 "error": imaging_broker_error,
+                **imaging_broker_metrics,
             },
             "evaluation_broker": {
                 "ready": evaluation_broker_ready if settings.BROKER_ENABLED else None,
                 "required": settings.BROKER_ENABLED,
                 "state": evaluation_broker_state,
                 "error": evaluation_broker_error,
+                **evaluation_broker_metrics,
             },
             "provider": {
                 "required": bool(settings.AI_CONFIG_VERSION.strip()),
