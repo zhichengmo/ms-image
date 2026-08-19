@@ -72,7 +72,9 @@ def compile_profile(profile_key: str, registry: StageRegistry) -> tuple[list[Sta
     paths = {
         ZERO_MODEL_PROFILE: [("study_preparation", "v1")],
         "xray_primary_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("decision_finalization", "v1")],
-        "xray_targeted_review_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("family_routing", "v1"), ("targeted_review", "v1"), ("decision_finalization", "v1")],
+        # TargetedReview is conditionally materialized by FamilyRouting at
+        # runtime.  It is not a static mandatory node in the compiled path.
+        "xray_targeted_review_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("family_routing", "v1"), ("decision_finalization", "v1")],
     }
     requested = paths.get(profile_key)
     if requested is None:
