@@ -1,10 +1,10 @@
 # MS-Image 全链路缺口分析与分阶段执行计划
 
-状态：`CURRENT_EXECUTION_PLAN / CODE_BASELINE_IMPLEMENTED / FULL_CHAIN_NOT_PASSED`
+状态：`CURRENT_EXECUTION_PLAN / PROVIDER_DISABLED_FULL_CHAIN_PASSED / NOT_RUNTIME_VALIDATED`
 
 日期：2026-08-19
 
-代码基线：`a1ac869cc0bc150cb1d0210f8d5462614554bba8`
+代码基线：`1a0646d80a39989beb8f82edde51ffc3bd823d80`
 
 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 
@@ -44,7 +44,7 @@ Service -> ObjectStorageGateway/Broker/Provider（数据库事务外）
 
 | 阻断 | 状态 | 后果 |
 |---|---|---|
-| provider-disabled 在线链与 Evaluation 链尚未组合验收 | `CONFIRMED` | 不能标记 `PROVIDER_DISABLED_FULL_CHAIN_PASSED` |
+| provider-disabled 在线链与 Evaluation 链组合 fake 已通过 | `CONFIRMED` | 只解除代码组合阻断，不代表真实运行或医学门禁通过 |
 | `ms_image`、`ms_image_eval` 没有目标迁移版本 | `CONFIRMED` | 真实数据库启动会 schema mismatch |
 | Evaluation readiness 未纳入总 readiness | `CONFIRMED` | API 可能显示 ready，但 Evaluation DB/Worker 不可用 |
 | Dataset/Truth/Experiment/HumanApproval 未实现 | `CONFIRMED` | fake expected status 不能升级为 trusted Gold |
@@ -57,10 +57,10 @@ Service -> ObjectStorageGateway/Broker/Provider（数据库事务外）
 | 维度 | 当前完成度 | 说明 |
 |---|---:|---|
 | 核心功能代码 | 约 85% | 在线链、Report、Exporter、Evaluation Worker/Scorer 已实现 |
-| 跨模块工程集成 | 约 70% | 子链已实现，完整组合验收、readiness、运维仍缺 |
+| 跨模块工程集成 | 约 82% | provider-disabled 组合 fake 与双 DB/双 queue readiness 已通过，指标、权限和真实环境仍缺 |
 | 真实运行资格 | 约 35% | 未迁移、未连接真实 DB/OSS/Broker |
 | 医学发布资格 | 约 15% | 无 trusted Gold、真实 Provider、Holdout 与审批 |
-| 综合完成度 | 约 64% | 按工程、运行和医学门禁加权 |
+| 综合完成度 | 约 70% | 组合链与 Evaluation readiness 通过后按工程、运行和医学门禁重新加权 |
 
 ---
 
@@ -182,7 +182,7 @@ flowchart TD
 ### 4.1 Caller 与 Task
 
 - Task API 使用 query/body ID：`app/api/api_v1/endpoints/tasks.py:18-36`。
-- Task 创建入口：`app/service/task_service.py:57`。
+- Task 创建入口：`app/service/task_service.py:70`；`diagnose` Active Config/Profile 选择见 `:73-120`。
 - Task 查询与取消：`app/service/task_service.py:152`、`:160`。
 - Task/Stage/Outbox 原子创建已存在，但尚未在真实 MySQL/Broker 上演练。
 
@@ -265,17 +265,21 @@ flowchart TD
 
 ### 6.2 Readiness 与可观测性缺口
 
-当前 readiness 只检查主 database、Redis、Broker 和 Provider，见
-`app/core/readiness.py:159-213`；没有：
+Evaluation readiness 基础已在提交 `1a0646d` 完成：
 
-- Evaluation DB readiness。
-- Evaluation queue/consumer readiness。
-- Evaluation Relay lease/stuck Job 指标。
-- Evaluation DLQ、missing row、Artifact drift 告警。
-- online/evaluation DB 分别标记的组件状态。
+- 主 DB 与 Evaluation DB 分开探测。
+- Imaging queue/consumer 与 Evaluation queue/consumer 分开探测。
+- `online_engineering_ready`、`evaluation_engineering_ready`、`medical_provider_ready` 正交输出。
+- 工程 readiness 不再被真实 Provider qualification 错误绑死。
+- `/health` 和 `/version` 已改为 MS-Image 文案。
 
-现有 `/health` 和 `/version` 仍返回脚手架名称，见
-`app/api/api_v1/endpoints/health.py:9-39`。
+仍缺：
+
+- Relay lease age/stuck Job 指标。
+- Imaging/Evaluation DLQ depth 和 oldest-message age。
+- missing row、invalid comparison、Artifact drift 计数和告警。
+- Prometheus/OpenTelemetry 或现有指标平台接入。
+- Evaluation Worker graceful shutdown、并发和滚动升级 readiness。
 
 ### 6.3 API 与权限缺口
 
@@ -498,8 +502,8 @@ flowchart LR
 
 | Evidence-backed problem | Exact boundary | Change | Causal metric mechanism | Guardrail | Validation gate | Stop/rollback | Status |
 |---|---|---|---|---|---|---|---|
-| 子链分别通过但组合未知 | 全链边界 | 运行 frozen provider-disabled fixture | 发现跨 DB/queue/state 漂移 | 在线事实 hash 不变 | Phase 1 全链 fake | 任一双写/迟到覆盖即停止 | `PROPOSED` |
-| readiness 不含 Evaluation | readiness | 增加 eval DB/queue/worker 组件 | 减少假 ready 和静默积压 | API-only 模式语义不变 | 故障注入返回 503 | 主 readiness 误报即回滚 | `PROPOSED` |
+| 子链分别通过但组合未知 | 全链边界 | 运行 frozen provider-disabled fixture | 发现跨 DB/queue/state 漂移 | 在线事实 hash 不变 | Phase 1 全链 fake | 任一双写/迟到覆盖即停止 | `CONFIRMED_PASSED` |
+| readiness 不含 Evaluation | readiness | 增加 eval DB/queue/worker 组件 | 减少假 ready 和静默积压 | API-only 模式语义不变 | 故障注入返回 503 | 主 readiness 误报即回滚 | `CONFIRMED_PASSED` |
 | expected status 非 trusted Gold | Truth boundary | Dataset/Truth Governance | 防止标签泄漏和不可信分母 | 双盲/仲裁 provenance | Gold Artifact hash | 候选可见 Gold 即停止 | `PROPOSED` |
 | Prompt/Provider 未资格化 | AI boundary | 冻结 bundle + qualification | 产生可追溯真实结果 | actual model/receipt/full-sent | Provider gate | 任一漂移保持 disabled | `PROPOSED` |
 | schema 未迁移 | DB boundary | 双 migration context | 使目标代码可真实运行 | rollback/batch digest | MySQL gate | 任一回滚失败停止 | `PROPOSED` |
@@ -578,6 +582,19 @@ Evaluation 只能新增 Evaluation DB/Artifact 事实。
 PROVIDER_DISABLED_FULL_CHAIN_PASSED
 ```
 
+### Phase 1 实际执行结果（2026-08-19）
+
+| Step | 结果 | 证据 |
+|---|---|---|
+| 1.1 冻结 fixture | `PASSED` | Session/Study/Image/Task/Stage/Call/Report/Config 与 Evaluation fingerprints 已冻结 |
+| 1.2 正向链 | `PASSED` | 实际 `TaskService -> ImagingExecutionService -> disabled Call -> Report` 通过；Exporter/Relay/Worker/Scorer/Artifact 组合通过 |
+| 1.3 在线事实不变量 | `PASSED` | Evaluation 前后 Session/Study/Image/Task/Stage/Call/Report/Config 快照完全一致 |
+| 1.4 duplicate/cancel/late/hash drift/retry | `PASSED` | 重复消息吸收、取消前 ACK、late writeback 拒绝、对象漂移失败关闭、commit crash 后对象复用通过 |
+| 1.4 Report/Targeted/lease | `PASSED` | superseded/void/non-current Report 拒绝；Targeted `max_instances=1`；Stage/Evaluation expired lease reconcile 通过 |
+| Caller 诊断入口 | `PASSED` | `TaskService` 已新增 `diagnose -> xray_diagnose Active Config -> xray_primary/targeted Profile`，提交 `fc5f52d` |
+
+Phase 1 只证明 provider-disabled 工程闭环，不证明真实 Provider 或医学准确率。
+
 ## Phase 2：Readiness、Observability 与权限收口
 
 1. 增加 Evaluation DB readiness。
@@ -588,6 +605,20 @@ PROVIDER_DISABLED_FULL_CHAIN_PASSED
 6. Artifact 下载使用短期授权，不暴露永久 URL。
 
 通过条件：依赖不可用时对应服务返回 503，API-only 与 Worker-ready 状态不混淆。
+
+### Phase 2 当前执行结果（2026-08-19）
+
+| Step | 结果 | 证据 |
+|---|---|---|
+| 主/Evaluation DB readiness | `PASSED` | 分别探测并输出组件状态 |
+| Imaging/Evaluation consumer readiness | `PASSED` | 使用目标 topology 分别检查 consumer count |
+| 工程/医学 readiness 正交 | `PASSED` | Provider 未资格化时工程链可 ready，`medical_provider_ready=false` |
+| API-only 语义 | `PASSED` | Broker disabled 时 `service_mode=api_only` 且 top-level worker ready=false |
+| health/version 文案 | `PASSED` | 已改为 MS-Image |
+| 运行指标与告警 | `PENDING` | 下一执行切片 |
+| scope/权限矩阵 | `PENDING` | Phase 2 后续切片 |
+
+提交：`1a0646d80a39989beb8f82edde51ffc3bd823d80`。
 
 ## Phase 3：Dataset、Truth、Experiment 与 Approval
 
@@ -757,7 +788,7 @@ provider/connection/schedule
 | Holdout 规模与隔离 owner | Holdout manifest | Phase 7 |
 | 发布审批人与回滚 owner | 权限矩阵/Runbook | Phase 7 |
 
-当前不需要新的架构授权。下一项需要执行的是 Phase 1 provider-disabled 全链 inline fake。
+当前不需要新的架构授权。Phase 1 已完成；下一项按顺序执行 Phase 2 Evaluation readiness、observability 与权限收口。
 迁移和真实基础设施仍需后续单独授权。
 
 ---
@@ -766,11 +797,10 @@ provider/connection/schedule
 
 | 阶段 | 状态 | 当前提交/证据 | 下一动作 |
 |---|---|---|---|
-| Phase 1 全链 fake | `IN_PROGRESS` | 子链 fake 已通过 | 执行组合 fixture 与故障矩阵 |
-| Phase 2 readiness/权限 | `PENDING` | 主 readiness 存在 | 增加 Evaluation 组件 |
+| Phase 1 全链 fake | `PASSED` | 组合 fixture、实际 Task/Stage/Call/Report 服务链、故障矩阵；`fc5f52d` | 进入 Phase 2 |
+| Phase 2 readiness/权限 | `IN_PROGRESS` | DB/queue readiness 已通过；`1a0646d` | 增加指标/告警和 scope 矩阵 |
 | Phase 3 治理 | `PENDING` | 无实现 | Dataset/Truth/Experiment/Approval |
 | Phase 4 Provider | `PENDING` | provider-disabled | Prompt bundle/qualification |
 | Phase 5 迁移 | `BLOCKED_BY_AUTHORIZATION` | Alembic 无 versions | 单独授权 |
 | Phase 6 真实运行 | `BLOCKED_BY_PHASE_5` | 未运行 | MySQL/OSS/RabbitMQ |
 | Phase 7 医学发布 | `BLOCKED_BY_EVIDENCE` | 指标 UNKNOWN | A/B/Holdout/审批 |
-
