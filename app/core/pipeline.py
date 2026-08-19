@@ -1,0 +1,87 @@
+"""Static stage contracts and fixed zero-model profile compilation."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import Any
+
+
+class PipelineContractError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class StageDefinition:
+    stage_key: str
+    handler_key: str
+    handler_version: str
+    provider_required: bool
+
+
+@dataclass(frozen=True)
+class StageContext:
+    task_id: str
+    checkpoint_id: str
+    study_revision_id: str
+    image_manifest_sha256: str
+    trace_id: str
+
+
+@dataclass(frozen=True)
+class StageResult:
+    status: str
+    output: dict[str, Any]
+    error_code: str | None = None
+
+
+class StageRegistry:
+    CONTRACT_VERSION = "stage-contract.v1"
+
+    def __init__(self):
+        self._definitions: dict[tuple[str, str], StageDefinition] = {}
+
+    def register(self, definition: StageDefinition) -> None:
+        key = (definition.handler_key, definition.handler_version)
+        if not all(key) or key in self._definitions:
+            raise PipelineContractError("stage_registry_registration_invalid")
+        self._definitions[key] = definition
+
+    def resolve(self, *, handler_key: str, handler_version: str) -> StageDefinition:
+        definition = self._definitions.get((handler_key, handler_version))
+        if definition is None:
+            raise PipelineContractError("stage_handler_not_registered")
+        return definition
+
+
+ZERO_MODEL_PROFILE = "zero_model_replay_v1"
+
+
+def build_default_registry() -> StageRegistry:
+    registry = StageRegistry()
+    registry.register(StageDefinition("study_preparation", "study_preparation", "v1", False))
+    registry.register(StageDefinition("joint_primary_reader", "joint_primary_reader", "v1", True))
+    registry.register(StageDefinition("family_routing", "family_routing", "v1", False))
+    registry.register(StageDefinition("targeted_review", "targeted_review", "v1", True))
+    registry.register(StageDefinition("decision_finalization", "decision_finalization", "v1", False))
+    return registry
+
+
+def compile_profile(profile_key: str, registry: StageRegistry) -> tuple[list[StageDefinition], str]:
+    paths = {
+        ZERO_MODEL_PROFILE: [("study_preparation", "v1")],
+        "xray_primary_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("decision_finalization", "v1")],
+        "xray_targeted_review_v1": [("study_preparation", "v1"), ("joint_primary_reader", "v1"), ("family_routing", "v1"), ("targeted_review", "v1"), ("decision_finalization", "v1")],
+    }
+    requested = paths.get(profile_key)
+    if requested is None:
+        raise PipelineContractError("profile_not_registered")
+    definitions = [registry.resolve(handler_key=key, handler_version=version) for key, version in requested]
+    if profile_key == ZERO_MODEL_PROFILE and any(item.provider_required for item in definitions):
+        raise PipelineContractError("zero_model_profile_provider_forbidden")
+    payload = [{"stage_key": item.stage_key, "handler_key": item.handler_key, "handler_version": item.handler_version} for item in definitions]
+    return definitions, hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+__all__ = ["PipelineContractError", "StageContext", "StageDefinition", "StageRegistry", "StageResult", "ZERO_MODEL_PROFILE", "build_default_registry", "compile_profile"]
