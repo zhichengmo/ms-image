@@ -7,7 +7,7 @@ from typing import Any
 
 from celery.exceptions import MaxRetriesExceededError, Reject
 
-from app.core.async_db import async_engine, session_factory
+from app.core.async_db import evaluation_async_engine, evaluation_session_factory
 from app.core.config import settings
 from app.core.messaging.celery import create_celery_app
 from app.core.messaging.config import runtime_config, topology_for
@@ -47,7 +47,7 @@ def execute_job(self: Any, message: dict[str, Any]) -> None:
     async def run() -> dict[str, Any]:
         try:
             return await EvaluationExecutionWorker(
-                session_factory_=session_factory
+                session_factory_=evaluation_session_factory
             ).execute(
                 event_id=event_id,
                 message=message,
@@ -58,7 +58,7 @@ def execute_job(self: Any, message: dict[str, Any]) -> None:
                 max_attempts=runtime.max_attempts,
             )
         finally:
-            await async_engine.dispose()
+            await evaluation_async_engine.dispose()
 
     try:
         result = asyncio.run(run())

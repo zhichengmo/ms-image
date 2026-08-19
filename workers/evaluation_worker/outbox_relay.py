@@ -6,7 +6,7 @@ import argparse
 import asyncio
 from datetime import datetime
 
-from app.core.async_db import async_engine, session_factory
+from app.core.async_db import evaluation_async_engine, evaluation_session_factory
 from app.core.messaging.outbox_relay import OutboxPublishEnvelope, OutboxRelay
 from app.crud.evaluation import EvaluationOutboxDal
 from app.service.evaluation_execution_service import EvaluationExecutionService
@@ -33,7 +33,7 @@ def publish(envelope: OutboxPublishEnvelope) -> str:
 
 
 relay = OutboxRelay(
-    session_factory=session_factory,
+    session_factory=evaluation_session_factory,
     publish=publish,
     runtime=runtime,
     owner_prefix="relay:evaluation",
@@ -42,7 +42,7 @@ relay = OutboxRelay(
 
 
 async def _reconcile_jobs() -> dict[str, int]:
-    async with session_factory() as session:
+    async with evaluation_session_factory() as session:
         async with session.begin():
             return await EvaluationExecutionService(session).reconcile_expired(
                 now=datetime.utcnow(),
@@ -67,7 +67,7 @@ async def _main(once: bool) -> None:
                 await relay.relay_once()
                 await asyncio.sleep(max(0.1, runtime.relay_poll_seconds))
     finally:
-        await async_engine.dispose()
+        await evaluation_async_engine.dispose()
 
 
 if __name__ == "__main__":

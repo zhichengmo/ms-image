@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     MYSQL_PORT: str = "3306"
     MYSQL_UNIX_SOCKET: str = ""
 
+    # Isolated Evaluation Database settings
+    MYSQL_EVALUATION_DB: str = "ms_image_eval"
+    MYSQL_EVALUATION_HOST: str = ""
+    MYSQL_EVALUATION_PW: str = ""
+    MYSQL_EVALUATION_USER: str = ""
+    MYSQL_EVALUATION_PORT: str = ""
+    MYSQL_EVALUATION_UNIX_SOCKET: str = ""
+
     # MS_HD Database settings (optional for HD service integration)
     MYSQL_HD_DB: str = "ms_hd"
     MYSQL_HD_HOST: str = "localhost"

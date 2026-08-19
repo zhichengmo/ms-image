@@ -9,6 +9,24 @@ DATABASE_URL = (f"mysql+aiomysql://"
                 f"{settings.MYSQL_USER}:{settings.MYSQL_PW}@{settings.MYSQL_HOST}:{settings.MYSQL_PORT}"
                 f"/{settings.MYSQL_DB}")
 
+# Isolated Evaluation database connection.  Empty connection overrides
+# intentionally inherit primary MySQL transport settings while keeping a
+# separate database name; production may supply distinct credentials/host.
+_evaluation_database = settings.MYSQL_EVALUATION_DB.strip()
+if not _evaluation_database or _evaluation_database == settings.MYSQL_DB.strip():
+    raise RuntimeError("evaluation_database_isolation_invalid")
+_evaluation_user = settings.MYSQL_EVALUATION_USER.strip() or settings.MYSQL_USER
+_evaluation_password = settings.MYSQL_EVALUATION_PW or settings.MYSQL_PW
+_evaluation_host = settings.MYSQL_EVALUATION_HOST.strip() or settings.MYSQL_HOST
+_evaluation_port = settings.MYSQL_EVALUATION_PORT.strip() or settings.MYSQL_PORT
+_evaluation_unix_socket = (
+    settings.MYSQL_EVALUATION_UNIX_SOCKET.strip()
+    or settings.MYSQL_UNIX_SOCKET.strip()
+)
+EVALUATION_DATABASE_URL = (f"mysql+aiomysql://"
+                           f"{_evaluation_user}:{_evaluation_password}@{_evaluation_host}:{_evaluation_port}"
+                           f"/{_evaluation_database}")
+
 # MS_HD database connection (for integration with HD service)
 MS_HD_DATABASE_URL = (f"mysql+aiomysql://"
                      f"{settings.MYSQL_HD_USER}:{settings.MYSQL_HD_PW}@{settings.MYSQL_HD_HOST}:{settings.MYSQL_HD_PORT}"
@@ -26,6 +44,21 @@ async_engine = create_async_engine(
     connect_args=(
         {"unix_socket": settings.MYSQL_UNIX_SOCKET}
         if settings.MYSQL_UNIX_SOCKET.strip()
+        else {}
+    )
+)
+
+evaluation_async_engine = create_async_engine(
+    EVALUATION_DATABASE_URL,
+    echo=False,
+    echo_pool=False,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    pool_size=5,
+    max_overflow=5,
+    connect_args=(
+        {"unix_socket": _evaluation_unix_socket}
+        if _evaluation_unix_socket
         else {}
     )
 )
@@ -50,6 +83,13 @@ session_factory = async_sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=async_engine,
+    expire_on_commit=True
+)
+
+evaluation_session_factory = async_sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=evaluation_async_engine,
     expire_on_commit=True
 )
 
@@ -112,6 +152,23 @@ async def get_async_session() -> AsyncSession:
             yield session
 
 
+async def get_evaluation_async_session() -> AsyncSession:
+    """获取隔离的 Evaluation 控制面数据库会话。"""
+    async with evaluation_session_factory() as session:
+        async with session.begin():
+            yield session
+
+
+async def get_explicit_evaluation_transaction_session() -> AsyncSession:
+    """Yield an Evaluation session whose short transactions are caller-owned."""
+    async with evaluation_session_factory() as session:
+        try:
+            yield session
+        finally:
+            if session.in_transaction():
+                await session.rollback()
+
+
 async def get_explicit_transaction_session() -> AsyncSession:
     """Yield a session whose transaction scopes are owned by the endpoint.
 
@@ -149,6 +206,20 @@ async def db_getter() -> AsyncSession:
     except Exception as e:
         await session.rollback()
         raise e
+    finally:
+        await session.close()
+
+
+@asynccontextmanager
+async def evaluation_db_getter() -> AsyncSession:
+    """Evaluation 数据库手动 session 上下文。"""
+    session = evaluation_session_factory()
+    try:
+        yield session
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        raise exc
     finally:
         await session.close()
 

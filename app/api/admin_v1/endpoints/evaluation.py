@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin_v1.endpoints.control_plane_errors import rollback_and_map_control_plane
-from app.api.deps import get_async_session, require_control_plane_scope
+from app.api.deps import require_control_plane_scope
+from app.core.async_db import get_evaluation_async_session
 from app.core.config import settings
 from app.core.contexts import ControlPlaneContext
 from app.schemas.base import GenericResponse
@@ -22,7 +23,7 @@ control = require_control_plane_scope(settings.EVALUATION_REQUIRED_SCOPE)
 
 
 async def get_service(
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ) -> EvaluationService:
     return EvaluationService(db)
 
@@ -36,7 +37,7 @@ async def create_job(
     payload: EvaluationJobCreate,
     context: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.create_job(payload=payload, context=context)
@@ -50,7 +51,7 @@ async def get_job(
     job_id: str = Query(..., alias="id", min_length=1, max_length=64),
     _: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.get_job(job_id)
@@ -64,7 +65,7 @@ async def cancel_job(
     payload: EvaluationJobStateRequest,
     _: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.cancel_job(payload.id, payload.expected_state_version)
@@ -78,7 +79,7 @@ async def create_run(
     payload: EvaluationRunCreate,
     _: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.create_run(payload.job_id)
@@ -92,7 +93,7 @@ async def list_runs(
     job_id: str = Query(..., min_length=1, max_length=64),
     _: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.list_runs(job_id)
@@ -109,7 +110,7 @@ async def list_artifacts(
     job_id: str = Query(..., min_length=1, max_length=64),
     _: ControlPlaneContext = Depends(control),
     service: EvaluationService = Depends(get_service),
-    db: AsyncSession = Depends(get_async_session),
+    db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
         data = await service.list_artifacts(job_id)
