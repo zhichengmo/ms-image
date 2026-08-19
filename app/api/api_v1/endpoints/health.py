@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from app.schemas.base import GenericResponse
+from app.core.config import settings
 from app.core.readiness import build_readiness
 from datetime import datetime
 
@@ -19,8 +20,8 @@ async def health_check():
         data={
             "status": "healthy",
             "timestamp": datetime.now().isoformat(),
-            "service": "MS Scaffold Service"
-        }
+            "service": settings.APPLICATION_NAME,
+        },
     )
 
 
@@ -34,10 +35,10 @@ async def get_version():
         message="获取版本信息成功",
         data={
             "version": "1.0.0",
-            "name": "MS Scaffold Service",
-            "description": "微服务脚手架",
-            "build_time": datetime.now().isoformat()
-        }
+            "name": settings.APPLICATION_NAME,
+            "description": "MS-Image 影像、诊断执行与 Evaluation 控制面服务",
+            "build_time": datetime.now().isoformat(),
+        },
     )
 
 
