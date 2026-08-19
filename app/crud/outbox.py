@@ -262,6 +262,40 @@ class OutboxDal(DalBase):
             changed[key] += int(recovered)
         return changed
 
+    async def operational_snapshot(self, *, now: datetime) -> dict[str, Any]:
+        counts = {
+            status: await self.get_count(publish_status=status)
+            for status in (
+                "pending",
+                "publishing",
+                "published",
+                "retry_wait",
+                "dead_letter",
+                "cancelled",
+            )
+        }
+        expired_relay_leases = await self.get_count(
+            v_where=[
+                self.model.publish_status == "publishing",
+                self.model.relay_lease_expires_at.is_not(None),
+                self.model.relay_lease_expires_at <= now,
+            ]
+        )
+        oldest = await self.get_datas(
+            page=1,
+            limit=1,
+            v_where=[
+                self.model.publish_status.in_(("pending", "publishing", "retry_wait"))
+            ],
+            v_order_field="created_at",
+            v_return_objs=True,
+        )
+        return {
+            "counts": counts,
+            "expired_relay_leases": expired_relay_leases,
+            "oldest_active_created_at": oldest[0].created_at if oldest else None,
+        }
+
     async def _mark_failure(
         self,
         *,

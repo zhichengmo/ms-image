@@ -173,11 +173,16 @@ class EvaluationExecutionWorker:
         try:
             async with self.session_factory() as session:
                 async with session.begin():
+                    summary = bundle.metrics.model_dump(mode="json")
+                    if bundle.paired_summary is not None:
+                        summary["paired_ab"] = bundle.paired_summary.model_dump(
+                            mode="json", exclude={"results"}
+                        )
                     result = await EvaluationExecutionService(session).complete(
                         claim=claim,
                         owner_id=owner_id,
                         artifacts=stored,
-                        summary=bundle.metrics.model_dump(mode="json"),
+                        summary=summary,
                         finished_at=datetime.utcnow(),
                     )
         except EvaluationExecutionConflict as exc:

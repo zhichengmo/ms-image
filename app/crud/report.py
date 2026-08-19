@@ -27,6 +27,26 @@ class ReportDal(DalBase):
     async def list_for_task(self, task_id: str) -> list[Report]:
         return await self.get_datas(limit=0, task_id=task_id, v_order="desc", v_order_field="revision_no", v_return_objs=True)
 
+    async def operational_snapshot(self) -> dict[str, Any]:
+        status_counts = {
+            status: await self.get_count(status=status)
+            for status in ("final", "published", "superseded", "void")
+        }
+        medical_counts = {
+            status: await self.get_count(medical_status=status)
+            for status in (
+                "not_produced",
+                "normal",
+                "abnormal",
+                "review_required",
+                "non_diagnostic",
+            )
+        }
+        return {
+            "status_counts": status_counts,
+            "medical_status_counts": medical_counts,
+        }
+
     async def cas_update(self, *, report_id: str, expected_version: int, values: dict[str, Any]) -> Report | None:
         allowed = {"status", "render_manifest_json", "published_at", "voided_at", "error_code"}
         if not values or not set(values).issubset(allowed):

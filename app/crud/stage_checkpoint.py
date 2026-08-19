@@ -52,6 +52,39 @@ class StageCheckpointDal(DalBase):
         terminal.update({"lease_owner_id": None, "lease_expires_at": None, "heartbeat_at": None, "next_retry_at": None})
         return await self.cas_put_data(data_id=checkpoint_id, expected_version=expected_version, data=terminal, v_where=[self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now])
 
+    async def operational_snapshot(self, *, now: datetime) -> dict[str, Any]:
+        counts = {
+            status: await self.get_count(status=status)
+            for status in (
+                "pending",
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "dead_letter",
+            )
+        }
+        expired_running_leases = await self.get_count(
+            v_where=[
+                self.model.status == "running",
+                self.model.lease_expires_at.is_not(None),
+                self.model.lease_expires_at <= now,
+            ]
+        )
+        oldest = await self.get_datas(
+            page=1,
+            limit=1,
+            v_where=[self.model.status.in_(("queued", "running"))],
+            v_order_field="created_at",
+            v_return_objs=True,
+        )
+        return {
+            "counts": counts,
+            "expired_running_leases": expired_running_leases,
+            "oldest_active_created_at": oldest[0].created_at if oldest else None,
+        }
+
     async def list_expired_running(self, *, now: datetime, limit: int) -> list[StageCheckpoint]:
         return await self.get_datas(page=1, limit=limit, v_where=[self.model.status == "running", self.model.lease_expires_at.is_not(None), self.model.lease_expires_at <= now], v_order_field="lease_expires_at", v_return_objs=True)
 

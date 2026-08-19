@@ -27,6 +27,25 @@ class AICallDal(DalBase):
     async def get_by_logical_key(self, logical_call_key: str) -> AICall | None:
         return await self.get_data(logical_call_key=logical_call_key, v_return_none=True)
 
+    async def operational_snapshot(self) -> dict[str, Any]:
+        counts = {
+            status: await self.get_count(status=status)
+            for status in ("prepared", "sent", "succeeded", "failed", "unknown")
+        }
+        oldest_unknown = await self.get_datas(
+            page=1,
+            limit=1,
+            status="unknown",
+            v_order_field="created_at",
+            v_return_objs=True,
+        )
+        return {
+            "counts": counts,
+            "oldest_unknown_created_at": (
+                oldest_unknown[0].created_at if oldest_unknown else None
+            ),
+        }
+
     async def cas_update(self, *, call_id: str, expected_version: int, values: dict[str, Any]) -> AICall | None:
         allowed = {"provider_request_id", "actual_model", "sent_image_manifest_sha256", "image_count_sent", "image_receipt_json", "status", "result_disposition", "response_object_ref_json", "parsed_result_json", "response_sha256", "error_code", "next_reconcile_at", "sent_at", "finished_at"}
         if not values or not set(values).issubset(allowed):
