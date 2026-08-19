@@ -7,6 +7,7 @@ from .study import Study
 from .task import Task
 from .stage_checkpoint import StageCheckpoint
 from .object_reconcile_cursor import ObjectReconcileCursor
+from .ai_config_record import AIConfigRecord
 from .xray_accuracy.model_call import XRayModelCall
 from .xray_accuracy.outbox import XRayOutbox
 from .xray_accuracy.request_snapshot import XRayRequestSnapshot
@@ -22,5 +23,5 @@ __all__ = [
     "AiApiConnection", "AiConfig", "AiModelPool", "AiPromptTemplate", "GptConfigItem",
     "XRayModelCall", "XRayOutbox", "XRayRequestSnapshot", "XRayRun",
     "XRayStageCheckpoint", "XRayTraceEvent", "XRaySession", "XRaySessionEvent",
-    "XRayStudySnapshot", "XRayImageAsset", "Image", "Outbox", "Session", "Series", "Study", "Task", "StageCheckpoint", "ObjectReconcileCursor",
+    "XRayStudySnapshot", "XRayImageAsset", "Image", "Outbox", "Session", "Series", "Study", "Task", "StageCheckpoint", "ObjectReconcileCursor", "AIConfigRecord",
 ]
