@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crud import DalBase
@@ -14,8 +15,15 @@ class ObjectReconcileCursorDal(DalBase):
     async def get_by_key(self, cursor_key: str) -> ObjectReconcileCursor | None:
         return await self.get_data(cursor_key=cursor_key, v_return_none=True)
 
+    async def create_idempotent(self, cursor_key: str) -> ObjectReconcileCursor | None:
+        try:
+            async with self.db.begin_nested():
+                return await self.create_data({"cursor_key": cursor_key, "state_version": 0, "lease_generation": 0}, v_return_obj=True)
+        except IntegrityError:
+            return None
+
     async def claim(self, *, cursor_key: str, owner_id: str, now: datetime, lease_expires_at: datetime) -> ObjectReconcileCursor | None:
-        claimed = await self.conditional_update(v_where=[self.model.cursor_key == cursor_key, or_(self.model.lease_expires_at.is_(None), self.model.lease_expires_at <= now)], data={"lease_owner_id": owner_id, "lease_generation": self.model.lease_generation + 1, "lease_expires_at": lease_expires_at, "error_code": None})
+        claimed = await self.conditional_update(v_where=[self.model.cursor_key == cursor_key, or_(self.model.next_scan_at.is_(None), self.model.next_scan_at <= now), or_(self.model.lease_expires_at.is_(None), self.model.lease_expires_at <= now)], data={"lease_owner_id": owner_id, "lease_generation": self.model.lease_generation + 1, "lease_expires_at": lease_expires_at, "error_code": None})
         if not claimed:
             return None
         return await self.get_data(cursor_key=cursor_key, v_return_none=True, v_expire_all=True)

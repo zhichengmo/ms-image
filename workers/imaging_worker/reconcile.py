@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -18,12 +18,15 @@ from app.core.imaging.object_store import (
     ObjectStoreError,
 )
 from app.core.messaging.config import runtime_config
+from app.crud.image import ImageDal
+from app.crud.object_reconcile_cursor import ObjectReconcileCursorDal
 from app.service.image_service import ImageService, ImageStateConflictError
 
 from .image_validation import ImageValidationWorker
 
 
 class ImageReconciler:
+    READY_CURSOR_KEY = "ready-image-drift.v1"
     def __init__(
         self,
         *,
@@ -133,12 +136,43 @@ class ImageReconciler:
         for image_id in ready_image_ids:
             outcome = await self.verify_ready_image(image_id=image_id)
             ready_outcomes[outcome] = ready_outcomes.get(outcome, 0) + 1
+        cursor_ready = await self._scan_ready_cursor(limit=limit, lease_seconds=lease_seconds)
+        for key, value in cursor_ready.items():
+            ready_outcomes[key] = ready_outcomes.get(key, 0) + value
         return {
             "expired_leases": expired,
             "validation": validation_outcomes,
             "uploads": upload_outcomes,
             "ready": ready_outcomes,
         }
+
+    async def _scan_ready_cursor(self, *, limit: int, lease_seconds: int) -> dict[str, int]:
+        now = datetime.utcnow()
+        owner = f"reconcile:ready:{now.timestamp():.6f}"[:128]
+        async with self.session_factory() as session:
+            async with session.begin():
+                cursors = ObjectReconcileCursorDal(session)
+                cursor = await cursors.get_by_key(self.READY_CURSOR_KEY)
+                if cursor is None:
+                    await cursors.create_idempotent(self.READY_CURSOR_KEY)
+                cursor = await cursors.claim(cursor_key=self.READY_CURSOR_KEY, owner_id=owner, now=now, lease_expires_at=now + timedelta(seconds=lease_seconds))
+        if cursor is None:
+            return {"cursor_unavailable": 1}
+        async with self.session_factory() as session:
+            async with session.begin():
+                images = await ImageDal(session).list_ready_after(updated_at=cursor.last_ready_updated_at, image_id=cursor.last_ready_image_id, limit=limit)
+        outcomes: dict[str, int] = {}
+        for image in images:
+            outcome = await self.verify_ready_image(image_id=image.id)
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            if outcome == "retry":
+                break
+        last = images[-1] if images and outcomes.get("retry", 0) == 0 else None
+        async with self.session_factory() as session:
+            async with session.begin():
+                cursors = ObjectReconcileCursorDal(session)
+                await cursors.advance(cursor_id=cursor.id, expected_version=cursor.state_version, owner_id=owner, lease_generation=cursor.lease_generation, now=datetime.utcnow(), last_ready_updated_at=last.updated_at if last else (cursor.last_ready_updated_at if images else None), last_ready_image_id=last.id if last else (cursor.last_ready_image_id if images else None), next_scan_at=datetime.utcnow() if last else datetime.utcnow() + timedelta(seconds=60))
+        return outcomes
 
     async def verify_ready_image(self, *, image_id: str) -> str:
         async with self.session_factory() as session:

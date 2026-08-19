@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -140,6 +140,14 @@ class ImageDal(DalBase):
             v_order_field="upload_expires_at",
             v_return_objs=True,
         )
+
+    async def list_ready_after(self, *, updated_at: datetime | None, image_id: str | None, limit: int) -> list[Image]:
+        if limit < 1:
+            raise ValueError("image_ready_scan_limit_invalid")
+        where = [self.model.status == "ready"]
+        if updated_at is not None:
+            where.append(or_(self.model.updated_at > updated_at, and_(self.model.updated_at == updated_at, self.model.id > (image_id or ""))))
+        return await self.get_datas(page=1, limit=limit, v_where=where, v_order_field="updated_at", v_return_objs=True)
 
     async def claim_validation_lease(
         self,
