@@ -18,7 +18,16 @@ class StageExecutionWorker:
         try:
             async with self.session_factory() as session:
                 async with session.begin():
-                    output = await ImagingExecutionService(session).complete_study_preparation(stage=stage, owner_id=owner_id)
+                    service = ImagingExecutionService(session)
+                    handler = {
+                        "study_preparation": service.complete_study_preparation,
+                        "joint_primary_reader": service.complete_joint_primary_reader,
+                        "family_routing": service.complete_family_routing,
+                        "decision_finalization": service.complete_decision_finalization,
+                    }.get(stage.stage_key)
+                    if handler is None:
+                        raise StageExecutionStateConflict("stage_handler_not_implemented")
+                    output = await handler(stage=stage, owner_id=owner_id)
         except StageExecutionStateConflict as exc:
             return {"outcome": "conflict", "event_id": event_id, "error_code": str(exc)}
         return {"outcome": "completed", "event_id": event_id, "output_sha256": __import__('hashlib').sha256(__import__('json').dumps(output, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}

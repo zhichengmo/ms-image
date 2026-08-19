@@ -10,6 +10,7 @@ from app.crud.stage_checkpoint import StageCheckpointDal
 from app.crud.task import TaskDal
 from app.schemas.outbox import ExecuteStageMessage
 from app.models.imaging_base import new_opaque_id
+from app.service.ai_request_service import AIRequestService
 
 
 class ImagingExecutionError(ValueError):
@@ -66,6 +67,59 @@ class ImagingExecutionService:
                 raise StageExecutionStateConflict("stage_cancel_conflict")
             updated_task = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "cancelled", "ai_medical_status": "not_produced", "finished_at": now})
             if updated_task is None:
+                raise StageExecutionStateConflict("task_cancel_conflict")
+            return {"status": "cancelled", "provider_called": False}
+        completed = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "completed", "output_json": output, "output_sha256": output_sha, "finished_at": now})
+        if completed is None:
+            raise StageExecutionStateConflict("stage_complete_conflict")
+        await self._schedule_next_or_complete(task=task, stage=completed, output=output, output_sha=output_sha, now=now)
+        return output
+
+    async def complete_joint_primary_reader(self, *, stage, owner_id: str) -> dict[str, Any]:
+        if stage.stage_key != "joint_primary_reader" or stage.status != "running":
+            raise StageExecutionStateConflict("joint_primary_stage_invalid")
+        call = await AIRequestService(self.outbox_dal.db).prepare_provider_disabled_call(
+            task_id=stage.task_id,
+            stage_checkpoint_id=stage.id,
+            prompt_sha256=hashlib.sha256(b"joint-primary-disabled.v1").hexdigest(),
+            schema_sha256=hashlib.sha256(b"primary-candidate.v1").hexdigest(),
+        )
+        return await self._complete_provider_disabled_stage(
+            stage=stage,
+            owner_id=owner_id,
+            output={"candidate_kind": "primary", "medical_status": "not_produced", "source_call_id": call["call_id"], "error_code": call["error_code"], "manifest_sha256": stage.input_json["manifest_sha256"]},
+        )
+
+    async def complete_family_routing(self, *, stage, owner_id: str) -> dict[str, Any]:
+        if stage.stage_key != "family_routing" or stage.status != "running":
+            raise StageExecutionStateConflict("family_routing_stage_invalid")
+        return await self._complete_provider_disabled_stage(
+            stage=stage,
+            owner_id=owner_id,
+            output={"route_signal": "primary_final", "source_primary_output_sha256": stage.input_json.get("previous_output_sha256"), "source_primary_call_id": (stage.input_json.get("previous_output") or {}).get("source_call_id")},
+        )
+
+    async def complete_decision_finalization(self, *, stage, owner_id: str) -> dict[str, Any]:
+        if stage.stage_key != "decision_finalization" or stage.status != "running":
+            raise StageExecutionStateConflict("decision_finalization_stage_invalid")
+        return await self._complete_provider_disabled_stage(
+            stage=stage,
+            owner_id=owner_id,
+            output={"medical_status": "not_produced", "selected_owner": "primary", "source_stage_id": stage.input_json.get("previous_stage_id"), "provider_called": False},
+        )
+
+    async def _complete_provider_disabled_stage(self, *, stage, owner_id: str, output: dict[str, Any]) -> dict[str, Any]:
+        output_sha = hashlib.sha256(json.dumps(output, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        now = datetime.utcnow()
+        task = await self.task_dal.get_by_id(stage.task_id)
+        if task is None:
+            raise StageExecutionStateConflict("task_not_found")
+        if task.cancel_requested_at is not None:
+            cancelled = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "cancelled", "error_code": "task_cancelled", "finished_at": now})
+            if cancelled is None:
+                raise StageExecutionStateConflict("stage_cancel_conflict")
+            updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "cancelled", "ai_medical_status": "not_produced", "finished_at": now})
+            if updated is None:
                 raise StageExecutionStateConflict("task_cancel_conflict")
             return {"status": "cancelled", "provider_called": False}
         completed = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "completed", "output_json": output, "output_sha256": output_sha, "finished_at": now})
