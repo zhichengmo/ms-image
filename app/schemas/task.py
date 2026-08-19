@@ -51,6 +51,9 @@ class TaskResponse(BaseModel):
     request_sha256: str
     trace_id: str
     error_code: str | None = None
+    cancel_requested_by_id: str | None = None
+    cancel_reason: str | None = None
+    cancel_requested_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

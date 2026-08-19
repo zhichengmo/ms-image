@@ -41,7 +41,7 @@ class ImagingExecutionService:
             raise StageExecutionStateConflict("task_not_found")
         if stage.status == "completed" and stage.state_version >= parsed.expected_state_version + 1:
             return None
-        if task.execution_status in {"cancelled", "failed", "dead_letter"}:
+        if task.execution_status in {"cancelled", "failed", "dead_letter"} or task.cancel_requested_at is not None:
             raise StageExecutionStateConflict("task_not_executable")
         claimed = await self.stage_dal.claim(checkpoint_id=stage.id, expected_version=parsed.expected_state_version, owner_id=owner_id, now=datetime.utcnow(), lease_expires_at=datetime.utcnow() + timedelta(seconds=lease_seconds))
         return claimed
@@ -52,12 +52,20 @@ class ImagingExecutionService:
         output = {"study_revision_id": stage.input_json["study_revision_id"], "manifest_sha256": stage.input_json["manifest_sha256"], "status": "prepared", "provider_called": False}
         output_sha = hashlib.sha256(json.dumps(output, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         now = datetime.utcnow()
-        completed = await self.stage_dal.cas_update(checkpoint_id=stage.id, expected_version=stage.state_version, values={"status": "completed", "lease_owner_id": None, "lease_expires_at": None, "heartbeat_at": None, "output_json": output, "output_sha256": output_sha, "finished_at": now})
-        if completed is None:
-            raise StageExecutionStateConflict("stage_complete_conflict")
         task = await self.task_dal.get_by_id(stage.task_id)
         if task is None:
             raise StageExecutionStateConflict("task_not_found")
+        if task.cancel_requested_at is not None:
+            cancelled = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "cancelled", "error_code": "task_cancelled", "finished_at": now})
+            if cancelled is None:
+                raise StageExecutionStateConflict("stage_cancel_conflict")
+            updated_task = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "cancelled", "ai_medical_status": "not_produced", "finished_at": now})
+            if updated_task is None:
+                raise StageExecutionStateConflict("task_cancel_conflict")
+            return {"status": "cancelled", "provider_called": False}
+        completed = await self.stage_dal.finish_with_lease(checkpoint_id=stage.id, expected_version=stage.state_version, owner_id=owner_id, lease_generation=stage.lease_generation, now=now, values={"status": "completed", "output_json": output, "output_sha256": output_sha, "finished_at": now})
+        if completed is None:
+            raise StageExecutionStateConflict("stage_complete_conflict")
         updated = await self.task_dal.cas_update(task_id=task.id, expected_version=task.state_version, values={"execution_status": "completed", "ai_medical_status": "not_produced", "finished_at": now})
         if updated is None:
             raise StageExecutionStateConflict("task_complete_conflict")

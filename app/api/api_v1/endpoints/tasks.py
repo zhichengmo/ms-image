@@ -6,7 +6,7 @@ from app.api.deps import get_async_session, require_caller_scope
 from app.core.config import settings
 from app.core.contexts import CallerContext
 from app.schemas.base import GenericResponse
-from app.schemas.task import TaskCreate, TaskResponse
+from app.schemas.task import TaskCancelRequest, TaskCreate, TaskResponse
 from app.service.task_service import TaskService
 
 router = APIRouter(prefix="/tasks", tags=["Imaging tasks"])
@@ -30,3 +30,12 @@ async def get_task(task_id: str = Query(..., alias="id", min_length=1, max_lengt
     except Exception as exc:
         return await rollback_and_map(db, exc)
     return GenericResponse(message="Task 查询成功", data=data)
+
+
+@router.post("/cancel", response_model=GenericResponse[TaskResponse])
+async def cancel_task(payload: TaskCancelRequest, context: CallerContext = Depends(caller), service: TaskService = Depends(get_task_service), db: AsyncSession = Depends(get_async_session)):
+    try:
+        data = await service.cancel_task(task_id=payload.id, expected_version=payload.expected_state_version, reason=payload.reason, caller=context)
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return GenericResponse(message="Task 取消请求已记录", data=data)

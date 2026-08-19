@@ -1,5 +1,6 @@
 import hashlib
 import json
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,6 +156,21 @@ class TaskService:
         if task.requester_id != caller.subject_id:
             raise TaskAccessDeniedError("task_access_denied")
         return self._response(task)
+
+    async def cancel_task(self, *, task_id: str, expected_version: int, reason: str | None, caller: CallerContext) -> TaskResponse:
+        task = await self.task_dal.get_by_id(task_id)
+        if task is None:
+            raise TaskNotFoundError("task_not_found")
+        if task.requester_id != caller.subject_id:
+            raise TaskAccessDeniedError("task_access_denied")
+        if task.cancel_requested_at is not None:
+            return self._response(task)
+        if task.execution_status in {"completed", "failed", "cancelled", "dead_letter"} or task.state_version != expected_version:
+            raise TaskStateConflictError("task_cancel_conflict")
+        updated = await self.task_dal.cas_update(task_id=task.id, expected_version=expected_version, values={"cancel_requested_by_id": caller.subject_id, "cancel_reason": (reason or "caller_cancelled")[:200], "cancel_requested_at": datetime.utcnow()})
+        if updated is None:
+            raise TaskStateConflictError("task_cancel_conflict")
+        return self._response(updated)
 
     @staticmethod
     def _sha(value: dict) -> str:

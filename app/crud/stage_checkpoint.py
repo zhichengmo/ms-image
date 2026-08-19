@@ -44,5 +44,13 @@ class StageCheckpointDal(DalBase):
     async def heartbeat(self, *, checkpoint_id: str, owner_id: str, lease_generation: int, now: datetime, lease_expires_at: datetime) -> bool:
         return await self.conditional_update(v_where=[self.model.id == checkpoint_id, self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now], data={"heartbeat_at": now, "lease_expires_at": lease_expires_at})
 
+    async def finish_with_lease(self, *, checkpoint_id: str, expected_version: int, owner_id: str, lease_generation: int, now: datetime, values: dict[str, Any]) -> StageCheckpoint | None:
+        allowed = {"status", "output_json", "output_sha256", "error_code", "finished_at"}
+        if values.get("status") not in {"completed", "failed", "cancelled", "dead_letter"} or not set(values).issubset(allowed):
+            raise ValueError("stage_finish_fields_invalid")
+        terminal = dict(values)
+        terminal.update({"lease_owner_id": None, "lease_expires_at": None, "heartbeat_at": None, "next_retry_at": None})
+        return await self.cas_put_data(data_id=checkpoint_id, expected_version=expected_version, data=terminal, v_where=[self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now])
+
 
 __all__ = ["StageCheckpointDal"]
