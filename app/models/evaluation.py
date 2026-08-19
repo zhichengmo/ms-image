@@ -17,6 +17,7 @@ class EvaluationJob(ImagingRecordBase):
     scorer_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): scorer 指纹")
     experiment_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, comment="CHAR(64): experiment 指纹")
     case_split_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="JSON: case split/failure-bank/holdout 合同")
+    denominator_contract_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="JSON: 医学条件与端到端分母合同")
     input_manifest_artifact_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): 输入 manifest Artifact ID")
     sanitization_artifact_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): sanitization Artifact ID")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default=text("'pending'"), comment="VARCHAR(32): pending/queued/running/completed/failed/cancelled")
