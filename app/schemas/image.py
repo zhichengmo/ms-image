@@ -363,6 +363,10 @@ class ImageReplaceRequest(BaseModel):
         return self
 
 
+class ImageReplaceMultipartRequest(ImageReplaceRequest):
+    expected_part_count: int = Field(ge=1, le=10000)
+
+
 class ImageAbortCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -439,6 +443,7 @@ __all__ = [
     "ImagePrepareUploadRequest",
     "ImageResponse",
     "ImageReplaceRequest",
+    "ImageReplaceMultipartRequest",
     "ImageSignedPart",
     "ImageUploadTicket",
     "ImageUpdate",

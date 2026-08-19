@@ -25,6 +25,7 @@ from app.schemas.image import (
     ImagePreparePartsRequest,
     ImagePrepareUploadRequest,
     ImageReplaceRequest,
+    ImageReplaceMultipartRequest,
     ImageResponse,
     ImageSignedPart,
     ImageUploadTicket,
@@ -124,6 +125,83 @@ async def replace_image(
     except Exception as exc:
         return await rollback_and_map(dependencies.db, exc)
     return GenericResponse(message="Image 替换上传已准备", data=data)
+
+
+@router.post(
+    "/replace-multipart",
+    response_model=GenericResponse[ImageMultipartUploadTicket],
+    status_code=status.HTTP_201_CREATED,
+)
+async def replace_image_multipart(
+    payload: ImageReplaceMultipartRequest,
+    context: dict = Depends(resource_context),
+    dependencies: ImageStorageDependencies = Depends(get_image_storage_dependencies),
+):
+    gateway = None
+    grant = None
+    created_session = False
+    try:
+        gateway = dependencies.gateway_factory()
+        ttl_seconds = int(settings.OSS_SIGNED_URL_TTL_SECONDS)
+        if ttl_seconds < 1:
+            raise ObjectStoreError("object_signed_url_ttl_invalid")
+        expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+        async with dependencies.db.begin():
+            image = await dependencies.service.prepare_multipart_replacement(
+                payload=payload,
+                requester_id=context["subject"],
+                storage_profile=gateway.storage_profile,
+                upload_expires_at=expires_at,
+            )
+            candidate = await dependencies.service.get_upload_operation_candidate(
+                image_id=image.id,
+                requester_id=context["subject"],
+                expected_state_version=image.state_version,
+                generation=image.image_version_no,
+                operation="multipart_prepare",
+            )
+        if candidate.upload_session_ref:
+            upload_session_ref = candidate.upload_session_ref
+            headers = {"Content-Type": payload.declared_content_type}
+        else:
+            grant = await gateway.initiate_multipart_upload(
+                object_key=image.object_key,
+                content_type=payload.declared_content_type,
+                expires_seconds=ttl_seconds,
+            )
+            if not grant.upload_session_ref:
+                raise ObjectStoreError("multipart_upload_session_missing")
+            created_session = True
+            upload_session_ref = grant.upload_session_ref
+            headers = grant.required_headers
+            async with dependencies.db.begin():
+                image = await dependencies.service.bind_multipart_upload_session(
+                    image_id=image.id,
+                    requester_id=context["subject"],
+                    expected_state_version=image.state_version,
+                    generation=image.image_version_no,
+                    upload_session_ref=upload_session_ref,
+                    upload_expires_at=expires_at,
+                )
+        data = ImageMultipartUploadTicket(
+            image=image,
+            generation=image.image_version_no,
+            upload_mode="multipart",
+            required_headers=headers,
+            expires_at=expires_at,
+            upload_session_ref=upload_session_ref,
+        )
+    except Exception as exc:
+        if created_session and gateway is not None and grant is not None:
+            try:
+                await gateway.abort_multipart_upload(
+                    object_key=grant.object_key,
+                    upload_session_ref=str(grant.upload_session_ref),
+                )
+            except Exception:
+                pass
+        return await rollback_and_map(dependencies.db, exc)
+    return GenericResponse(message="Image 分片替换上传已准备", data=data)
 
 
 @router.post(

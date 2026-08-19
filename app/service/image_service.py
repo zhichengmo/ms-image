@@ -24,6 +24,7 @@ from app.schemas.image import (
     ImagePrepareMultipartRequest,
     ImagePrepareUploadRequest,
     ImageReplaceRequest,
+    ImageReplaceMultipartRequest,
     ImageResponse,
 )
 from app.schemas.outbox import ValidateImageMessage
@@ -462,6 +463,107 @@ class ImageService:
             if latest is None or latest.supersedes_image_id != old.id:
                 raise ImageStateConflictError("image_replace_prepare_race")
             self._assert_replacement_match(latest, old, payload, profile)
+            created = latest
+        return self._response(created)
+
+    async def prepare_multipart_replacement(
+        self,
+        *,
+        payload: ImageReplaceMultipartRequest,
+        requester_id: str,
+        storage_profile: str,
+        upload_expires_at: datetime,
+    ) -> ImageResponse:
+        old = await self._owned_image(
+            image_id=payload.old_image_id, requester_id=requester_id
+        )
+        if old.status != "ready" or old.state_version != payload.expected_state_version:
+            raise ImageStateConflictError("image_replace_source_conflict")
+        profile = storage_profile.strip()
+        if profile != old.storage_profile:
+            raise ImageStateConflictError("image_storage_profile_conflict")
+        latest = await self.image_dal.get_latest_logical(
+            series_id=old.series_id,
+            logical_image_key=old.logical_image_key,
+        )
+        if latest is not None and latest.id != old.id:
+            if latest.status == "uploading" and latest.supersedes_image_id == old.id:
+                self._assert_replacement_match(
+                    latest,
+                    old,
+                    payload,
+                    profile,
+                    upload_mode="multipart",
+                    expected_part_count=payload.expected_part_count,
+                )
+                refreshed = await self.image_dal.refresh_upload_expiry(
+                    image_id=latest.id,
+                    expected_version=latest.state_version,
+                    upload_expires_at=upload_expires_at,
+                )
+                if refreshed is None:
+                    raise ImageStateConflictError("image_replace_prepare_conflict")
+                return self._response(refreshed)
+            if latest.status == "validating" and latest.supersedes_image_id == old.id:
+                raise ImageStateConflictError("image_validation_in_progress")
+            if not (
+                latest.status == "quarantined"
+                and latest.supersedes_image_id == old.id
+            ):
+                raise ImageStateConflictError("image_replace_source_stale")
+        version = max(
+            old.image_version_no,
+            latest.image_version_no if latest is not None else old.image_version_no,
+        ) + 1
+        image_id = new_opaque_id()
+        values: dict[str, Any] = {
+            "id": image_id,
+            "series_id": old.series_id,
+            "source_image_id": payload.source_image_id or old.source_image_id,
+            "logical_image_key": old.logical_image_key,
+            "image_version_no": version,
+            "supersedes_image_id": old.id,
+            "source_manifest_json": old.source_manifest_json,
+            "sequence_no": old.sequence_no,
+            "image_role": old.image_role,
+            "image_kind": old.image_kind,
+            "metadata_schema_version": payload.metadata_schema_version,
+            "storage_profile": profile,
+            "object_key": OSSObjectStore.new_image_object_key(
+                image_id=image_id,
+                generation=version,
+                file_format=payload.file_format,
+            ),
+            "file_format": payload.file_format,
+            "upload_mode": "multipart",
+            "upload_session_ref": None,
+            "expected_part_count": payload.expected_part_count,
+            "expected_sha256": payload.expected_sha256,
+            "expected_size_bytes": payload.expected_size_bytes,
+            "declared_content_type": payload.declared_content_type,
+            "technical_metadata_json": payload.technical_metadata,
+            "status": "uploading",
+            "state_version": 0,
+            "validation_lease_generation": 0,
+            "validation_attempt_count": 0,
+            "upload_expires_at": upload_expires_at,
+        }
+        created = await self.image_dal.create_idempotent(values)
+        if created is None:
+            latest = await self.image_dal.get_latest_logical(
+                series_id=old.series_id,
+                logical_image_key=old.logical_image_key,
+            )
+            if latest is None or latest.supersedes_image_id != old.id:
+                raise ImageStateConflictError("image_replace_prepare_race")
+            self._assert_replacement_match(
+                latest,
+                old,
+                payload,
+                profile,
+                upload_mode="multipart",
+                expected_part_count=payload.expected_part_count,
+            )
             created = latest
         return self._response(created)
 
@@ -1260,6 +1362,8 @@ class ImageService:
         old: Image,
         payload: ImageReplaceRequest,
         storage_profile: str,
+        upload_mode: str = "direct_put",
+        expected_part_count: int | None = None,
     ) -> None:
         expected = {
             "series_id": old.series_id,
@@ -1272,13 +1376,15 @@ class ImageService:
             "metadata_schema_version": payload.metadata_schema_version,
             "storage_profile": storage_profile,
             "file_format": payload.file_format,
-            "upload_mode": "direct_put",
+            "upload_mode": upload_mode,
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
             "technical_metadata_json": payload.technical_metadata,
         }
         if any(getattr(image, field) != value for field, value in expected.items()):
+            raise ImageIdempotencyConflictError("image_idempotency_conflict")
+        if image.expected_part_count != expected_part_count:
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
 
     @staticmethod
