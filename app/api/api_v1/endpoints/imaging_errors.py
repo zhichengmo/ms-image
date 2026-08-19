@@ -27,6 +27,7 @@ from app.service.task_service import (
     TaskNotFoundError,
     TaskStateConflictError,
 )
+from app.service.report_service import ReportNotFoundError, ReportStateConflictError
 
 
 def _response(status_code: int, error_code: int, message: str) -> JSONResponse:
@@ -47,7 +48,7 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
     if isinstance(exc, SessionAccessDeniedError):
         return _response(404, 4041, "资源不存在")
     if isinstance(
-        exc, (SessionNotFoundError, StudyNotFoundError, SeriesNotFoundError, ImageNotFoundError, TaskNotFoundError, TaskAccessDeniedError)
+        exc, (SessionNotFoundError, StudyNotFoundError, SeriesNotFoundError, ImageNotFoundError, TaskNotFoundError, TaskAccessDeniedError, ReportNotFoundError)
     ):
         return _response(404, 4041, "资源不存在")
     if isinstance(
@@ -61,7 +62,7 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
     ):
         return _response(409, 4091, "幂等请求内容冲突")
     if isinstance(
-        exc, (SessionStateConflictError, StudyStateConflictError, ImageStateConflictError, TaskStateConflictError)
+        exc, (SessionStateConflictError, StudyStateConflictError, ImageStateConflictError, TaskStateConflictError, ReportStateConflictError)
     ):
         return _response(409, 4092, "资源状态冲突")
     raise exc

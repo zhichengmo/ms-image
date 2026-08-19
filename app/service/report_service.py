@@ -73,6 +73,21 @@ class ReportService:
             raise ReportStateConflictError("current_report_invalid")
         return self._response(report)
 
+    async def get_for_requester(self, *, report_id: str, requester_id: str) -> ReportResponse:
+        report = await self.report_dal.get_by_id(report_id)
+        if report is None:
+            raise ReportNotFoundError("report_not_found")
+        task = await self.task_dal.get_by_id(report.task_id)
+        if task is None or task.requester_id != requester_id:
+            raise ReportNotFoundError("report_not_found")
+        return self._response(report)
+
+    async def list_for_requester(self, *, task_id: str, requester_id: str) -> list[ReportResponse]:
+        task = await self.task_dal.get_by_id(task_id)
+        if task is None or task.requester_id != requester_id:
+            raise ReportNotFoundError("task_not_found")
+        return [self._response(item) for item in await self.report_dal.list_for_task(task.id)]
+
     async def publish(self, *, report_id: str, expected_version: int) -> ReportResponse:
         report = await self.report_dal.get_by_id(report_id)
         if report is None:
