@@ -1,4 +1,16 @@
+# Runtime path bootstrap must run before the legacy-compatible absolute
+# ``app`` imports below; suppress only the resulting import-order lint rule.
+# ruff: noqa: E402
 import logging.config
+from pathlib import Path
+import sys
+
+# Keep the Runtime import root stable for both the container's `/app` layout
+# and direct repository-root imports such as `services.runtime.main:app`.
+RUNTIME_ROOT = Path(__file__).resolve().parent
+if str(RUNTIME_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_ROOT))
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 

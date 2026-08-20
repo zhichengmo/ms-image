@@ -60,6 +60,17 @@ python services/runtime/start_user_api.py
 python services/runtime/start_admin_api.py
 ```
 
+从仓库根目录直接使用模块路径时，Runtime 会自动注入唯一的
+`services/runtime` import root；Worker 也可以使用同一套 fully-qualified module path：
+
+```bash
+uvicorn services.runtime.main:app --host 0.0.0.0 --port 8000
+celery -A services.runtime.workers.imaging_worker.celery_app:celery_app worker \
+  --loglevel=INFO --queues=imaging.image.validate
+```
+
+Compose 容器仍使用镜像内 `/app` 作为 import root，不需要复制第二份 `app` 或 `workers` 源码。
+
 ### 3.3 Docker Compose（容器编排）
 
 默认启动用户 API、管理 API、在线 MySQL、隔离 Evaluation MySQL 和 Redis：
