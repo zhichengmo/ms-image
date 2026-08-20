@@ -170,6 +170,7 @@ class Settings(BaseSettings):
     IMAGING_BROKER_DLQ: str = "imaging.image.validate.dlq"
     IMAGING_RELAY_POLL_SECONDS: float = 1.0
     IMAGING_RELAY_LEASE_SECONDS: int = 120
+    IMAGING_RELAY_HEARTBEAT_PATH: str = "/tmp/ms-image-imaging-relay.heartbeat"
     IMAGING_WORKER_LEASE_SECONDS: int = 120
     IMAGING_WORKER_MAX_ATTEMPTS: int = 5
     EVALUATION_BROKER_EXCHANGE: str = "evaluation.v1"
@@ -178,6 +179,7 @@ class Settings(BaseSettings):
     EVALUATION_BROKER_DLQ: str = "evaluation.job.dlq"
     EVALUATION_RELAY_POLL_SECONDS: float = 1.0
     EVALUATION_RELAY_LEASE_SECONDS: int = 120
+    EVALUATION_RELAY_HEARTBEAT_PATH: str = "/tmp/ms-image-evaluation-relay.heartbeat"
     EVALUATION_WORKER_LEASE_SECONDS: int = 120
     EVALUATION_WORKER_MAX_ATTEMPTS: int = 5
     READINESS_TIMEOUT_SECONDS: float = 3.0

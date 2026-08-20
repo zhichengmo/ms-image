@@ -89,6 +89,12 @@ services:
       dockerfile: services/runtime/Dockerfile
     command: ["celery", "-A", "workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A workers.imaging_worker.celery_app:celery_app inspect ping -d imaging-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -109,6 +115,12 @@ services:
       dockerfile: services/runtime/Dockerfile
     command: ["celery", "-A", "workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A workers.evaluation_worker.celery_app:celery_app inspect ping -d evaluation-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -129,6 +141,12 @@ services:
       dockerfile: services/runtime/Dockerfile
     command: ["python", "-m", "workers.imaging_worker.outbox_relay"]
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import os; import time; p=Path(os.getenv('IMAGING_RELAY_HEARTBEAT_PATH', '/tmp/ms-image-imaging-relay.heartbeat')); raise SystemExit(0 if p.is_file() and time.time() - p.stat().st_mtime <= 60 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -146,6 +164,12 @@ services:
       dockerfile: services/runtime/Dockerfile
     command: ["python", "-m", "workers.evaluation_worker.outbox_relay"]
     stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import os; import time; p=Path(os.getenv('EVALUATION_RELAY_HEARTBEAT_PATH', '/tmp/ms-image-evaluation-relay.heartbeat')); raise SystemExit(0 if p.is_file() and time.time() - p.stat().st_mtime <= 60 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true

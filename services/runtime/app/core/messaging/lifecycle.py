@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import signal
 
 
@@ -28,4 +29,16 @@ async def wait_for_shutdown(stop_event: asyncio.Event, timeout: float) -> None:
         return
 
 
-__all__ = ["install_shutdown_handlers", "wait_for_shutdown"]
+def touch_heartbeat(path: str) -> bool:
+    """Best-effort heartbeat for supervised long-running Runtime processes."""
+
+    try:
+        heartbeat = Path(path)
+        heartbeat.parent.mkdir(parents=True, exist_ok=True)
+        heartbeat.touch()
+        return True
+    except OSError:
+        return False
+
+
+__all__ = ["install_shutdown_handlers", "touch_heartbeat", "wait_for_shutdown"]

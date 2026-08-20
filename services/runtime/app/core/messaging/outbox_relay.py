@@ -200,13 +200,22 @@ class OutboxRelay:
                 )
                 return {"disabled": 0, **result}
 
-    async def run_forever(self, *, stop_event: asyncio.Event | None = None) -> None:
+    async def run_forever(
+        self,
+        *,
+        stop_event: asyncio.Event | None = None,
+        on_cycle: Callable[[], Any] | None = None,
+    ) -> None:
         if not self.runtime.enabled:
             raise RuntimeError("broker_disabled")
         shutdown = stop_event or asyncio.Event()
         while not shutdown.is_set():
             await self.reconcile_once()
             await self.relay_once()
+            if on_cycle is not None:
+                callback_result = on_cycle()
+                if inspect.isawaitable(callback_result):
+                    await callback_result
             await wait_for_shutdown(shutdown, self.runtime.relay_poll_seconds)
 
 

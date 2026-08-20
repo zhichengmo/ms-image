@@ -10,7 +10,8 @@ from app.core.messaging.outbox_relay import (
     OutboxPublishEnvelope,
     OutboxRelay,
 )
-from app.core.messaging.lifecycle import install_shutdown_handlers
+from app.core.config import settings
+from app.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat
 from app.crud.outbox import OutboxDal
 
 from .celery_app import celery_app, runtime, topology
@@ -60,7 +61,10 @@ async def _main(once: bool) -> None:
                 }
             )
         else:
-            await relay.run_forever(stop_event=stop_event)
+            await relay.run_forever(
+                stop_event=stop_event,
+                on_cycle=lambda: touch_heartbeat(settings.IMAGING_RELAY_HEARTBEAT_PATH),
+            )
     finally:
         await async_engine.dispose()
 
