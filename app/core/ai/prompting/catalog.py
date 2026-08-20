@@ -12,6 +12,8 @@ from .contracts import (
     PromptBundle,
     PromptContractError,
     SchemaAsset,
+    prompt_asset_payload,
+    schema_asset_payload,
     sha256_json,
 )
 
@@ -57,6 +59,70 @@ class PromptCatalog:
 
     def assets_for_role(self, prompt_role: str) -> tuple[PromptAsset, ...]:
         return tuple(item for item in self._assets if item.prompt_role == prompt_role)
+
+    @classmethod
+    def from_bundle_payload(cls, payload: dict[str, Any]) -> "PromptCatalog":
+        if payload.get("language") != PROMPT_LANGUAGE:
+            raise PromptContractError("prompt_language_not_available")
+        catalog = cls.__new__(cls)
+        catalog.root = Path("<frozen-ai-config>")
+        catalog.catalog_revision = str(payload.get("catalog_revision") or "")
+        assets: list[PromptAsset] = []
+        for item in payload.get("assets", []):
+            if not isinstance(item, dict):
+                raise PromptContractError("prompt_bundle_asset_invalid")
+            assets.append(
+                PromptAsset(
+                    prompt_key=str(item.get("prompt_key") or ""),
+                    prompt_role=str(item.get("prompt_role") or ""),
+                    language=str(item.get("language") or ""),
+                    content=str(item.get("content") or ""),
+                    content_sha256=str(item.get("content_sha256") or ""),
+                    family_key=item.get("family_key"),
+                    report_domain_keys=tuple(item.get("report_domain_keys") or ()),
+                    focus_key=item.get("focus_key"),
+                    strategy_key=item.get("strategy_key"),
+                    species=str(item.get("species") or "all"),
+                    input_scope=str(item.get("input_scope") or ""),
+                    output_contract=str(item.get("output_contract") or ""),
+                    eligibility=str(item.get("eligibility") or ""),
+                    status=str(item.get("status") or ""),
+                )
+            )
+        schema_payload = payload.get("schema")
+        if not isinstance(schema_payload, dict):
+            raise PromptContractError("prompt_bundle_schema_invalid")
+        catalog._schema = SchemaAsset(
+            schema_key=str(schema_payload.get("schema_key") or ""),
+            schema_version=str(schema_payload.get("schema_version") or ""),
+            language=str(schema_payload.get("language") or ""),
+            schema=dict(schema_payload.get("schema") or {}),
+            schema_sha256=str(schema_payload.get("schema_sha256") or ""),
+            output_contract=str(schema_payload.get("output_contract") or ""),
+            status=str(schema_payload.get("status") or ""),
+        )
+        catalog._assets = tuple(assets)
+        expected = sha256_json(
+            {key: value for key, value in payload.items() if key != "bundle_sha256"}
+        )
+        if payload.get("bundle_sha256") != expected:
+            raise PromptContractError("prompt_bundle_checksum_mismatch")
+        return catalog
+
+    def bundle_payload(self, *, prompt_policy: dict[str, Any]) -> dict[str, Any]:
+        bundle = self.build_bundle()
+        payload = {
+            "bundle_version": bundle.bundle_version,
+            "catalog_revision": bundle.catalog_revision,
+            "language": bundle.language,
+            "assets": [prompt_asset_payload(item) for item in self._assets],
+            "schema": schema_asset_payload(bundle.schema),
+            "prompt_policy": prompt_policy,
+        }
+        payload["bundle_sha256"] = sha256_json(
+            {key: value for key, value in payload.items() if key != "bundle_sha256"}
+        )
+        return payload
 
     def build_bundle(self) -> PromptBundle:
         primary = tuple(

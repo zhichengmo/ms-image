@@ -16,11 +16,44 @@ from .leakage import validate_primary_context, validate_targeted_context
 
 
 class PromptCompiler:
-    def __init__(self, catalog: PromptCatalog, *, max_prompt_chars: int):
+    def __init__(
+        self,
+        catalog: PromptCatalog,
+        *,
+        max_prompt_chars: int,
+        prompt_policy: dict[str, Any] | None = None,
+    ):
         if max_prompt_chars <= 0:
             raise PromptContractError("prompt_budget_invalid")
         self.catalog = catalog
         self.max_prompt_chars = max_prompt_chars
+        self.prompt_policy = self._normalize_policy(prompt_policy or {})
+
+    @staticmethod
+    def _normalize_policy(value: dict[str, Any]) -> dict[str, Any]:
+        families = value.get("primary_family_keys") or list(PRIMARY_FAMILY_ORDER)
+        if not isinstance(families, list) or any(
+            item not in PRIMARY_FAMILY_ORDER for item in families
+        ):
+            raise PromptContractError("prompt_policy_primary_family_invalid")
+        targeted = value.get("targeted") or {}
+        if not isinstance(targeted, dict):
+            raise PromptContractError("prompt_policy_targeted_invalid")
+        focus_keys = targeted.get("focus_keys") or []
+        strategy_keys = targeted.get("strategy_keys") or []
+        if not all(isinstance(item, str) for item in focus_keys + strategy_keys):
+            raise PromptContractError("prompt_policy_targeted_invalid")
+        return {
+            "primary_family_keys": tuple(families),
+            "allow_technical_evidence": bool(
+                value.get("allow_technical_evidence", False)
+            ),
+            "targeted": {
+                "enabled": bool(targeted.get("enabled", False)),
+                "focus_keys": tuple(focus_keys),
+                "strategy_keys": tuple(strategy_keys),
+            },
+        }
 
     def compile_primary(
         self,
@@ -31,8 +64,20 @@ class PromptCompiler:
     ) -> CompiledPrompt:
         validate_primary_context(safe_context)
         unknown = set(applicable_family_keys) - set(PRIMARY_FAMILY_ORDER)
-        if unknown or len(set(applicable_family_keys)) != len(applicable_family_keys):
+        not_allowed = set(applicable_family_keys) - set(
+            self.prompt_policy["primary_family_keys"]
+        )
+        if (
+            unknown
+            or not_allowed
+            or len(set(applicable_family_keys)) != len(applicable_family_keys)
+        ):
             raise PromptContractError("primary_family_selection_invalid")
+        if (
+            include_technical_evidence
+            and not self.prompt_policy["allow_technical_evidence"]
+        ):
+            raise PromptContractError("technical_evidence_not_allowed")
         assets = [self.catalog.asset(prompt_role="joint_primary_base")]
         selected_families = tuple(
             family

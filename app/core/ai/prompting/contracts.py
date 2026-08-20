@@ -120,6 +120,41 @@ def sha256_json(value: Any) -> str:
     return sha256_text(canonical_json(value))
 
 
+def prompt_asset_payload(
+    asset: PromptAsset, *, include_content: bool = True
+) -> dict[str, Any]:
+    payload = {
+        "prompt_key": asset.prompt_key,
+        "prompt_role": asset.prompt_role,
+        "language": asset.language,
+        "content_sha256": asset.content_sha256,
+        "family_key": asset.family_key,
+        "report_domain_keys": list(asset.report_domain_keys),
+        "focus_key": asset.focus_key,
+        "strategy_key": asset.strategy_key,
+        "species": asset.species,
+        "input_scope": asset.input_scope,
+        "output_contract": asset.output_contract,
+        "eligibility": asset.eligibility,
+        "status": asset.status,
+    }
+    if include_content:
+        payload["content"] = asset.content
+    return payload
+
+
+def schema_asset_payload(schema: SchemaAsset) -> dict[str, Any]:
+    return {
+        "schema_key": schema.schema_key,
+        "schema_version": schema.schema_version,
+        "language": schema.language,
+        "schema": schema.schema,
+        "schema_sha256": schema.schema_sha256,
+        "output_contract": schema.output_contract,
+        "status": schema.status,
+    }
+
+
 __all__ = [
     "CompiledPrompt",
     "PRIMARY_FAMILY_ORDER",
@@ -130,6 +165,8 @@ __all__ = [
     "PromptContractError",
     "SchemaAsset",
     "canonical_json",
+    "prompt_asset_payload",
+    "schema_asset_payload",
     "sha256_json",
     "sha256_text",
 ]
