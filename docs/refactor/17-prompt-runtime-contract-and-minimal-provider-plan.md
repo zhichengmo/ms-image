@@ -1,6 +1,6 @@
 # MS-Image Prompt 运行合同与最小 Provider 链路调整方案
 
-状态：`CURRENT_PROMPT_DECISION / PROVIDER_DISABLED_PLACEHOLDER_PRESENT / NOT_IMPLEMENTED`
+状态：`CURRENT_PROMPT_P4_0_TO_P4_3_IMPLEMENTED / PROVIDER_DISABLED_TRUE_BUNDLE_IMPLEMENTED / REAL_PROVIDER_NOT_IMPLEMENTED`
 
 日期：2026-08-20
 
@@ -13,7 +13,7 @@
 - [14-xray-specialty-design.md](14-xray-specialty-design.md)：Family/Focus/Strategy、Primary/Targeted 医学边界。
 - [设计母文](../ms-image-final-architecture-and-database-design.md)：`ai_config_record` 的目标字段合同。
 
-> 本文冻结 Prompt 链的最小化设计，不实施真实 Provider，不生成迁移脚本，不改变医学结果或评测分母。实际代码实施必须先满足本文的编译、版本、泄漏与调用数合同。
+> 本文已用于实现中文 Catalog、Prompt Compiler、Config Bundle、provider-disabled 真 Bundle 和 Targeted experiment gate；仍不实施真实 Provider，不生成迁移脚本，不改变医学结果或评测分母。
 
 ---
 
@@ -95,14 +95,13 @@ app/core/ai/prompting/ PromptCatalog + PromptCompiler
 | `XRayPromptRegistry` 文件 Prompt | legacy request gate、qualification | 只含 `xray.request_gate.v1`，不是目标 Primary/Targeted | 保留 legacy/qualification |
 | 旧 AI runtime 五表 | 旧 AIGovernance Prompt/model/connection | 分散、可含明文 key、与目标 Config 重叠 | 隔离 legacy |
 
-当前硬编码位置：
+历史硬编码位置曾位于：
 
 ```text
-app/service/imaging_execution_service.py:82-86
-app/service/imaging_execution_service.py:106-110
+app/service/imaging_execution_service.py
 ```
 
-当前占位符：
+历史占位符：
 
 ```text
 joint-primary-disabled.v1
@@ -111,12 +110,7 @@ targeted-review-disabled.v1
 targeted-candidate.v1
 ```
 
-它们只是对标签字符串计算 SHA，不能证明 Prompt/Schema 内容：
-
-```text
-sha256(b"joint-primary-disabled.v1")
-sha256(b"primary-candidate.v1")
-```
+已在 P4.3 移除。当前 provider-disabled 路径会从冻结 `prompt_bundle_json` 编译真实中文 Prompt/Schema，并把真实 `rendered_prompt_sha256/schema_sha256` 写入 AICall；仍禁止发送 Provider。
 
 ### 2.2 当前目标 AI Config 缺口
 
@@ -718,6 +712,25 @@ connection_record
 - provider-disabled 编译真实 Bundle/Schema。
 - AICall 保存实际 rendered Prompt SHA。
 - 验证 Task/Call/Report/Exporter/Evaluation fingerprints。
+
+### P4.0-P4.3 实际执行结果（2026-08-20）
+
+| 切片 | 状态 | 结果 |
+|---|---|---|
+| P4.0 合同 | `PASSED` | 六种 role、中文语言、CompleteMedicalResult Schema、上下文 allowlist、调用上限冻结 |
+| P4.1 Catalog/Compiler | `PASSED` | `prompts/xray/catalog.zh-CN.json`、中文资产、checksum、无 fallback、Primary/Targeted deterministic compiler、leakage/预算 fail closed |
+| P4.2 Config Bundle | `PASSED` | `prompt_bundle_json/schema_bundle_json/model_policy_json/config_sha256/release_fingerprint` 冻结入 AI Config；API 不接受 raw Prompt |
+| P4.3 provider-disabled | `PASSED` | 移除四个 placeholder SHA；AICall 保存真实中文 rendered/schema SHA；Task 冻结 Config/Release/Bundle 指纹 |
+| Targeted skeleton gate | `PASSED` | Targeted 仅 experiment scope；Focus/Strategy/catalog/max_calls=2 提前验证；未接真实 Provider，未 global activate |
+
+提交：
+
+```text
+6359163  feat: add zh-CN prompt catalog and compiler
+9b52214  feat: freeze zh-CN prompt bundles in ai config
+946447e  feat: compile real prompt bundles for disabled calls
+984b028  feat: gate targeted prompt configs
+```
 
 ### P4.4：真实 Primary Provider
 

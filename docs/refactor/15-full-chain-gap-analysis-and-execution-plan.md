@@ -4,7 +4,7 @@
 
 日期：2026-08-19
 
-代码基线：`836e72efacdf75af15c6be7dcc5f1af07d96ba01`
+代码基线：`984b0288283c22c3c1262751ffb6161a2a188252`
 
 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 
@@ -48,7 +48,7 @@ Service -> ObjectStorageGateway/Broker/Provider（数据库事务外）
 | `ms_image`、`ms_image_eval` 没有目标迁移版本 | `CONFIRMED` | 真实数据库启动会 schema mismatch |
 | Evaluation readiness 未纳入总 readiness | `CONFIRMED` | API 可能显示 ready，但 Evaluation DB/Worker 不可用 |
 | Dataset/Truth/Experiment/HumanApproval 未实现 | `CONFIRMED` | fake expected status 不能升级为 trusted Gold |
-| 六种 Prompt role 与真实 Provider bundle 未实现 | `CONFIRMED` | 只能运行 provider-disabled 工程链 |
+| 中文 Prompt Catalog/Bundle 与 provider-disabled 真 Bundle 已实现；真实 Provider 未实现 | `CONFIRMED` | 可验证冻结 Prompt/Schema/Call 指纹，不能产生真实医学结果 |
 | 真实 MySQL/OSS/RabbitMQ/Provider 演练未运行 | `CONFIRMED` | 不能标记 runtime/provider qualified |
 | Development A/B、isolated Holdout 和发布审批未运行 | `CONFIRMED` | 医学发布保持 `NO-GO` |
 
@@ -320,31 +320,36 @@ HumanApproval
 
 ### 6.5 Prompt 与真实 Provider 缺口
 
-仓库没有完整实现：
+已实现：
 
 ```text
+zh-CN Prompt Catalog
 joint_primary_base
 joint_primary_module
-targeted_focus
-review_strategy
-technical_evidence
-offline_evaluation
+targeted_focus skeleton
+review_strategy skeleton
+technical_evidence skeleton
+offline_evaluation catalog asset
 prompt_bundle_json
+schema_bundle_json
+model_policy_json
+Config/release/rendered Prompt SHA
+provider-disabled 真 Bundle 编译
 ```
 
-当前 `AIConfigService` 只允许 provider-disabled，见
-`app/service/ai_config_service.py:42`。
+当前 `AIConfigService` 仍只允许 provider-disabled，见
+`app/service/ai_config_service.py`。
 
 还需：
 
-- Prompt Manifest 编译器和优先级。
-- Schema binding。
+- 真实 `prepare_call/send_call/reconcile_unknown`。
 - requested/actual model 资格。
 - full-sent 与逐图 receipt。
 - timeout/rate-limit/cost。
-- sent/unknown reconcile。
 - SecretRef 解析与轮换。
 - response ObjectRef/hash。
+- Primary Prompt 模块消融。
+- Targeted paired A/B 与真实 Provider gate。
 
 ### 6.6 Migration 缺口
 
