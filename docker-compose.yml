@@ -88,6 +88,7 @@ services:
       context: .
       dockerfile: services/runtime/Dockerfile
     command: ["celery", "-A", "workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
+    stop_grace_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -111,6 +112,7 @@ services:
       context: .
       dockerfile: services/runtime/Dockerfile
     command: ["celery", "-A", "workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
+    stop_grace_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -134,6 +136,7 @@ services:
       context: .
       dockerfile: services/runtime/Dockerfile
     command: ["python", "-m", "workers.imaging_worker.outbox_relay"]
+    stop_grace_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true
@@ -154,6 +157,7 @@ services:
       context: .
       dockerfile: services/runtime/Dockerfile
     command: ["python", "-m", "workers.evaluation_worker.outbox_relay"]
+    stop_grace_period: 30s
     environment:
       <<: *runtime-environment
       BROKER_ENABLED: true

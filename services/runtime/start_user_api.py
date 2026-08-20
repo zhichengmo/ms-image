@@ -16,5 +16,5 @@ if __name__ == "__main__":
         app_dir=str(RUNTIME_ROOT),
         host="0.0.0.0",
         port=8000,
-        reload=True,
+        reload=False,
     )

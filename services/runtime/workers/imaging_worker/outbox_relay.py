@@ -10,6 +10,7 @@ from app.core.messaging.outbox_relay import (
     OutboxPublishEnvelope,
     OutboxRelay,
 )
+from app.core.messaging.lifecycle import install_shutdown_handlers
 from app.crud.outbox import OutboxDal
 
 from .celery_app import celery_app, runtime, topology
@@ -47,6 +48,9 @@ relay = OutboxRelay(
 
 
 async def _main(once: bool) -> None:
+    stop_event = asyncio.Event()
+    if not once:
+        install_shutdown_handlers(stop_event)
     try:
         if once:
             print(
@@ -56,7 +60,7 @@ async def _main(once: bool) -> None:
                 }
             )
         else:
-            await relay.run_forever()
+            await relay.run_forever(stop_event=stop_event)
     finally:
         await async_engine.dispose()
 

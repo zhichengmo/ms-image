@@ -1,5 +1,6 @@
 from pathlib import Path
 from multiprocessing import Process
+import signal
 import sys
 
 import uvicorn
@@ -33,6 +34,14 @@ def run_admin_api():
 
 
 if __name__ == "__main__":
+    shutdown_signal: list[int | None] = [None]
+
+    def request_shutdown(signum, _frame):
+        shutdown_signal[0] = signum
+
+    signal.signal(signal.SIGINT, request_shutdown)
+    signal.signal(signal.SIGTERM, request_shutdown)
+
     processes = [
         Process(target=run_user_api, name="ms-image-user"),
         Process(target=run_admin_api, name="ms-image-admin"),
@@ -46,12 +55,15 @@ if __name__ == "__main__":
         # one plane has exited.  Polling also makes the failing exit code
         # observable to the container/orchestrator.
         while True:
+            if shutdown_signal[0] is not None:
+                exit_code = 128 + shutdown_signal[0]
+                break
             finished = next(
                 (process for process in processes if not process.is_alive()),
                 None,
             )
             if finished is not None:
-                exit_code = finished.exitcode or 0
+                exit_code = finished.exitcode or 1
                 break
             for process in processes:
                 process.join(timeout=0.2)
@@ -63,5 +75,9 @@ if __name__ == "__main__":
                 process.terminate()
         for process in processes:
             process.join(timeout=5)
+        for process in processes:
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=1)
 
     raise SystemExit(exit_code)

@@ -11,6 +11,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from .config import BrokerRuntimeConfig
+from .lifecycle import wait_for_shutdown
 
 
 def safe_error(exc: BaseException) -> str:
@@ -199,13 +200,14 @@ class OutboxRelay:
                 )
                 return {"disabled": 0, **result}
 
-    async def run_forever(self) -> None:
+    async def run_forever(self, *, stop_event: asyncio.Event | None = None) -> None:
         if not self.runtime.enabled:
             raise RuntimeError("broker_disabled")
-        while True:
+        shutdown = stop_event or asyncio.Event()
+        while not shutdown.is_set():
             await self.reconcile_once()
             await self.relay_once()
-            await asyncio.sleep(max(0.1, self.runtime.relay_poll_seconds))
+            await wait_for_shutdown(shutdown, self.runtime.relay_poll_seconds)
 
 
 class TransactionalOutboxRelay:
@@ -403,14 +405,15 @@ class TransactionalOutboxRelay:
                             result[f"checkpoint_{key}"] = int(value)
                 return result
 
-    async def run_forever(self) -> None:
+    async def run_forever(self, *, stop_event: asyncio.Event | None = None) -> None:
         if not self.runtime.enabled:
             raise RuntimeError("broker_disabled")
-        while True:
+        shutdown = stop_event or asyncio.Event()
+        while not shutdown.is_set():
             await self.reconcile_once()
             await self.relay_once()
             await self.consumer_retry_once()
-            await asyncio.sleep(max(0.1, self.runtime.relay_poll_seconds))
+            await wait_for_shutdown(shutdown, self.runtime.relay_poll_seconds)
 
 
 __all__ = [

@@ -7,6 +7,7 @@ import asyncio
 from datetime import datetime
 
 from app.core.async_db import evaluation_async_engine, evaluation_session_factory
+from app.core.messaging.lifecycle import install_shutdown_handlers, wait_for_shutdown
 from app.core.messaging.outbox_relay import OutboxPublishEnvelope, OutboxRelay
 from app.crud.evaluation import EvaluationOutboxDal
 from app.service.evaluation_execution_service import EvaluationExecutionService
@@ -51,6 +52,9 @@ async def _reconcile_jobs() -> dict[str, int]:
 
 
 async def _main(once: bool) -> None:
+    stop_event = asyncio.Event()
+    if not once:
+        install_shutdown_handlers(stop_event)
     try:
         if once:
             print(
@@ -61,11 +65,11 @@ async def _main(once: bool) -> None:
                 }
             )
         else:
-            while True:
+            while not stop_event.is_set():
                 await _reconcile_jobs()
                 await relay.reconcile_once()
                 await relay.relay_once()
-                await asyncio.sleep(max(0.1, runtime.relay_poll_seconds))
+                await wait_for_shutdown(stop_event, runtime.relay_poll_seconds)
     finally:
         await evaluation_async_engine.dispose()
 
