@@ -92,7 +92,10 @@ class AIConfigService:
             prompt_policy = self._normalize_prompt_policy(payload)
             catalog = PromptCatalog.target_xray(payload.prompt_catalog_revision)
             prompt_bundle = catalog.bundle_payload(prompt_policy=prompt_policy)
-            model_policy = self._normalize_model_policy(payload.model_policy)
+            model_policy = self._normalize_model_policy(
+                payload.model_policy,
+                profile_key=payload.profile_key,
+            )
             PromptCompiler(
                 catalog,
                 max_prompt_chars=model_policy["max_prompt_chars"],
@@ -180,14 +183,17 @@ class AIConfigService:
         }
 
     @staticmethod
-    def _normalize_model_policy(value: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_model_policy(
+        value: dict[str, Any], *, profile_key: str
+    ) -> dict[str, Any]:
+        default_max_calls = 2 if profile_key == "xray_targeted_review_v1" else 1
         policy = {
             "requested_model": str(value.get("requested_model") or "disabled"),
             "max_prompt_chars": int(value.get("max_prompt_chars") or 16000),
             "max_input_tokens": int(value.get("max_input_tokens") or 8192),
             "max_output_tokens": int(value.get("max_output_tokens") or 2048),
             "max_images": int(value.get("max_images") or 32),
-            "max_calls": int(value.get("max_calls") or 1),
+            "max_calls": int(value.get("max_calls") or default_max_calls),
             "require_actual_model": bool(value.get("require_actual_model", False)),
         }
         if (

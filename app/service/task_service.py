@@ -133,6 +133,10 @@ class TaskService:
             "ai_config_id": config.id,
             "config_key": config.config_key,
             "config_version": config.version,
+            "config_sha256": config.config_sha256,
+            "release_fingerprint": config.release_fingerprint,
+            "prompt_bundle_sha256": config.prompt_bundle_json["bundle_sha256"],
+            "schema_bundle_sha256": config.schema_bundle_json["bundle_sha256"],
             "profile_key": profile_key,
             "compiled_profile": contract,
         }
@@ -166,6 +170,8 @@ class TaskService:
         assignment_sha = self._sha(
             {
                 "config_id": config.id,
+                "config_sha256": config.config_sha256,
+                "release_fingerprint": config.release_fingerprint,
                 "profile": profile_sha,
                 "task_type": payload.task_type,
                 "run_mode": run_mode,

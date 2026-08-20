@@ -12,6 +12,7 @@ from app.schemas.outbox import ExecuteStageMessage
 from app.models.imaging_base import new_opaque_id
 from app.service.ai_request_service import AIRequestService
 from app.service.report_service import ReportService
+from app.service.stages.xray import build_primary_ai_request_command, build_targeted_ai_request_command
 
 
 class ImagingExecutionError(ValueError):
@@ -79,11 +80,13 @@ class ImagingExecutionService:
     async def complete_joint_primary_reader(self, *, stage, owner_id: str) -> dict[str, Any]:
         if stage.stage_key != "joint_primary_reader" or stage.status != "running":
             raise StageExecutionStateConflict("joint_primary_stage_invalid")
+        task = await self.task_dal.get_by_id(stage.task_id)
+        if task is None:
+            raise StageExecutionStateConflict("task_not_found")
         call = await AIRequestService(self.outbox_dal.db).prepare_provider_disabled_call(
             task_id=stage.task_id,
             stage_checkpoint_id=stage.id,
-            prompt_sha256=hashlib.sha256(b"joint-primary-disabled.v1").hexdigest(),
-            schema_sha256=hashlib.sha256(b"primary-candidate.v1").hexdigest(),
+            prompt_command=build_primary_ai_request_command(task=task, stage=stage),
         )
         return await self._complete_provider_disabled_stage(
             stage=stage,
@@ -103,11 +106,13 @@ class ImagingExecutionService:
     async def complete_targeted_review(self, *, stage, owner_id: str) -> dict[str, Any]:
         if stage.stage_key != "targeted_review" or stage.status != "running":
             raise StageExecutionStateConflict("targeted_review_stage_invalid")
+        task = await self.task_dal.get_by_id(stage.task_id)
+        if task is None:
+            raise StageExecutionStateConflict("task_not_found")
         call = await AIRequestService(self.outbox_dal.db).prepare_provider_disabled_call(
             task_id=stage.task_id,
             stage_checkpoint_id=stage.id,
-            prompt_sha256=hashlib.sha256(b"targeted-review-disabled.v1").hexdigest(),
-            schema_sha256=hashlib.sha256(b"targeted-candidate.v1").hexdigest(),
+            prompt_command=build_targeted_ai_request_command(task=task, stage=stage),
         )
         output = {
             "candidate_kind": "targeted",
