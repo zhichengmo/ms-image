@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.strategy_options import _AbstractLoad
 from app.core.exception import CustomException
 from sqlalchemy.sql.selectable import Select as SelectType
-from typing import Any, Union, Literal
+from typing import Any, Union
 
 
 class DalBase:

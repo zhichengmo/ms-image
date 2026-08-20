@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 import os
 from pathlib import Path
 from dotenv import dotenv_values, find_dotenv, load_dotenv
@@ -131,7 +132,18 @@ class Settings(BaseSettings):
         if self.ALGORITHM == "RS256" and not self.SECRET_KEY:
             key_path = Path(self.RSA_PUBLIC_KEY_PATH)
             if not key_path.is_absolute():
-                key_path = Path(__file__).resolve().parents[2] / key_path
+                # The source lives below services/runtime while the container
+                # packages it below /app.  Find the first existing key along
+                # the runtime/repository parent chain without changing the
+                # configured relative path contract.
+                key_path = next(
+                    (
+                        parent / key_path
+                        for parent in Path(__file__).resolve().parents
+                        if (parent / key_path).is_file()
+                    ),
+                    key_path,
+                )
             if key_path.is_file():
                 self.SECRET_KEY = key_path.read_text(encoding="utf-8")
             else:
@@ -166,6 +178,21 @@ class Settings(BaseSettings):
     EVALUATION_WORKER_LEASE_SECONDS: int = 120
     EVALUATION_WORKER_MAX_ATTEMPTS: int = 5
     READINESS_TIMEOUT_SECONDS: float = 3.0
+
+    # Runtime operational alerts. A zero threshold disables that rule;
+    # OPERATIONAL_ALERTS_ENABLED disables the whole projection.
+    OPERATIONAL_ALERTS_ENABLED: bool = True
+    OPERATIONAL_ALERT_LEASE_COUNT_THRESHOLD: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_ACTIVE_AGE_SECONDS: int = Field(default=300, ge=0)
+    OPERATIONAL_ALERT_AI_UNKNOWN_AGE_SECONDS: int = Field(default=300, ge=0)
+    OPERATIONAL_ALERT_QUEUE_DEPTH: int = Field(default=100, ge=0)
+    OPERATIONAL_ALERT_DLQ_DEPTH: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_CONSUMER_MINIMUM: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_MISSING_ROWS: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_INVALID_COMPARISONS: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_COVERAGE_LOSS: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_TECHNICAL_FAILURES: int = Field(default=1, ge=0)
+    OPERATIONAL_ALERT_ARTIFACT_DRIFT: int = Field(default=1, ge=0)
 
     # AI transport is selected by the database-backed OpenAI-compatible
     # connection pool.  These are qualification artifacts/secrets only;

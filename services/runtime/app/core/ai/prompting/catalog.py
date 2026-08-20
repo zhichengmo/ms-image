@@ -26,7 +26,19 @@ class PromptCatalog:
 
     @classmethod
     def target_xray(cls, catalog_revision: str) -> "PromptCatalog":
-        root = Path(__file__).resolve().parents[4] / "prompts" / "xray"
+        # Resolve the single repository/container prompt tree from either the
+        # source checkout (services/runtime/app/...) or the packaged image
+        # (/app/app/...).  Do not hard-code a source-layout parent index.
+        root = next(
+            (
+                parent / "prompts" / "xray"
+                for parent in Path(__file__).resolve().parents
+                if (parent / "prompts" / "xray").is_dir()
+            ),
+            None,
+        )
+        if root is None:
+            raise PromptContractError("prompt_catalog_root_not_found")
         return cls(root=root, catalog_revision=catalog_revision)
 
     @property

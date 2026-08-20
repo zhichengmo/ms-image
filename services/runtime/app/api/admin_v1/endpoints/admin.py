@@ -45,7 +45,7 @@ async def admin_info(
             "admin_version": "1.0.0",
             "scopes": auth["scopes"],
             "subject": auth["subject"],
-            "service": "Admin MS Scaffold Service",
+            "service": "MS-Image Admin Service",
             "timestamp": datetime.now().isoformat()
         }
     )

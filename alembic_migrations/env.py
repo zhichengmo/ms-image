@@ -6,10 +6,15 @@ from sqlalchemy import pool
 
 from alembic import context
 import sys
-import os
+from pathlib import Path
 
-# Add the project root directory to Python path
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+# The migration directory remains at repository root while the sole Runtime
+# source (and its ``app`` import package) lives below services/runtime.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_ROOT = REPO_ROOT / "services" / "runtime"
+for import_root in (RUNTIME_ROOT, REPO_ROOT):
+    if str(import_root) not in sys.path:
+        sys.path.insert(0, str(import_root))
 
 # Import your models
 from app.core.async_db import BaseModel

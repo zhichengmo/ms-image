@@ -1,16 +1,35 @@
-import uvicorn
-import asyncio
+from pathlib import Path
 from multiprocessing import Process
+import sys
+
+import uvicorn
+
+
+RUNTIME_ROOT = Path(__file__).resolve().parent
+if str(RUNTIME_ROOT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_ROOT))
 
 
 def run_user_api():
     """运行用户端API"""
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(
+        "main:app",
+        app_dir=str(RUNTIME_ROOT),
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+    )
 
 
 def run_admin_api():
     """运行管理员API"""
-    uvicorn.run("main:admin_app", host="0.0.0.0", port=8001, reload=False)
+    uvicorn.run(
+        "main:admin_app",
+        app_dir=str(RUNTIME_ROOT),
+        host="0.0.0.0",
+        port=8001,
+        reload=False,
+    )
 
 
 if __name__ == "__main__":

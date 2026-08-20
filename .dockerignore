@@ -1,0 +1,13 @@
+.env
+.env-01
+.env.local
+.env.dev
+.env.prod
+.git
+.idea
+.ruff_cache
+.agent-handoff
+__pycache__
+**/__pycache__
+*.pyc
+logs

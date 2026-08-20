@@ -3,8 +3,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class OperationalAlert(BaseModel):
+    """A stable, non-sensitive threshold signal for operational consumers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1, max_length=80)
+    severity: Literal["warning", "critical"]
+    source: str = Field(min_length=1, max_length=80)
+    observed_value: int | float | None
+    threshold: int | float | None
+    unit: str = Field(min_length=1, max_length=32)
+    captured_at: datetime
+    summary: str = Field(min_length=1, max_length=200)
 
 
 class QueueOperationalStatus(BaseModel):
@@ -61,12 +77,14 @@ class OperationalStatusResponse(BaseModel):
     evaluation_jobs: ExecutionOperationalStatus
     evaluation_outbox: QueueOperationalStatus
     evaluation_metrics: EvaluationMetricOperationalStatus
+    alerts: list[OperationalAlert] = Field(default_factory=list)
 
 
 __all__ = [
     "CallOperationalStatus",
     "EvaluationMetricOperationalStatus",
     "ExecutionOperationalStatus",
+    "OperationalAlert",
     "OperationalStatusResponse",
     "QueueOperationalStatus",
     "ReportOperationalStatus",

@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.api.admin_v1.endpoints.control_plane_errors import (
     rollback_and_map_control_plane,
@@ -10,6 +11,7 @@ from app.api.deps import require_control_plane_scope
 from app.core.async_db import get_async_session, get_evaluation_async_session
 from app.core.config import settings
 from app.core.contexts import ControlPlaneContext
+from app.core.readiness import build_readiness
 from app.schemas.base import GenericResponse
 from app.schemas.operations import OperationalStatusResponse
 from app.service.operational_status_service import OperationalStatusService
@@ -31,13 +33,15 @@ async def get_service(
 
 @router.get("/status", response_model=GenericResponse[OperationalStatusResponse])
 async def get_operational_status(
+    request: Request,
     _: ControlPlaneContext = Depends(control),
     service: OperationalStatusService = Depends(get_service),
     online_db: AsyncSession = Depends(get_async_session),
     evaluation_db: AsyncSession = Depends(get_evaluation_async_session),
 ):
     try:
-        data = await service.snapshot()
+        readiness = await build_readiness(request.app.state.redis_manager)
+        data = await service.snapshot(readiness=readiness)
     except Exception as exc:
         await online_db.rollback()
         return await rollback_and_map_control_plane(evaluation_db, exc)

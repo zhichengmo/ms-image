@@ -1,11 +1,10 @@
 import logging.config
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
-from fastapi.staticfiles import StaticFiles
 
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse, FileResponse
+from starlette.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.api_v1.api import api_router
@@ -176,7 +175,7 @@ async def root():
 
 @admin_app.get("/")
 async def admin_root():
-    return {"message": "MS Scaffold Admin API is running", "docs": "/docs"}
+    return {"message": "MS-Image Admin API is running", "docs": "/docs"}
 
 
 if __name__ == "__main__":

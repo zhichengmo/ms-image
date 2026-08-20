@@ -8,6 +8,8 @@
 from fastapi.responses import JSONResponse
 # from sqlalchemy.testing.plugin.plugin_base import logging
 import logging
+from typing import Optional
+
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from starlette import status
@@ -21,7 +23,6 @@ from fastapi import FastAPI
 # credentials or image addresses.
 DEBUG = False
 logger = logging.getLogger(__name__)
-from typing import Optional
 
 
 class CustomException(Exception):

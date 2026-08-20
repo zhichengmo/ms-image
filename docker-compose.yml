@@ -1,21 +1,47 @@
+x-runtime-environment: &runtime-environment
+  ENV: ${COMPOSE_ENV:-dev}
+  APPLICATION_HOST: 0.0.0.0
+  MYSQL_DB: ${COMPOSE_MYSQL_DB:-ms_image}
+  MYSQL_HOST: ${COMPOSE_MYSQL_HOST:-mysql}
+  MYSQL_PORT: ${COMPOSE_MYSQL_PORT:-3306}
+  MYSQL_USER: ${COMPOSE_MYSQL_USER:-root}
+  MYSQL_PW: ${COMPOSE_MYSQL_PASSWORD:-password}
+  MYSQL_EVALUATION_DB: ${COMPOSE_MYSQL_EVALUATION_DB:-ms_image_eval}
+  MYSQL_EVALUATION_HOST: ${COMPOSE_MYSQL_EVALUATION_HOST:-mysql-evaluation}
+  MYSQL_EVALUATION_PORT: ${COMPOSE_MYSQL_EVALUATION_PORT:-3306}
+  MYSQL_EVALUATION_USER: ${COMPOSE_MYSQL_EVALUATION_USER:-root}
+  MYSQL_EVALUATION_PW: ${COMPOSE_MYSQL_EVALUATION_PASSWORD:-password}
+  REDIS_HOST: ${COMPOSE_REDIS_HOST:-redis}
+  REDIS_PORT: ${COMPOSE_REDIS_PORT:-6379}
+  REDIS_PASSWORD: ""
+  RABBITMQ_HOST: ${COMPOSE_RABBITMQ_HOST:-rabbitmq}
+  RABBITMQ_PASSWORD: ${COMPOSE_RABBITMQ_PASSWORD:-password}
+  RABBITMQ_PORT: ${COMPOSE_RABBITMQ_PORT:-5672}
+  RABBITMQ_USERNAME: ${COMPOSE_RABBITMQ_USERNAME:-admin}
+  RABBITMQ_VIRTUAL_HOST: ${COMPOSE_RABBITMQ_VIRTUAL_HOST:-/}
+
+x-runtime-env-files: &runtime-env-files
+  - path: .env-01
+    required: false
+
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - ENV=dev
-      - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
-      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
-      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
-    env_file:
-      - path: .env.example
-        required: true
-      - path: .env-01
-        required: false
+      <<: *runtime-environment
+      BROKER_ENABLED: ${BROKER_ENABLED:-false}
+      AI_RECEIPT_SIGNING_KEY: ${AI_RECEIPT_SIGNING_KEY:-}
+      AI_EGRESS_PROOF_SIGNING_KEY: ${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file: *runtime-env-files
     depends_on:
       mysql:
+        condition: service_healthy
+      mysql-evaluation:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -28,23 +54,23 @@ services:
       retries: 5
 
   admin:
-    build: .
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
     command: ["uvicorn", "main:admin_app", "--host", "0.0.0.0", "--port", "8001"]
     ports:
       - "127.0.0.1:8001:8001"
     environment:
-      - ENV=dev
-      - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
-      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
-      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
-    env_file:
-      - path: .env.example
-        required: true
-      - path: .env-01
-        required: false
+      <<: *runtime-environment
+      BROKER_ENABLED: ${BROKER_ENABLED:-false}
+      AI_RECEIPT_SIGNING_KEY: ${AI_RECEIPT_SIGNING_KEY:-}
+      AI_EGRESS_PROOF_SIGNING_KEY: ${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file: *runtime-env-files
     depends_on:
       mysql:
+        condition: service_healthy
+      mysql-evaluation:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -56,17 +82,116 @@ services:
       timeout: 5s
       retries: 5
 
+  imaging-worker:
+    profiles: ["broker"]
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
+    command: ["celery", "-A", "workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: true
+      AI_RECEIPT_SIGNING_KEY: ${AI_RECEIPT_SIGNING_KEY:-}
+      AI_EGRESS_PROOF_SIGNING_KEY: ${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mysql-evaluation:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  evaluation-worker:
+    profiles: ["broker"]
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
+    command: ["celery", "-A", "workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: true
+      AI_RECEIPT_SIGNING_KEY: ${AI_RECEIPT_SIGNING_KEY:-}
+      AI_EGRESS_PROOF_SIGNING_KEY: ${AI_EGRESS_PROOF_SIGNING_KEY:-}
+      AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mysql-evaluation:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  imaging-relay:
+    profiles: ["broker"]
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
+    command: ["python", "-m", "workers.imaging_worker.outbox_relay"]
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: true
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mysql-evaluation:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  evaluation-relay:
+    profiles: ["broker"]
+    build:
+      context: .
+      dockerfile: services/runtime/Dockerfile
+    command: ["python", "-m", "workers.evaluation_worker.outbox_relay"]
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: true
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mysql-evaluation:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: ms_image
+      MYSQL_ROOT_PASSWORD: ${COMPOSE_MYSQL_PASSWORD:-password}
+      MYSQL_DATABASE: ${COMPOSE_MYSQL_DB:-ms_image}
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ppassword"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${COMPOSE_MYSQL_PASSWORD:-password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mysql-evaluation:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${COMPOSE_MYSQL_EVALUATION_PASSWORD:-password}
+      MYSQL_DATABASE: ${COMPOSE_MYSQL_EVALUATION_DB:-ms_image_eval}
+    volumes:
+      - mysql_evaluation_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${COMPOSE_MYSQL_EVALUATION_PASSWORD:-password}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -88,8 +213,8 @@ services:
     profiles: ["broker"]
     image: rabbitmq:3.13-management-alpine
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: password
+      RABBITMQ_DEFAULT_USER: ${COMPOSE_RABBITMQ_USERNAME:-admin}
+      RABBITMQ_DEFAULT_PASS: ${COMPOSE_RABBITMQ_PASSWORD:-password}
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
@@ -103,5 +228,6 @@ services:
 
 volumes:
   mysql_data:
+  mysql_evaluation_data:
   redis_data:
   rabbitmq_data:
