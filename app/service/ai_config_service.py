@@ -91,6 +91,11 @@ class AIConfigService:
             )
             prompt_policy = self._normalize_prompt_policy(payload)
             catalog = PromptCatalog.target_xray(payload.prompt_catalog_revision)
+            self._validate_prompt_assets(
+                catalog=catalog,
+                prompt_policy=prompt_policy,
+                profile_key=payload.profile_key,
+            )
             prompt_bundle = catalog.bundle_payload(prompt_policy=prompt_policy)
             model_policy = self._normalize_model_policy(
                 payload.model_policy,
@@ -101,6 +106,8 @@ class AIConfigService:
                 max_prompt_chars=model_policy["max_prompt_chars"],
                 prompt_policy=prompt_policy,
             )
+            if payload.schema_catalog_revision != "complete_medical_result.v1":
+                raise AIConfigValidationError("schema_catalog_revision_not_available")
         except PromptContractError as exc:
             raise AIConfigValidationError(str(exc)) from exc
         schema_bundle = {
@@ -183,6 +190,46 @@ class AIConfigService:
         }
 
     @staticmethod
+    def _validate_prompt_assets(
+        *,
+        catalog: PromptCatalog,
+        prompt_policy: dict[str, Any],
+        profile_key: str,
+    ) -> None:
+        catalog.asset(prompt_role="joint_primary_base")
+        for family_key in prompt_policy["primary_family_keys"]:
+            catalog.asset(
+                prompt_role="joint_primary_module",
+                family_key=family_key,
+                eligibility="primary",
+            )
+        if prompt_policy["allow_technical_evidence"]:
+            catalog.asset(
+                prompt_role="technical_evidence",
+                prompt_key="technical_evidence.source_lineage",
+                eligibility="online",
+            )
+        if profile_key != "xray_targeted_review_v1":
+            return
+        catalog.asset(
+            prompt_role="targeted_focus",
+            prompt_key="targeted_focus.base",
+            eligibility="targeted_experimental",
+        )
+        for focus_key in prompt_policy["targeted"]["focus_keys"]:
+            catalog.asset(
+                prompt_role="targeted_focus",
+                focus_key=focus_key,
+                eligibility="targeted_experimental",
+            )
+        for strategy_key in prompt_policy["targeted"]["strategy_keys"]:
+            catalog.asset(
+                prompt_role="review_strategy",
+                strategy_key=strategy_key,
+                eligibility="targeted_experimental",
+            )
+
+    @staticmethod
     def _normalize_model_policy(
         value: dict[str, Any], *, profile_key: str
     ) -> dict[str, Any]:
@@ -196,13 +243,14 @@ class AIConfigService:
             "max_calls": int(value.get("max_calls") or default_max_calls),
             "require_actual_model": bool(value.get("require_actual_model", False)),
         }
+        expected_max_calls = 2 if profile_key == "xray_targeted_review_v1" else 1
         if (
             not policy["requested_model"]
             or policy["max_prompt_chars"] <= 0
             or policy["max_input_tokens"] <= 0
             or policy["max_output_tokens"] <= 0
             or policy["max_images"] <= 0
-            or policy["max_calls"] <= 0
+            or policy["max_calls"] != expected_max_calls
         ):
             raise AIConfigValidationError("model_policy_invalid")
         return policy
