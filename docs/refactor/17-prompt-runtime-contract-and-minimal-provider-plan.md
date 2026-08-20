@@ -1,6 +1,6 @@
 # MS-Image Prompt 运行合同与最小 Provider 链路调整方案
 
-状态：`CURRENT_PROMPT_P4_0_TO_P4_3_IMPLEMENTED / PROVIDER_DISABLED_TRUE_BUNDLE_IMPLEMENTED / REAL_PROVIDER_NOT_IMPLEMENTED`
+状态：`CURRENT_PROMPT_P4_0_TO_P4_3_IMPLEMENTED / PROVIDER_DISABLED_TRUE_BUNDLE_IMPLEMENTED / TARGET_ONLY_CODEBASE / REAL_PROVIDER_NOT_IMPLEMENTED`
 
 日期：2026-08-20
 
@@ -92,8 +92,8 @@ app/core/ai/prompting/ PromptCatalog + PromptCompiler
 | 来源 | 当前作用 | 问题 | 处理 |
 |---|---|---|---|
 | `ImagingExecutionService` 硬编码 SHA | provider-disabled Call 的 Prompt/Schema SHA | SHA 来自标签字符串，不来自真实内容 | 移除占位语义 |
-| `XRayPromptRegistry` 文件 Prompt | legacy request gate、qualification | 只含 `xray.request_gate.v1`，不是目标 Primary/Targeted | 保留 legacy/qualification |
-| 旧 AI runtime 五表 | 旧 AIGovernance Prompt/model/connection | 分散、可含明文 key、与目标 Config 重叠 | 隔离 legacy |
+| 历史 `XRayPromptRegistry` | 已从代码库移除 | 曾是旧 request gate Prompt 来源 | 不再是运行时来源 |
+| 历史 AI runtime 五表 | 已从代码库移除 | 曾拼装旧 Prompt/model/connection | 不再由当前 MS-Image 引用 |
 
 历史硬编码位置曾位于：
 
@@ -828,5 +828,5 @@ Prompt/model/schema 同时改变却进行 A/B
 - provider-disabled 也必须编译真实 Prompt/Schema。
 - 默认链 Primary-only。
 - Targeted 最多一次，只处理唯一 Focus。
-- 旧 `XRayPromptRegistry` 与旧 AI 五表只留在 legacy/qualification，不能成为目标 Prompt 事实源。
+- 旧 `XRayPromptRegistry`、旧 AI 五表和 `xray_accuracy` 运行链已从当前代码库移除；历史物理表不属于目标 metadata，也不再有当前 API/Worker 消费者。
 - 迁移与真实 Provider 仍需对应阶段授权和门禁。
