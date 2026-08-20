@@ -99,10 +99,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      mysql-evaluation:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -121,11 +117,7 @@ services:
       AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
     env_file: *runtime-env-files
     depends_on:
-      mysql:
-        condition: service_healthy
       mysql-evaluation:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -144,10 +136,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      mysql-evaluation:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 
@@ -163,11 +151,7 @@ services:
       BROKER_ENABLED: true
     env_file: *runtime-env-files
     depends_on:
-      mysql:
-        condition: service_healthy
       mysql-evaluation:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
