@@ -17,7 +17,7 @@ from app.core.config import settings
 # Import every model package explicitly so autogenerate sees the same metadata
 # used by the runtime.  This import is metadata-only; it does not create/drop
 # tables and does not execute a migration.
-from app.models import xray_accuracy  # noqa: F401
+import app.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

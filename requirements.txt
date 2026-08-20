@@ -32,8 +32,6 @@ redis[hiredis]==5.2.1
 celery==5.5.2
 # Celery uses Kombu/py-amqp for RabbitMQ; no second broker client is needed.
 
-# MongoDB (optional)
-mongoengine==0.27.0
 
 # File handling
 aiofiles==24.1.0

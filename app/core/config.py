@@ -74,13 +74,6 @@ class Settings(BaseSettings):
     GUNICORN_ERROR_LOG_PATH: str = "./logs/gunicorn_error.log"
     LOG_PATH: str = "./logs/"
 
-    MONGO_AUTH_SOURCE: str = "admin"
-    MONGO_DB: str = "ms_image"
-    MONGO_HOST: str = "localhost"
-    MONGO_PASSWORD: str = ""
-    MONGO_PORT: str = "27017"
-    MONGO_USER: str = "admin"
-
     # Primary Database settings
     MYSQL_DB: str = "ms_image"
     MYSQL_HOST: str = "localhost"
@@ -114,9 +107,8 @@ class Settings(BaseSettings):
     API_PRIVATE_KEY: str = ""
     JWT_ISSUER: str = "ms-image"
     JWT_AUDIENCE: str = "ms-image-api"
-    # Generic imaging scope; the legacy default preserves current XRay callers.
-    IMAGING_REQUIRED_SCOPE: str = "xray:run"
-    XRAY_REQUIRED_SCOPE: str = "xray:run"
+
+    IMAGING_REQUIRED_SCOPE: str = "imaging:run"
 
     # Admin JWT settings
     ADMIN_ALGORITHM: str = "HS256"
@@ -157,14 +149,6 @@ class Settings(BaseSettings):
     RABBITMQ_VIRTUAL_HOST: str = "/"
     BROKER_ENABLED: bool = False
     CELERY_BROKER_URL: str = ""
-    XRAY_BROKER_EXCHANGE: str = "xray.v2"
-    XRAY_BROKER_QUEUE: str = "xray.stage.requested"
-    XRAY_BROKER_ROUTING_KEY: str = "xray.run.stage.requested"
-    XRAY_BROKER_DLQ: str = "xray.stage.dlq"
-    XRAY_RELAY_POLL_SECONDS: float = 1.0
-    XRAY_RELAY_LEASE_SECONDS: int = 120
-    XRAY_WORKER_LEASE_SECONDS: int = 120
-    XRAY_WORKER_MAX_ATTEMPTS: int = 5
     IMAGING_BROKER_EXCHANGE: str = "imaging.v1"
     IMAGING_BROKER_QUEUE: str = "imaging.image.validate"
     IMAGING_BROKER_ROUTING_KEY: str = "imaging.image.validate"
@@ -191,24 +175,8 @@ class Settings(BaseSettings):
     AI_TRANSPORT_QUALIFICATION_ARTIFACT_PATH: str = (
         "docs/artifacts/ai-provider-transport-qualification.v1.json"
     )
-    AI_QUALIFICATION_IMAGE_PATHS: str = ""
     AI_QUALIFICATION_ARTIFACT_PATH: str = "docs/artifacts/ai-provider-qualification.v1.json"
     AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: str = ""
-    AI_QUALIFICATION_MAX_ATTEMPTS: int = 32
-    AI_QUALIFICATION_TENANT_ID: str = "xray-qualification"
-    AI_QUALIFICATION_SUBJECT_ID: str = "provider-qualification"
-    AI_CONFIG_VERSION: str = ""
-    # Isolated qualification-only source fixture contract.  The manifest
-    # contains opaque refs, relative paths and expected SHA256; it is never
-    # accepted from an API request and is not a production image source.
-    AI_SOURCE_IMAGE_MANIFEST_PATH: str = ""
-    AI_SOURCE_IMAGE_ROOT: str = ""
-    # Compatibility-only hash map. Keys are SHA256(image_url), values are
-    # approved opaque source refs. Raw legacy URLs are never persisted.
-    AI_LEGACY_IMAGE_REF_MAP_PATH: str = ""
-    # Compatibility switch stays false until the Study/ObjectStore gate is
-    # deployed and its isolated test-database artifact is approved.
-    AI_REQUIRE_FROZEN_STUDY: bool = True
 
     PROJECT_ENV: str = "development"
 
@@ -231,6 +199,7 @@ class Settings(BaseSettings):
         case_sensitive = True
         env_file = '.env-01'
         env_file_encoding = 'utf-8'
+        extra = 'ignore'
 
 
 settings = Settings()

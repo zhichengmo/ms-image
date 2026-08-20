@@ -49,7 +49,7 @@ def _read(source: Any, name: str) -> Any:
     return getattr(source, name)
 
 
-def runtime_config(*, source: Any = settings, prefix: str = "XRAY") -> BrokerRuntimeConfig:
+def runtime_config(*, source: Any = settings, prefix: str = "IMAGING") -> BrokerRuntimeConfig:
     """Build broker runtime settings from an injected domain prefix."""
     def value(suffix: str) -> Any:
         return _read(source, f"{prefix}_{suffix}")
@@ -76,15 +76,6 @@ def topology_for(
 ) -> BrokerTopology:
     """Return a domain-isolated topology without duplicating broker logic."""
     normalized = domain.strip().lower().replace("_", "-")
-    if normalized == "xray":
-        return BrokerTopology(
-            domain="xray",
-            exchange=exchange or _read(source, "XRAY_BROKER_EXCHANGE"),
-            queue=queue or _read(source, "XRAY_BROKER_QUEUE"),
-            routing_key=routing_key or _read(source, "XRAY_BROKER_ROUTING_KEY"),
-            dead_letter_queue=dead_letter_queue or _read(source, "XRAY_BROKER_DLQ"),
-            task_name=task_name or "xray_accuracy.execute_outbox",
-        )
     if normalized == "imaging":
         return BrokerTopology(
             domain="imaging",

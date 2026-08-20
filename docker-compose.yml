@@ -6,7 +6,6 @@ services:
     environment:
       - ENV=dev
       - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
       - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
       - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
       - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
@@ -36,7 +35,6 @@ services:
     environment:
       - ENV=dev
       - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
       - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
       - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
       - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
@@ -53,62 +51,10 @@ services:
     volumes:
       - ./logs:/app/logs
     healthcheck:
-      # Liveness must remain independent from the protected control-plane
-      # readiness probe; readiness is checked by an authenticated operator.
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/')"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  xray-relay:
-    profiles: ["xray-broker"]
-    build: .
-    command:
-      ["sh", "-c", "if [ \"$$BROKER_ENABLED\" != \"true\" ]; then echo broker_disabled; exit 0; fi; exec python -m workers.xray_accuracy_worker.outbox_relay"]
-    environment:
-      - ENV=dev
-      - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
-      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
-      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
-      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
-    env_file:
-      - path: .env.example
-        required: true
-      - path: .env-01
-        required: false
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./logs:/app/logs
-
-  xray-worker:
-    profiles: ["xray-broker"]
-    build: .
-    command:
-      ["sh", "-c", "if [ \"$$BROKER_ENABLED\" != \"true\" ]; then echo broker_disabled; exit 0; fi; exec celery -A workers.xray_accuracy_worker.celery_app:celery_app worker --loglevel=INFO --queues=xray.stage.requested --concurrency=2"]
-    environment:
-      - ENV=dev
-      - BROKER_ENABLED=${BROKER_ENABLED:-false}
-      - AI_CONFIG_VERSION=${AI_CONFIG_VERSION:-}
-      - AI_RECEIPT_SIGNING_KEY=${AI_RECEIPT_SIGNING_KEY:-}
-      - AI_EGRESS_PROOF_SIGNING_KEY=${AI_EGRESS_PROOF_SIGNING_KEY:-}
-      - AI_QUALIFICATION_ARTIFACT_SIGNING_KEY=${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
-    env_file:
-      - path: .env.example
-        required: true
-      - path: .env-01
-        required: false
-    depends_on:
-      mysql:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-    volumes:
-      - ./logs:/app/logs
 
   mysql:
     image: mysql:8.0
@@ -139,7 +85,7 @@ services:
       retries: 10
 
   rabbitmq:
-    profiles: ["xray-broker"]
+    profiles: ["broker"]
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: admin

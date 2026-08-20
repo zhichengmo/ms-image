@@ -8,17 +8,10 @@ import asyncio
 from typing import Any
 
 from sqlalchemy import text
-from app.core.ai.qualification import (
-    qualification_artifact_is_current,
-    transport_qualification_artifact_is_current,
-)
-from app.core.async_db import async_engine, evaluation_async_engine, session_factory
+from app.core.async_db import async_engine, evaluation_async_engine
 from app.core.config import settings
 from app.core.messaging.config import BrokerTopology, broker_url, topology_for
 from app.core.redis_manager import RedisManager
-from app.service.ai_governance_service import AIGovernanceService
-from app.service.xray_accuracy.prompt_service import XRayPromptRegistry
-from app.service.xray_accuracy.prompt_service import sha256_text
 
 
 async def _database_ready(engine: Any, *, error_code: str) -> tuple[bool, str | None]:
@@ -31,108 +24,24 @@ async def _database_ready(engine: Any, *, error_code: str) -> tuple[bool, str | 
 
 
 async def _provider_ready() -> dict[str, Any]:
-    """Expose transport and receipt gates independently."""
-    if not settings.AI_CONFIG_VERSION.strip():
-        return {
-            "transport": {
-                "state": "unconfigured",
-                "ready": False,
-                "error": "ai_config_version_missing",
-            },
-            "receipt": {"state": "blocked_by_transport", "ready": False, "error": None},
-        }
-    if not settings.AI_EGRESS_PROOF_SIGNING_KEY:
-        return {
-            "transport": {
-                "state": "unconfigured",
-                "ready": False,
-                "error": "egress_proof_signing_key_missing",
-            },
-            "receipt": {"state": "blocked_by_transport", "ready": False, "error": None},
-        }
-    if not settings.AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:
-        return {
-            "transport": {
-                "state": "unconfigured",
-                "ready": False,
-                "error": "qualification_artifact_signing_key_missing",
-            },
-            "receipt": {"state": "blocked_by_transport", "ready": False, "error": None},
-        }
-    try:
-        registry = XRayPromptRegistry()
-        manifest = registry.get_manifest("xray.request_gate.v1", language="en")
-        _, schema_sha256 = registry.response_schema(manifest.schema_key)
-    except (OSError, TypeError, ValueError):
-        return {
-            "transport": {
-                "state": "unconfigured",
-                "ready": False,
-                "error": "prompt_or_schema_invalid",
-            },
-            "receipt": {"state": "blocked_by_transport", "ready": False, "error": None},
-        }
-    try:
-        async with session_factory() as db:
-            async with db.begin():
-                bundle = await AIGovernanceService(db).resolve(
-                    version=settings.AI_CONFIG_VERSION, language="en"
-                )
-        connection = bundle.connection_entries[0]
-    except (ValueError, IndexError):
-        return {
-            "transport": {
-                "state": "unconfigured",
-                "ready": False,
-                "error": "ai_governance_unresolved",
-            },
-            "receipt": {"state": "blocked_by_transport", "ready": False, "error": None},
-        }
-    governed_prompt_key = f"ai_prompt_template:{bundle.prompt.item_id}"
-    governed_prompt_version = bundle.version
-    governed_prompt_checksum = sha256_text(bundle.prompt.content.strip())
-    transport_ready = transport_qualification_artifact_is_current(
-        settings.AI_TRANSPORT_QUALIFICATION_ARTIFACT_PATH,
-        base_url=connection.base_url,
-        model=connection.model,
-        api_key=connection.api_key,
-        api_keys=(connection.api_key,),
-        prompt_key=governed_prompt_key,
-        prompt_version=governed_prompt_version,
-        prompt_checksum=governed_prompt_checksum,
-        schema_key=manifest.schema_key,
-        schema_checksum=schema_sha256,
-        artifact_signing_key=settings.AI_QUALIFICATION_ARTIFACT_SIGNING_KEY,
-        egress_signing_key=settings.AI_EGRESS_PROOF_SIGNING_KEY,
-    )
-    transport = {
-        "state": "qualified" if transport_ready else "unqualified",
-        "ready": transport_ready,
-        "error": None if transport_ready else "transport_not_qualified",
+    """Target Provider gate while real Provider runtime remains unimplemented.
+
+    The legacy XRay prompt/config tables must not make target readiness appear
+    qualified.  P4.4 replaces this static gate with a contribution sourced
+    from the frozen target AI Config release and Provider qualification facts.
+    """
+    return {
+        "transport": {
+            "state": "not_implemented",
+            "ready": False,
+            "error": "target_provider_not_qualified",
+        },
+        "receipt": {
+            "state": "blocked_by_transport",
+            "ready": False,
+            "error": None,
+        },
     }
-    receipt_ready = qualification_artifact_is_current(
-        settings.AI_QUALIFICATION_ARTIFACT_PATH,
-        base_url=connection.base_url,
-        model=connection.model,
-        api_key=connection.api_key,
-        api_keys=(connection.api_key,),
-        prompt_key=governed_prompt_key,
-        prompt_version=governed_prompt_version,
-        prompt_checksum=governed_prompt_checksum,
-        schema_key=manifest.schema_key,
-        schema_checksum=schema_sha256,
-        signing_key=settings.AI_QUALIFICATION_ARTIFACT_SIGNING_KEY,
-    )
-    receipt = {
-        "state": "qualified"
-        if receipt_ready
-        else "unsupported"
-        if transport_ready
-        else "blocked_by_transport",
-        "ready": receipt_ready,
-        "error": None if receipt_ready else "provider_receipt_not_qualified",
-    }
-    return {"transport": transport, "receipt": receipt}
 
 
 async def _broker_domain_ready(
@@ -357,7 +266,7 @@ async def build_readiness(redis_manager: RedisManager) -> dict[str, Any]:
                 **evaluation_broker_metrics,
             },
             "provider": {
-                "required": bool(settings.AI_CONFIG_VERSION.strip()),
+                "required": False,
                 **provider,
             },
         },

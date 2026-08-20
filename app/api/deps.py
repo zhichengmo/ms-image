@@ -325,57 +325,6 @@ async def get_image_storage_dependencies(
     )
 
 
-async def get_xray_run_service(
-    db=Depends(get_async_session),
-):
-    """Expose the existing XRay service through API dependency injection."""
-    from app.service.xray_accuracy import XRayRunService
-
-    return XRayRunService(db)
-
-
-async def get_xray_trace_service(
-    db=Depends(get_async_session),
-):
-    """Expose the existing XRay trace service through API dependency injection."""
-    from app.service.xray_accuracy import XRayTraceService
-
-    return XRayTraceService(db)
-
-
-async def get_xray_execution_service(
-    db=Depends(get_async_session),
-):
-    """Expose the validation-only execution/result service via DI."""
-    from app.service.xray_accuracy import XRayExecutionService
-
-    return XRayExecutionService(db)
-
-
-async def get_xray_lifecycle_service(
-    db=Depends(get_async_session),
-):
-    """Expose Session/Study/Image lifecycle orchestration through DI."""
-    from app.service.xray_accuracy import XRayLifecycleService
-
-    return XRayLifecycleService(db)
-
-
-async def get_xray_legacy_compat_service(
-    db=Depends(get_async_session),
-):
-    """Expose legacy XRay V2 request semantics over the new fact model."""
-    from app.service.xray_accuracy import XRayLegacyCompatService
-
-    return XRayLegacyCompatService(db)
-
-
-async def get_xray_provider_qualification_service(
-    db=Depends(get_async_session),
-):
-    from app.service.xray_accuracy import XRayProviderQualificationService
-
-    return XRayProviderQualificationService(db)
 
 
 def authorized_user(
