@@ -1,150 +1,219 @@
-# MS-Image 新重构会话交接
+# MS-Image 新会话交接：QJ 借鉴与模块收敛调整
 
-状态：`READY_FOR_NEXT_SESSION`（已准备供新会话读取）
-用途：让新会话不依赖历史聊天，先恢复目标、事实、风险和实施顺序。
+状态：`CURRENT_NEXT_SESSION_HANDOFF / QJ_CONVERGENCE_PROPOSED / IMPLEMENTATION_PENDING_AUTHORIZATION`
 
-## 1. 新会话最小读取顺序
+更新日期：2026-08-20
 
-1. 根目录 `AGENTS.md`（项目规则，系统通常自动加载，但仍需确认适用范围）。
-2. 根目录 `AGENT_HANDOFF.md`（代理交接入口）。
-3. `.agent-handoff/snapshot.md`（当前状态）。
-4. `.agent-handoff/risks.md`（风险与未知项）。
-5. `.agent-handoff/backlog.md`（下一步待办）。
-6. [重构文档包入口](README.md)。
-7. P1 实现读取[目标架构](02-target-architecture.md)、[数据库与 OSS 设计](03-database-and-storage-design.md)、[开发指南](05-development-guide.md)和[重构计划](06-refactor-migration-and-validation-plan.md)。
-8. 实现 XRay（X 光）时读取 [XRay 详细链路与开发流程图](10-xray-detailed-flow.md)。
-9. 评审或实现图中节点职责时读取 [Canonical XRay Chain 逐层目的与责任合同](12-canonical-xray-layer-responsibility-contract.md)。
-10. 开始内部代码替换前读取[重构基线决策](13-refactor-base-decision.md)，按 preserve/replace（保留/替换）边界执行。
-11. 读取设计母文中与当前 Phase（阶段）直接相关的精确字段、状态、事务和不变量章节。
-12. 即将修改的确切代码，必须亲自完整阅读。
+用途：让新的 Codex/开发会话在不依赖历史聊天的情况下，正确恢复当前工程状态，并在获得用户实现授权后按 16 号文档执行模块收敛调整。
 
-若本轮不是按既定设计实现，而是要改变架构、字段、Service（业务服务）或 Stage（阶段）决策，才额外读取：
+> 本文是新会话恢复和执行入口，不重复字段、Stage 或医学设计权威。
+> 架构方案以 [16-QJ 借鉴与模块收敛调整方案](16-qj-reference-and-modular-convergence-plan.md) 为准；当前工程门禁以 [15-全链缺口与执行计划](15-full-chain-gap-analysis-and-execution-plan.md) 与 handoff 为准。
 
-- [决策、风险与待确认项](07-decisions-risks-and-open-questions.md)。
-- [历史演进与冲突索引](../history/README.md)，只用于理解旧方案，不作为合同。
-- [设计母文](../ms-image-final-architecture-and-database-design.md) 中受影响的全部合同，并同步更新权威设计；不能只改实施视图。
+---
+
+## 1. 新会话必须读取的顺序
+
+1. 根目录 `AGENTS.md`：项目规则、授权边界和交接维护协议。
+2. 根目录 `AGENT_HANDOFF.md`：交接入口。
+3. `.agent-handoff/snapshot.md`、`risks.md`、`backlog.md`：当前状态、阻断和下一动作。
+4. [重构文档包入口](README.md)：文档权威边界。
+5. [QJ 借鉴与模块收敛调整方案](16-qj-reference-and-modular-convergence-plan.md)：本任务的目标、范围、Phase 和停止条件。
+6. [全链缺口与分阶段执行计划](15-full-chain-gap-analysis-and-execution-plan.md)：当前 Phase 2 门禁、真实运行和医学发布边界。
+7. [Prompt 运行合同与最小 Provider 链路调整方案](17-prompt-runtime-contract-and-minimal-provider-plan.md)：若本轮涉及 AIConfig、AIRequest、Prompt、Schema、Provider-disabled、JointPrimaryReader 或 TargetedReview，必须先读；其调用数、冻结版本、编译和泄漏合同优先约束该切片。
+8. [XRay 完整核心架构与专项设计](14-xray-specialty-design.md)：公共/专项、医学 owner 和 Targeted 边界。
+9. [Service 与 Stage 设计](04-service-and-stage-design.md)、[开发指南](05-development-guide.md)：8 个 Service、5 个 Stage、分层和代码规则。
+10. 即将修改的确切源码；修改前必须完整阅读对应文件。
+11. 仅在修改精确字段、状态、索引或迁移策略时，读取设计母文的受影响章节。
+
+> `docs/refactor/README.md` 在本读取顺序中只充当导航。若其“当前一句话状态”与当前 worktree、`.agent-handoff/snapshot.md` 或 15 号文档冲突，必须以后者为准，不得据此重建已有 Task/Stage/Report/Evaluation 代码。
+
+如需理解旧链原因，可读取 `docs/history/README.md`；历史资料不能作为新建表、迁移或新执行链依据。
+
+---
 
 ## 2. 当前恢复摘要
 
-- 当前仓库代码是 XRay validation-only（仅验证）骨架，目标通用影像架构尚未实现。
-- 用户允许完全重构代码；旧 `xray_accuracy` 内部模块、目录和类可以替换，但外部兼容、数据迁移和事实 owner 必须受控。
-- 目标在线 `ms_image` 当前为 10 表候选，隔离 `ms_image_eval` 当前为 4 表候选；10+4 不是数量上限，必要时按独立事实证据增表。
-- 目标在线业务 Service 为 8 个，注册 Stage Service 为 5 个。
-- Canonical XRay Chain（X 光权威主链）已冻结：`xray_primary_v1` 为 StudyPreparation -> JointPrimaryReader -> DecisionFinalization -> Report。
-- `xray_targeted_review_v1` 才在 Primary 后进入 FamilyRouting，并选择 `primary_final` 直接定稿或最多一次 TargetedReview；Targeted 技术失败不得静默回退 Primary。
-- 人工复核当前不考虑；`review_required` 是可发布 AI 无法确定终态。
-- OSS 保存 bytes；不建设 `file_asset`（文件资产）表，各 owner 表保存完整 ObjectRef。
-- 当前医学准确率是 `UNKNOWN`，发布状态是 `PARTIAL / NO-GO`。
-- 当前 `HEAD` 就是 `9a45209a`；重构基线选择“当前未提交工作树作为资产基线 + 保留入口的内部模块化替换”，不是 reset 后全量重写，也不是继续零散修补。开始大范围代码替换前必须先排除 `.env`/Secret 并建立用户认可的可恢复 checkpoint。
+### 2.1 Git 与工作树
 
-## 3. 第一轮实现前必须做什么
+- 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`。
+- 当前分支：以实时 `git branch --show-current` 为准；本次 Runtime Foundation 分支为 `codex/monorepo-runtime-foundation`。
+- 16 号 QJ 收敛静态审计基线：`2fa2a8b5cd01777204e4952641b97174d9dc5879`（仅用于解释该文档的审计范围，不是当前 worktree HEAD）。
+- 开始实施前必须执行 `git rev-parse HEAD`，并以当前 worktree 与 `.agent-handoff/snapshot.md` 的 HEAD 为实现事实；截至 2026-08-20 的已知 HEAD 是 `9fdd1c64655bbf27af7c0359d58f39df3c467775`，其冻结了 17 号 Prompt 运行合同。
+- 当前工作树可能已有用户未提交的文档/handoff 与 `services/runtime/app/models/evaluation.py` 格式改动；禁止 `reset`、`clean`、`checkout`、`git add -A` 或整文件覆盖。
+- 本次新建/更新的文档可能同样未提交；开始前必须重新运行 `git status --short`、`git diff --name-status`、`git diff --stat`。
 
-新会话不要把 10+4 当成固定数量，也不要直接大批生成全部表。先完成：
+### 2.2 当前工程状态
 
-1. 读取当前 git 状态，保护所有用户未提交改动。
-   固定先运行 `git status --short`、`git diff --name-status`、`git diff --stat`；修改重叠文件前完整阅读并合并，禁止 reset、checkout、覆盖或批量删除。
-2. 用当前代码重新核对 P0 阻断是否仍然存在，特别是 Secret、事务内外部 I/O、身份、Broker、Trace/Audit 和启动合同；StageRegistry 缺失是 P3 的预期差距，不阻止 P1。
-3. 代码内部完全重构已经得到用户授权，不需要再次询问；迁移脚本、新建测试脚本、真实数据库操作和生产发布仍未授权。
-4. P0 只核对会阻止 P1 的真实工程边界，不无限扩展成纯审计；无硬阻断时在同一会话直接进入 P1。
-5. 将 P1 按 P1A/P1B/P1C 顺序闭环，不因只完成 ORM/Schema 就宣称模块完成。
-6. 将目标、文件、风险和完成定义写入 `.agent-handoff/snapshot.md`。
-
-### 3.1 第一轮执行判定
-
-```mermaid
-flowchart TD
-    START["恢复 handoff（代理交接）和读取 git 状态"]
-    P0["P0 基线核对<br/>Secret/事务外 I/O/身份/Broker/Trace/启动合同"]
-    BLOCK{"是否存在阻止 P1 的硬阻断？"}
-    FIX["只修复与 P1 直接相关的阻断"]
-    P1["P1A/P1B/P1C<br/>影像分层 + API + validate Outbox/Worker"]
-    STOP["更新 handoff 并明确外部阻断<br/>不伪造已完成"]
-
-    START --> P0 --> BLOCK
-    BLOCK -->|"否"| P1
-    BLOCK -->|"是且仓库内可修复"| FIX --> P1
-    BLOCK -->|"需要新权限/外部事实"| STOP
-```
-
-## 4. 推荐首个开发切片
-
-用户已经授权内部代码重构。推荐第一个切片：
+当前已确认：
 
 ```text
-P1A Session/Study/Series/Image 目标 Model + Schema + DAL + Service
-P1B API + dependency injection + route registration
-P1C ObjectStorageGateway + Image validate Outbox/Relay/Worker + reconcile/revision
--> 不创建迁移脚本（除非另行授权）
--> 不接医学 Provider
+ONLINE_CODE_IMPLEMENTED
+TASK_STAGE_EXECUTION_IMPLEMENTED
+PROVIDER_DISABLED_MEDICAL_CHAIN_IMPLEMENTED
+PROVIDER_DISABLED_FULL_CHAIN_PASSED
+REPORT_CHAIN_IMPLEMENTED
+EVALUATION_CODE_IMPLEMENTED
+EVALUATION_DB_ISOLATION_IMPLEMENTED
+EVALUATION_EXPORTER_IMPLEMENTED
+EVALUATION_RELAY_IMPLEMENTED
+EVALUATION_WORKER_IMPLEMENTED
+EVALUATION_READINESS_IMPLEMENTED
+OPERATIONAL_STATUS_IMPLEMENTED
+EVALUATION_SCOPE_SEPARATION_IMPLEMENTED
+FAKE_SCORER_IMPLEMENTED
+PAIRED_AB_SUMMARY_IMPLEMENTED
 ```
 
-原因：它先建立所有模态共享的影像事实，不依赖 Prompt/模型准确率；Task、Stage 和 AI 只有在冻结的 Study revision 上才有可靠输入。Image 完成上传不能同步执行大对象校验，因此 `validate_image` 的最小 Outbox/Relay/Worker 属于 P1C，而不是留到 P2。
+上述仅是摘要；完整状态以 `.agent-handoff/snapshot.md` 为准。新会话不得因摘要遗漏而重建已有 scorer、paired A/B、Task、Stage、Report 或 Evaluation 链。
 
-第二个切片：
+当前仍然必须保持：
 
 ```text
-Task + first Stage + Outbox atomic transaction
--> 将 P1C 的同一 Outbox/Relay 扩展到 Task/Stage/Call
--> zero-model replay
+NOT_MIGRATED
+NOT_RUNTIME_VALIDATED
+PROVIDER_NOT_QUALIFIED
+AI_TEST_NOT_STARTED
+MEDICAL_ACCURACY_UNKNOWN
+MEDICAL_RELEASE_NO_GO
 ```
 
-第三个切片才是 AI Config/Call、Primary Reader 和 Report。
+`PROVIDER_DISABLED_FULL_CHAIN_PASSED` 只证明 inline fake 工程组合链；不能表述为真实 MySQL/OSS/RabbitMQ/Provider、生产可用或医学准确率通过。
 
-### 4.1 P1 最小切片的完成定义
+### 2.3 已批准的目标边界
 
-- Model/Schema/DAL/Service 使用同一实体语义，不复制旧 XRay 专项字段。
-- DAL 全部复用 `app.core.crud.DalBase`；API、Service 和 Worker 不直接拼 SQLAlchemy。
-- Session/Study/Series/Image 的 owner、状态、revision 和 ObjectRef（对象引用）合同能闭环。
-- `Image uploading -> validating + Outbox(validate_image)` 同事务；Broker 由 relay 在提交后发布。
-- prepare/upload/complete/validate/revision 中所有 OSS（对象存储）外部 I/O 均在数据库事务外；完整校验由 Worker 执行，不阻塞 API 长请求。
-- ready 只能来自服务端流式 hash/size/格式校验；失败进入 quarantined，不信任客户端 hash、OSS ETag 或 HEAD 单独结论。
-- 替换影像必须创建新版本；新版本 ready 且 Study revision CAS 成功后，旧版本才能 superseded。
-- required Series/Image 未完整前 Study 不得 ready；相同幂等键但 payload 不同必须冲突。
-- 不生成 Alembic（数据库迁移）脚本，不新建测试脚本，不操作真实数据库，不接医学 Provider。
-- 可以运行已有的非破坏性检查；运行、失败和未运行项全部写入 validation（验证记录）。
-- 无迁移和真实运行授权时，结束状态只能是 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`，不能把 G4 标为通过。
-- 目标表不保存 `tenant_id`，但不能因此删除认证：旧 tenant claim 暂作兼容访问范围；目标 owner 使用可信 subject/service identity + scope + 资源归属，请求体不得覆盖 owner。
-- 新 OSS key 不再按 tenant 派生；旧 key 由现有网关内的兼容适配器只读，不新建第二套 OSS Gateway，不盲目重写旧对象。
-- 新实现、仍为设计和尚未验证的部分在文档和 handoff 中明确区分。
+```text
+QJ Open Platform
+= 外部商业控制面：Kong、Project/API Key、Capability、限流、Usage/Wallet/Ledger、SDK/Webhook
 
-## 5. 新会话禁止事项
+MS-Image
+= 独立影像领域内核：Image/OSS、Study revision、Task/Stage/Outbox、AI Call、Report、Evaluation
+```
 
-- 不把目标文档写成已实现。
-- 不一表一表复制 `xray_accuracy_*`。
-- 不恢复 `tenant_id`、公共 `file_asset`、固定 FinalReader 或人工复核占位字段。
-- 不在 API/Service/Worker 直接拼 SQL。
-- 不新增 Repository、第二套 CRUDBase 或 DatabaseService。
-- 不在数据库事务内调用 OSS/Broker/Provider。
-- 不使用 `/{id}` 路由。
-- 未经用户特别授权不生成迁移脚本和测试脚本。
-- 不修改或删除用户已有未提交改动。
-- P1 不删除旧 XRay API/表，不开启生产双写；旧入口保持原状，直到 P6 Compatibility Adapter 获得明确授权。
-- 不让 Python 阈值、投票或 fallback 产生医学结论。
-- 不读取 isolated Holdout（隔离留出集）调 Prompt 或阈值。
+目标公共在线新主链：
 
-## 6. 每轮会话结束前
+```text
+Session / Study / Series / Image
+Task / StageCheckpoint / Outbox
+AIConfigRecord / AICall / Report
+```
 
-- 更新 `.agent-handoff/snapshot.md`：状态、下一步、活动文件和阻断。
-- 将长期取舍写入 `.agent-handoff/decisions.md`，不要塞进 snapshot。
-- 将验证命令、结果和未运行项写入 `.agent-handoff/validation.md`。
-- 将风险和 UNKNOWN 写入 `.agent-handoff/risks.md`。
-- 更新 backlog，只保留可执行未完成项。
-- 运行 handoff maintenance（交接维护）检查。
-- 明确哪些代码已实现、哪些只设计、哪些未验证。
+目标在线业务 Service 固定为：
 
-## 7. 可直接用于新会话的启动提示
+```text
+SessionService / StudyService / ImageService / TaskService
+ImagingExecutionService / AIConfigService / AIRequestService / ReportService
+```
 
-直接使用根目录 [AGENT_SESSION_PROMPTS.md](../../AGENT_SESSION_PROMPTS.md) 中“开启新的重构会话”的完整提示词。
-该提示词是唯一维护版本，本文不再复制第二份以避免授权范围、读取顺序和 P1 完成定义漂移。
+XRay 新能力只能通过 Profile、Prompt、Schema、Stage handler 和 Stage output 扩展；不得继续新增 `xray_accuracy` 的 Task/Stage/Outbox/Call/Report 事实。
 
-## 8. 新会话能否正确恢复的验收问题
+---
 
-新会话读完最小集后，应能回答：
+## 3. 新会话的第一轮判定
 
-1. 当前代码与目标架构的差距是什么？
-2. 下一步最小实现切片是什么？
-3. 哪些表、Service 和 Stage 属于目标但尚未实现？
-4. 哪些医学能力默认关闭，为什么？
-5. 当前有哪些阻断和 UNKNOWN？
-6. 本轮可以修改哪些文件，哪些动作未被授权？
-7. 如何验证本轮没有破坏唯一 owner、事务和医学边界？
+新会话首先判断用户当前授权属于哪一类：
+
+| 用户授权 | 新会话最早动作 |
+|---|---|
+| 只评审/解释架构 | 只读 16 号文档和相关源码，不改代码 |
+| 明确授权“执行 16 号 QJ 收敛方案”但未指定切片 | 从 16 号文档 **Phase A** 开始：部署拓扑、Worker 角色、legacy consumer 清单和入口边界；不迁移、不删旧链 |
+| 仅说“按文档开始/继续重构” | 先以当前 snapshot 和 15 号文档的 Phase 2 下一动作判定任务；不得擅自切换到 16-Phase A |
+| 明确调整 Stage 收敛 | 执行 16 号文档 **Phase B**；还必须先阅读 17 号 Prompt 合同，以及 `pipeline.py`、`imaging_execution_service.py`、现有 Service/Worker 和相关 Schema |
+| 明确调整上传/对象生命周期 | 执行 **Phase C**；先完整阅读 `images.py`、`image_service.py`、ImageDal、ObjectStorageGateway 和 imaging worker |
+| 明确调整 DB/入口/Compose | 执行 **Phase D**；先完整阅读 `async_db.py`、`main.py`、`run_servers.py`、Compose、readiness、worker entrypoints |
+| 明确接 QJ | 先完成 **Phase E 接口评审**，冻结 identity、idempotency、object owner、状态同步和计费终态；不得先写透明 proxy 或新表 |
+| 明确要求迁移、真实运行、Provider 或医学发布 | 先要求并记录专门授权；遵守 15 号文档的门禁 |
+
+不要一次跨越多个 Phase。每个 Phase 必须先完成可复核的代码、部署合同和验证，再进入下一步。
+
+---
+
+## 4. 严格禁止事项
+
+- 不新建 Repository、第二套 CRUDBase、DatabaseService、平行 service 包、第二套 OSS Gateway、第三套 Outbox 或 Task Runner。
+- 不在 API、Service、Worker 直接拼 SQLAlchemy 查询；数据库访问仍经实体 `XxxDal(DalBase)`。
+- 不使用 `/{id}`；资源 ID 只放 query 或 request body。
+- 新 Model 不使用 Foreign Key、数据库 Enum、联合主键或 `tenant_id`。
+- 不在数据库事务内调用 OSS、Broker 或 Provider。
+- 不把 QJ Project/API Key/Wallet/Ledger/客户 Webhook 复制到 MS-Image。
+- 不把 QJ 的动态 HTTP Provider proxy 当作 MS-Image 的 Task/Stage 替代物。
+- 不扩展或删除 `xray_accuracy` 表/API/Worker，直到外部消费者、迁移映射和审计期限有证据。
+- 不让 XRay Stage 直接拥有第二套 Task/Stage/Outbox/Report 状态机。
+- 不生成迁移脚本、测试脚本，不连接真实基础设施，除非用户单独授权。
+- 不把工程 fake、静态检查、测试通过写成 Provider 资格、医学准确率或生产发布通过。
+
+---
+
+## 5. 最小实施顺序
+
+### Phase A：部署真相与边界冻结
+
+目标：让源码、Compose、Worker、queue topology、readiness 和 handoff 表述一致。
+
+优先核查：
+
+```text
+services/runtime/main.py
+services/runtime/run_servers.py
+docker-compose.yml
+services/runtime/workers/imaging_worker/
+services/runtime/workers/evaluation_worker/
+services/runtime/app/core/messaging/config.py
+services/runtime/app/core/readiness.py
+```
+
+输出：明确 Runtime user/admin、imaging/evaluation worker/relay 的职责；不得恢复或复制已删除的 legacy XRay worker。
+
+### Phase B：公共 Execution 与 XRay Stage 收敛
+
+目标：`ImagingExecutionService` 是唯一状态机 owner；XRay 只实现专项 handler。
+
+前置条件：涉及 AIConfig、AIRequest、Prompt、Schema、JointPrimaryReader 或 TargetedReview 时，必须先满足 17 号文档的调用数、Config Release、Prompt Compiler、泄漏检查和 provider-disabled 真 Bundle 合同；目录收敛不得改变这些冻结约束。
+
+```text
+common stages:
+- StudyPreparation
+- DecisionFinalization
+
+XRay stages:
+- JointPrimaryReader
+- FamilyRouting
+- TargetedReview
+```
+
+Stage 只返回 `StageResult`/DTO；Execution 才写 Stage/Task/Outbox/Report。
+
+### Phase C：Image API 编排下沉
+
+目标：`images.py` 不直接管理多段事务或 OSS 生命周期；唯一对外业务入口保持 `ImageService`。
+
+### Phase D：Registry 与独立入口
+
+目标：借鉴 QJ 的 DatabaseRegistry 和 Compose 薄编排，但保留 `online != evaluation` 的失败关闭；不使用启动 `create_all()`。
+
+### Phase E：QJ Adapter
+
+目标：QJ 只处理商业事实；MS-Image 只处理影像事实。先冻结内部 identity、Task 映射、Object owner、状态同步和计费终态，再写接口。
+
+---
+
+## 6. 新会话结束前
+
+- 更新 `.agent-handoff/snapshot.md`：当前 Phase、修改文件、下一动作、阻断。
+- 更新 `.agent-handoff/work-log.md`、`validation.md`、`backlog.md`、`risks.md`；长期决策才更新 `decisions.md`。
+- 运行：
+
+```bash
+python /Users/mozhicheng/.codex/skills/agent-handoff/scripts/maintain_handoff.py \
+  --repo /Users/mozhicheng/workspace/code/cy-code/ms-image \
+  --compact-if-needed
+```
+
+- 诚实区分：代码实现、fake/静态验证、真实运行资格、Provider 资格和医学证据。
+
+---
+
+## 7. 可直接复制给新会话的启动提示
+
+只需要评审 QJ 借鉴是否适用、尚未授权任何代码调整时，使用 [18-QJ 架构借鉴决策门提示](18-qj-reference-decision-gate-session-prompt.md)。
+
+只有用户明确授权执行 16 号方案的具体最小切片时，才使用根目录 `AGENT_SESSION_PROMPTS.md` 中的 **“开启 QJ 借鉴与模块收敛调整会话”** 提示词。两种入口都不得使用历史 P1/P2 提示替代当前 worktree/handoff 事实。

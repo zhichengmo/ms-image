@@ -1,14 +1,14 @@
 # MS-Image（宠物影像 AI 服务）
 
-状态：`REFACTOR_DESIGN_READY / TARGET_NOT_IMPLEMENTED`（重构设计已准备/目标架构尚未实现）
+状态：`PARTIAL_IMPLEMENTATION / ONLINE_CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`（部分实现/在线链代码已实现/未迁移/未做真实运行验证）
 
-当前日期：2026-08-18
+当前日期：2026-08-21
 
 适用范围：XRay（X 光）首期闭环，以及 CT（计算机断层成像）、MRI（磁共振成像）、超声、视频和 WSI（全切片影像）的通用影像底座。
 
 MS-Image 是宠物多模态影像接入、AI（人工智能）诊断执行、报告和离线评测服务，不是用于生成其他 FastAPI 项目的脚手架。
 
-当前代码仍是 `XRay validation-only`（X 光仅验证）工程骨架；目标在线 10 表、隔离评测 4 表、8 个在线业务 Service（业务服务）和 5 个 Stage Service（阶段服务）均属于已评审设计，不代表已经建表、迁移或上线。医学准确率当前仍为 `UNKNOWN`（未知），发布状态仍为 `PARTIAL / NO-GO`（部分完成/禁止放行）。
+当前 Runtime 源码已唯一收敛到 `services/runtime/`，包含 Session/Study/Series/Image、Task/Stage、provider-disabled AI Call、Report、Evaluation Job/Outbox/Relay/Worker、readiness 与 Operational Status；Compose 同时定义在线和隔离 Evaluation MySQL。代码尚未迁移到真实 schema，也尚未完成真实 MySQL/OSS/RabbitMQ 演练；Provider 仍未资格化，医学准确率为 `UNKNOWN`，发布状态为 `NO-GO`。
 
 ## 项目目的
 
@@ -83,8 +83,7 @@ flowchart TD
 
 | 目的 | 文档 |
 |---|---|
-| 第一次了解项目 | [文档中心](docs/README.md) -> [项目概览与业务链](docs/refactor/01-project-overview-and-business-chain.md) |
-| 向开发人员讲解 XRay | [XRay 核心链路沟通文档](docs/refactor/11-xray-core-chain-developer-briefing.md) |
+| 第一次完整了解 XRay 或向开发人员讲解 | [XRay 完整核心架构与专项设计](docs/refactor/14-xray-specialty-design.md) |
 | 审查每一层的目的、逻辑、输入、输出和必要性 | [XRay 权威主链逐层责任与接口合同](docs/refactor/12-canonical-xray-layer-responsibility-contract.md) |
 | 查看完整 XRay 状态、事务和故障链 | [XRay 详细链路与开发流程图](docs/refactor/10-xray-detailed-flow.md) |
 | 查看精确表、字段、索引和不变量 | [最终架构、数据库与完整链路设计](docs/ms-image-final-architecture-and-database-design.md) |
@@ -124,9 +123,9 @@ API（接口层） -> Service（业务层） -> CRUD/DAL（数据访问层） ->
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r services/runtime/requirements.txt
 cp .env.example .env-01
-python run_servers.py
+python services/runtime/run_servers.py
 ```
 
 - 用户 API（应用程序接口）：`http://localhost:8000/docs`

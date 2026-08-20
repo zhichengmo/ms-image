@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     MYSQL_EVALUATION_UNIX_SOCKET: str = ""
 
     # MS_HD Database settings (optional for HD service integration)
+    # The HD integration is outside the Runtime primary/evaluation boundary;
+    # keep it opt-in so importing the Runtime does not allocate a third pool.
+    MYSQL_HD_ENABLED: bool = False
     MYSQL_HD_DB: str = "ms_hd"
     MYSQL_HD_HOST: str = "localhost"
     MYSQL_HD_PW: str = "password"

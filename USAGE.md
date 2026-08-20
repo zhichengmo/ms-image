@@ -9,7 +9,7 @@
 - Python 3.11
 - MySQL 8.0
 - Redis 7
-- RabbitMQ 3.13：只有启用 `xray-broker`（X 光消息代理）Profile 时需要
+- RabbitMQ 3.13：只有启用 `broker`（消息代理）Profile 时需要
 - OSS（对象存储）和 AI Provider（AI 服务提供方）凭证：只有进行已授权的真实资格验证时需要
 
 所有 Secret（密钥）必须通过本地环境或批准的 Secret Manager（密钥管理服务）注入，不得写入文档、代码、数据库明文字段或提交到 Git。
@@ -20,7 +20,7 @@
 cd /Users/mozhicheng/workspace/code/cy-code/ms-image
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r services/runtime/requirements.txt
 cp .env.example .env-01
 ```
 
@@ -50,19 +50,19 @@ BROKER_ENABLED=false
 ### 3.1 同时启动用户端和管理端
 
 ```bash
-python run_servers.py
+python services/runtime/run_servers.py
 ```
 
 ### 3.2 分别启动
 
 ```bash
-python start_user_api.py
-python start_admin_api.py
+python services/runtime/start_user_api.py
+python services/runtime/start_admin_api.py
 ```
 
 ### 3.3 Docker Compose（容器编排）
 
-默认启动用户 API、管理 API、MySQL 和 Redis：
+默认启动用户 API、管理 API、在线 MySQL、隔离 Evaluation MySQL 和 Redis：
 
 ```bash
 docker compose up --build
@@ -71,10 +71,10 @@ docker compose up --build
 启用当前 XRay validation-only（X 光仅验证）的 Relay（中继）和 Worker（工作进程）：
 
 ```bash
-BROKER_ENABLED=true docker compose --profile xray-broker up --build
+BROKER_ENABLED=true docker compose --profile broker up --build
 ```
 
-这里的 `xray_accuracy_worker` 是当前验证骨架，不是目标 `ImagingExecutionService + StageRegistry` 已经实现的证明。
+这里的 imaging/evaluation Worker 和 Relay 使用 `broker` Profile；它们仍是当前 Runtime 代码域的一部分，不代表 AI Control 或 Evaluation Control 已独立部署。
 
 ## 4. 本地地址
 
@@ -85,7 +85,7 @@ BROKER_ENABLED=true docker compose --profile xray-broker up --build
 | 健康检查 | `http://localhost:8000/api/v1/health` | 只证明进程可响应 |
 | 用户依赖就绪 | `http://localhost:8000/api/v1/readiness` | 检查 Redis/数据库等当前依赖 |
 | 管理依赖就绪 | `http://localhost:8001/api/v1/readiness` | 需要管理身份与 scope（作用域） |
-| RabbitMQ 管理界面 | `http://localhost:15672` | 仅 `xray-broker` Profile |
+| RabbitMQ 管理界面 | `http://localhost:15672` | 仅 `broker` Profile |
 
 健康检查、readiness（就绪检查）、Provider 调用成功和工程测试均不能证明医学准确率。
 
@@ -93,10 +93,10 @@ BROKER_ENABLED=true docker compose --profile xray-broker up --build
 
 | 范围 | 当前事实 | 目标设计 |
 |---|---|---|
-| 影像领域模型 | 仍以 XRay 专项验证结构为主 | 通用 Session/Study/Series/Image/Task |
-| 执行器 | `xray_accuracy_worker` 骨架 | `ImagingExecutionService + StageRegistry + 固定 Profile` |
-| 数据库 | 仍含旧 XRay/AI 模型 | `ms_image` 在线候选 10 表 + `ms_image_eval` 隔离候选 4 表 |
-| 医学链 | 未完成真实资格和准确率闭环 | Primary 基线 + Targeted 实验链 |
+| 影像领域模型 | Runtime 已有公共 Session/Study/Series/Image/Task/Stage/Report 链 | 后续继续按模态资格化 |
+| 执行器 | `ImagingExecutionService + StageRegistry + 固定 Profile`，Broker worker/relay 仍在 Runtime | 按需拆分无状态跨服务合同 |
+| 数据库 | Compose 提供独立 `ms_image` / `ms_image_eval`，尚未迁移 schema | 在线候选 10 表 + Evaluation 候选 4 表 |
+| 医学链 | provider-disabled 工程链已闭环，真实 Provider/准确率仍未知 | Primary 基线 + Targeted 实验链 |
 | 发布状态 | `PARTIAL / NO-GO` | 必须通过工程、Provider、paired A/B 和 Holdout 门禁 |
 
 精确差距见 [重构迁移与验证计划](docs/refactor/06-refactor-migration-and-validation-plan.md)。
@@ -181,7 +181,7 @@ lsof -i :8001
 
 ### Broker 未消费
 
-确认使用了 `--profile xray-broker` 且 `BROKER_ENABLED=true`，再检查 Relay、Worker 和 RabbitMQ 状态。重复消息由数据库 CAS/lease 处理，不能依赖 Broker 恰好只投递一次。
+确认使用了 `--profile broker` 且 `BROKER_ENABLED=true`，再检查 Relay、Worker 和 RabbitMQ 状态。重复消息由数据库 CAS/lease 处理，不能依赖 Broker 恰好只投递一次。
 
 ### AI Provider 不可用
 

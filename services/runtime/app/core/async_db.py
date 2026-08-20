@@ -27,11 +27,6 @@ EVALUATION_DATABASE_URL = (f"mysql+aiomysql://"
                            f"{_evaluation_user}:{_evaluation_password}@{_evaluation_host}:{_evaluation_port}"
                            f"/{_evaluation_database}")
 
-# MS_HD database connection (for integration with HD service)
-MS_HD_DATABASE_URL = (f"mysql+aiomysql://"
-                     f"{settings.MYSQL_HD_USER}:{settings.MYSQL_HD_PW}@{settings.MYSQL_HD_HOST}:{settings.MYSQL_HD_PORT}"
-                     f"/{settings.MYSQL_HD_DB}")
-
 # Create database engines
 async_engine = create_async_engine(
     DATABASE_URL,
@@ -63,20 +58,45 @@ evaluation_async_engine = create_async_engine(
     )
 )
 
-async_engine_hd = create_async_engine(
-    MS_HD_DATABASE_URL,
-    echo=False,
-    echo_pool=False,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    pool_size=5,
-    max_overflow=5,
-    connect_args=(
-        {"unix_socket": settings.MYSQL_HD_UNIX_SOCKET}
-        if settings.MYSQL_HD_UNIX_SOCKET.strip()
-        else {}
+async_engine_hd = None
+session_factory_hd = None
+
+
+def _initialize_hd_database() -> None:
+    """Initialize the optional HD pool only when explicitly enabled."""
+
+    global async_engine_hd, session_factory_hd
+    if async_engine_hd is not None:
+        return
+    if not settings.MYSQL_HD_ENABLED:
+        raise RuntimeError("ms_hd_database_disabled")
+
+    ms_hd_database_url = (
+        "mysql+aiomysql://"
+        f"{settings.MYSQL_HD_USER}:{settings.MYSQL_HD_PW}@"
+        f"{settings.MYSQL_HD_HOST}:{settings.MYSQL_HD_PORT}/{settings.MYSQL_HD_DB}"
     )
-)
+    async_engine_hd = create_async_engine(
+        ms_hd_database_url,
+        echo=False,
+        echo_pool=False,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        pool_size=5,
+        max_overflow=5,
+        connect_args=(
+            {"unix_socket": settings.MYSQL_HD_UNIX_SOCKET}
+            if settings.MYSQL_HD_UNIX_SOCKET.strip()
+            else {}
+        ),
+    )
+    session_factory_hd = async_sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=async_engine_hd,
+        expire_on_commit=True,
+    )
+
 
 # Create database sessions
 session_factory = async_sessionmaker(
@@ -92,14 +112,6 @@ evaluation_session_factory = async_sessionmaker(
     bind=evaluation_async_engine,
     expire_on_commit=True
 )
-
-session_factory_hd = async_sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=async_engine_hd,
-    expire_on_commit=True
-)
-
 
 class BaseModel(AsyncAttrs, DeclarativeBase):
     """
@@ -189,6 +201,8 @@ async def get_async_session_hd() -> AsyncSession:
     """
     获取 MS_HD 数据库会话（HD服务集成）
     """
+    _initialize_hd_database()
+    assert session_factory_hd is not None
     async with session_factory_hd() as session:
         async with session.begin():
             yield session
@@ -230,6 +244,8 @@ async def db_getter_hd() -> AsyncSession:
     获取 MS_HD 数据库会话
     使用异步上下文管理器模式，确保会话的正确创建和清理
     """
+    _initialize_hd_database()
+    assert session_factory_hd is not None
     session = session_factory_hd()
     try:
         yield session
