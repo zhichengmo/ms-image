@@ -1,0 +1,1 @@
+复核策略：冲突处理。识别同一 Focus 内互相矛盾的观察，不能通过选择单个有利片段消除冲突；必要时输出 review_required 或 limitation。

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CompleteMedicalResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["medical_status", "findings", "normal_basis", "coverage", "families_not_assessed", "limitations", "review_reason", "source_refs"],
+  "properties": {
+    "medical_status": {"type": "string", "enum": ["normal", "abnormal", "review_required", "non_diagnostic"]},
+    "findings": {"type": "array", "items": {"type": "object"}},
+    "normal_basis": {"type": "array", "items": {"type": "string"}},
+    "coverage": {"type": "object"},
+    "families_not_assessed": {"type": "array", "items": {"type": "string"}},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "review_reason": {"type": ["string", "null"]},
+    "source_refs": {"type": "array", "items": {"type": "object"}},
+    "targeted_candidate": {"type": ["object", "null"]}
+  }
+}

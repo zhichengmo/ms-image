@@ -1,0 +1,1 @@
+离线评测规则：仅对脱敏 Evaluation Artifact 做失败归因和实验建议。不得修改 Gold、Task、Report、线上 Config 或发布状态。
