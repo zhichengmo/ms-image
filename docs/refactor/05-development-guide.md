@@ -6,7 +6,9 @@
 
 ## 1. 开发前先确认状态
 
-当前代码是 XRay validation-only（仅验证）骨架，目标通用表和 Stage 尚未实现。开发说明必须区分：
+当前代码已实现 Session/Study/Series/Image、Task/Stage、provider-disabled
+AI Call、Report 与 Evaluation 的工程链路；目标 schema 尚未迁移，真实
+MySQL/OSS/Broker/Provider 资格和医学效果仍未验证。开发说明必须区分：
 
 - `CONFIRMED`（已确认）：可由当前代码、schema 或 Artifact 证明。
 - `PROPOSED`（候选）：目标合同，尚未实现。
@@ -34,11 +36,11 @@ Worker -> Service，不直连 ORM
 
 每个核心实体按以下顺序开发：
 
-1. `app/models/xxx.py`：一张表一个 ORM。
-2. `app/schemas/xxx.py`：Create/Update/Query/Response 分离。
-3. `app/crud/xxx.py`：一个 `XxxDal(DalBase)`。
-4. `app/service/xxx_service.py`：业务用例和事务。
-5. `app/api/.../endpoints/xxx.py`：薄路由。
+1. `apps/runtime/models/xxx.py`：一张表一个 ORM。
+2. `apps/runtime/schemas/xxx.py`：Create/Update/Query/Response 分离。
+3. `apps/runtime/crud/xxx.py`：一个 `XxxDal(DalBase)`。
+4. `apps/runtime/service/xxx_service.py`：业务用例和事务。
+5. `apps/runtime/api/.../endpoints/xxx.py`：薄路由。
 6. 在对应 `api.py` 注册路由。
 7. 迁移和测试只在用户另行授权后创建。
 
@@ -55,12 +57,13 @@ Endpoint file: sessions.py
 
 ## 4. DAL（数据访问层）规则
 
-- 所有实体 DAL 继承 `app.core.crud.DalBase`。
+- 所有实体 DAL 继承 `apps.runtime.core.crud.DalBase`。
 - 构造函数接收 `AsyncSession`，并调用 `super().__init__(db=db, model=YourModel)`。
 - 所有 `get_data/get_datas/get_count/create_data/put_data/delete_datas` 调用使用 `await`。
 - 实体特有 CAS、lease、claim 和资源归属查询封装为该实体 DAL 方法。
 - Service、API、Worker 和脚本不得直接写 `select/update/delete`。
-- 不使用遗留 `app/crud/base.py:CRUDBase` 作为目标数据访问实现。
+- 不使用遗留 `apps/runtime/crud/base.py:CRUDBase` 作为目标数据访问实现；该历史路径
+  不能作为当前 Runtime 的 import 或实现依据。
 - DAL `create_data` 只 flush，不代表 commit；事务由 Service 拥有。
 
 ## 5. Service（业务服务层）规则
@@ -124,7 +127,8 @@ POST /tasks/{id}/complete
 
 ## 9. Stage（阶段）开发规则
 
-- 公共阶段放 `app/service/stages/common/`，XRay 专项放 `app/service/stages/xray/`。
+- 公共阶段放 `apps/runtime/stages/common/`，XRay 专项放
+  `apps/runtime/stages/xray/`。
 - 每个 Stage 实现固定 `handler_key/version` 和输入输出 Schema。
 - 只通过 `StageRegistry` 注册，不允许运行时 import string 或 `latest`。
 - Stage 返回 `StageResult`，由 `ImagingExecutionService` 持久化和推进。

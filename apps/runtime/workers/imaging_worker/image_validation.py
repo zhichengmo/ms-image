@@ -8,12 +8,12 @@ from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.imaging.object_store import (
+from apps.runtime.core.imaging.object_store import (
     OSSObjectStore,
     ObjectStorageGateway,
     ObjectStoreError,
 )
-from app.service.image_service import (
+from apps.runtime.service.image_service import (
     ImageService,
     ImageStateConflictError,
     ImageValidationClaim,

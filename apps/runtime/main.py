@@ -1,15 +1,16 @@
-# Runtime path bootstrap must run before the legacy-compatible absolute
-# ``app`` imports below; suppress only the resulting import-order lint rule.
+# Runtime path bootstrap keeps direct script execution compatible with the
+# repository-root namespace; suppress only the resulting import-order lint
+# rule.
 # ruff: noqa: E402
 import logging.config
 from pathlib import Path
 import sys
 
-# Keep the Runtime import root stable for both the container's `/app` layout
-# and direct repository-root imports such as `apps.runtime.main:app`.
-RUNTIME_ROOT = Path(__file__).resolve().parent
-if str(RUNTIME_ROOT) not in sys.path:
-    sys.path.insert(0, str(RUNTIME_ROOT))
+# Keep the repository root stable for direct execution and fully-qualified
+# imports such as `apps.runtime.main:app`.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -19,29 +20,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api.api_v1.api import api_router
-from app.api.admin_v1.api import admin_api_router
-from app.lib import LOG_CONFIG, get_logging_message
-from app.core.config import settings
-from app.core.redis_manager import RedisManager
-from contextlib import asynccontextmanager
+from apps.runtime.api.api_v1.api import api_router
+from apps.runtime.admin_api.api import admin_api_router
+from apps.runtime.lib import LOG_CONFIG, get_logging_message
+from apps.runtime.config import settings
+from apps.runtime.lifespan import lifespan
 
 logging.config.dictConfig(LOG_CONFIG)
 logger = logging.getLogger('ms-image-service')
-
-# 全局Redis管理器
-redis_manager = RedisManager()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 启动时初始化Redis
-    app.state.redis_manager = redis_manager
-    await redis_manager.init_redis_pool(app)
-    yield
-    # 关闭时清理Redis连接
-    await redis_manager.close_redis_pool()
-
 
 # 用户端API
 app = FastAPI(
@@ -193,5 +179,5 @@ async def admin_root():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app='main:app', host="0.0.0.0", port=settings.APPLICATION_PORT,
+    uvicorn.run(app='apps.runtime.main:app', host="0.0.0.0", port=settings.APPLICATION_PORT,
                 reload=False if settings.ENV == 'production' else True)

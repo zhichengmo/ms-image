@@ -32,14 +32,23 @@ jobs:
       - name: Check single Runtime source boundary
         shell: bash
         run: |
-          test -d apps/runtime/app
+          test -d apps/runtime
           test -d apps/runtime/workers
+          test -d apps/runtime/api
+          test -d apps/runtime/admin_api
+          test -d apps/runtime/models
+          test -d apps/runtime/crud
+          test -d apps/runtime/schemas
+          test -d apps/runtime/service
+          test -d apps/runtime/stages
           test -f apps/runtime/main.py
+          test -f apps/runtime/config.py
+          test -f apps/runtime/lifespan.py
           test ! -e app
           test ! -e workers
           test ! -e main.py
           test "$(git ls-files 'app/**' 'workers/**' 'main.py' | wc -l | tr -d ' ')" = "0"
-          test "$(git ls-files 'apps/runtime/app/**' 'apps/runtime/workers/**' | wc -l | tr -d ' ')" -gt "0"
+          test "$(git ls-files 'apps/runtime/**' | wc -l | tr -d ' ')" -gt "0"
 
       - name: Check Compose definitions
         run: |

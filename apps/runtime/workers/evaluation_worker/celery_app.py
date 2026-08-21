@@ -7,10 +7,10 @@ from typing import Any
 
 from celery.exceptions import MaxRetriesExceededError, Reject
 
-from app.core.async_db import evaluation_async_engine, evaluation_session_factory
-from app.core.config import settings
-from app.core.messaging.celery import create_celery_app
-from app.core.messaging.config import runtime_config, topology_for
+from apps.runtime.core.async_db import evaluation_async_engine, evaluation_session_factory
+from apps.runtime.config import settings
+from apps.runtime.core.messaging.celery import create_celery_app
+from apps.runtime.core.messaging.config import runtime_config, topology_for
 
 from .execution import EvaluationExecutionWorker
 

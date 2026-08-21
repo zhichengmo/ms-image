@@ -18,8 +18,8 @@ Schema 作为接口边界与数据结构约束层
 
 强制规则：
 - 业务接口必须遵循 `API -> Service -> CRUD`
-- 数据库访问必须统一经由现有 `app.core.crud.DalBase`；不得新建第二套 `CRUDBase`、Repository 或数据库服务。
-- “不另外添加服务”指不平行创建新的 service/repository 包、通用数据库服务或重复的微服务边界；需要业务编排时，只在现有 `app/service/` 中增加对应的 `XxxService`，并复用同一条调用链。
+- 数据库访问必须统一经由现有 `apps.runtime.core.crud.DalBase`；不得新建第二套 `CRUDBase`、Repository 或数据库服务。
+- “不另外添加服务”指不平行创建新的 service/repository 包、通用数据库服务或重复的微服务边界；需要业务编排时，只在现有 `apps/runtime/service/` 中增加对应的 `XxxService`，并复用同一条调用链。
 - `API` 层不直接承载复杂数据库访问逻辑
 - `CRUD` 层不承载 HTTP 语义
 - `Schema` 层不承载数据库访问逻辑
@@ -30,8 +30,8 @@ Schema 作为接口边界与数据结构约束层
 ### API Layer
 
 目录：
-- `app/api/api_v1/endpoints/`
-- `app/api/admin_v1/endpoints/`
+- `apps/runtime/api/api_v1/endpoints/`
+- `apps/runtime/admin_api/endpoints/`
 
 职责：
 - 定义路由
@@ -62,7 +62,7 @@ async def create_user(
 ### Service Layer
 
 目录：
-- `app/service/`
+- `apps/runtime/service/`
 
 职责：
 - 承载业务逻辑
@@ -92,7 +92,7 @@ class UserService:
 ### CRUD Layer
 
 目录：
-- `app/crud/`
+- `apps/runtime/crud/`
 
 职责：
 - 基于 `DalBase` 封装数据访问
@@ -101,7 +101,7 @@ class UserService:
 约束：
 - 每个核心实体一个 `XxxDal`
 - `XxxDal.__init__` 必须调用 `super().__init__(db=db, model=YourModel)`
-- `XxxDal` 必须继承 `app.core.crud.DalBase`，构造函数接收 `AsyncSession`；所有查询、新增、更新、删除均使用其异步方法（如 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas`）。
+- `XxxDal` 必须继承 `apps.runtime.core.crud.DalBase`，构造函数接收 `AsyncSession`；所有查询、新增、更新、删除均使用其异步方法（如 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas`）。
 - 不得直接在 Service、API、Worker 或脚本中拼装 SQLAlchemy 数据库调用；确需实体特有查询时，封装为 `XxxDal` 方法并继续调用 `DalBase`。
 - 默认只处理数据访问，不处理接口语义
 - 不在 CRUD 中直接拼装 `GenericResponse`
@@ -120,7 +120,7 @@ class UserDal(DalBase):
 ### Schema Layer
 
 目录：
-- `app/schemas/`
+- `apps/runtime/schemas/`
 
 职责：
 - 定义请求体
@@ -142,7 +142,7 @@ class UserDal(DalBase):
 ### Model Layer
 
 目录：
-- `app/models/`
+- `apps/runtime/models/`
 
 职责：
 - 定义 ORM 模型
@@ -162,8 +162,8 @@ class UserDal(DalBase):
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.async_db import get_async_session
-from app.service.user_service import UserService
+from apps.runtime.core.async_db import get_async_session
+from apps.runtime.service.user_service import UserService
 
 
 async def get_user_service(
@@ -179,7 +179,7 @@ async def get_user_service(
 
 ## Database and Service Reuse
 
-数据库访问合同以 `app/core/crud.py` 中的 `DalBase` 实现为准：
+数据库访问合同以 `apps/runtime/core/crud.py` 中的 `DalBase` 实现为准：
 
 ```python
 class DalBase:
@@ -210,11 +210,11 @@ class DalBase:
         ...
 ```
 
-`DalBase` 的 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas` 等方法都是异步方法，调用必须使用 `await`。`XxxDal` 不得绕过基类直接操作 session；不得把遗留 MongoEngine 的 `app/crud/base.py:CRUDBase` 当作本项目的数据库访问实现。
+`DalBase` 的 `get_data`、`get_datas`、`get_count`、`create_data`、`create_datas`、`put_data`、`delete_datas` 等方法都是异步方法，调用必须使用 `await`。`XxxDal` 不得绕过基类直接操作 session；不得把遗留 MongoEngine 的 `apps/runtime/crud/base.py:CRUDBase` 当作本项目的数据库访问实现。
 
-实体 DAL 只在 `app/crud/xxx.py` 中定义一次，例如 `class UserDal(DalBase)`；Service 使用 `from app.crud.user import UserDal`，构造 `UserDal(db)` 后调用它的方法。Service、API、Worker 和脚本都不得重新写 SQL、`select`/`update`/`delete` 语句或另造一个数据库访问类。
+实体 DAL 只在 `apps/runtime/crud/xxx.py` 中定义一次，例如 `class UserDal(DalBase)`；Service 使用 `from apps.runtime.crud.user import UserDal`，构造 `UserDal(db)` 后调用它的方法。Service、API、Worker 和脚本都不得重新写 SQL、`select`/`update`/`delete` 语句或另造一个数据库访问类。
 
-本项目已经有 `app/service/` 业务层和 `app/core/crud.py` 数据访问基类。新增功能应复用它们：API 通过 `get_xxx_service` 注入现有 Service，Service 接收 `AsyncSession` 并初始化 `XxxDal`。除健康检查、版本信息和静态状态接口外，不要在 endpoint 中直接创建 DAL，也不要再增加平行的 Repository/DatabaseService/微服务。
+本项目已经有 `apps/runtime/service/` 业务层和 `apps/runtime/core/crud.py` 数据访问基类。新增功能应复用它们：API 通过 `get_xxx_service` 注入现有 Service，Service 接收 `AsyncSession` 并初始化 `XxxDal`。除健康检查、版本信息和静态状态接口外，不要在 endpoint 中直接创建 DAL，也不要再增加平行的 Repository/DatabaseService/微服务。
 
 数据库模型约束：每张物理 MySQL 表必须定义独立、非空的 `id` 作为单列主键，默认使用服务端生成的 opaque `VARCHAR(64)`；业务 ID、请求 ID、事件键、版本号、哈希和联合唯一约束不得替代 `id` 主键，也不得使用联合主键。目标新表不设计 `tenant_id` 或其他租户分区字段，资源 ID 必须全局唯一；读取历史兼容数据时不得把旧租户字段带回目标模型。新表不声明 foreign key；状态、类型等可演进字段优先使用 string/json/timestamp，不使用数据库 enum；每个字段的 SQLAlchemy `comment` 同时写候选类型和中文含义。资源 ID 只能放在 query 参数或 request body，禁止设计 `/{id}` 路由。
 
@@ -248,11 +248,11 @@ class DalBase:
 
 新增业务实体时，默认按以下顺序补齐：
 
-1. `app/models/xxx.py`
-2. `app/schemas/xxx.py`
-3. `app/crud/xxx.py`
-4. `app/service/xxx_service.py`
-5. `app/api/api_v1/endpoints/xxx.py`
+1. `apps/runtime/models/xxx.py`
+2. `apps/runtime/schemas/xxx.py`
+3. `apps/runtime/crud/xxx.py`
+4. `apps/runtime/service/xxx_service.py`
+5. `apps/runtime/api/api_v1/endpoints/xxx.py`
 6. 在对应 `api.py` 注册路由
 7. 补 Alembic 迁移
 
@@ -281,14 +281,14 @@ class DalBase:
 - 示例代码优先展示完整调用链
 - 优先复用 `DalBase`、`GenericResponse`、`PagedResponse`
 - 除健康检查外，不生成 “API 直连 CRUD” 的示例实现
-- 不重复创建数据库访问基类、Repository、DatabaseService 或新的平行 service 包；先复用现有 `DalBase` 与 `app/service/`，只有明确的业务用例才新增实体级 `XxxService`。
+- 不重复创建数据库访问基类、Repository、DatabaseService 或新的平行 service 包；先复用现有 `DalBase` 与 `apps/runtime/service/`，只有明确的业务用例才新增实体级 `XxxService`。
 
 ## Reference Notes
 
 参考仓库现状时，需要注意：
 - 当前仓库已有 `CLAUDE.md`，可作为架构说明参考
 - 实际代码中 `health` 与 `admin` 示例接口较轻，可视为简单接口例外
-- 当前 `app/service/` 目录存在，但业务示例尚未完全走通完整分层；后续新增模块应按本文件补齐
+- 当前 `apps/runtime/service/` 目录存在，但业务示例尚未完全走通完整分层；后续新增模块应按本文件补齐
 
 <!-- AGENT_HANDOFF_PROTOCOL:START -->
 # Codex Agent Handoff Protocol

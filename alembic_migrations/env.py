@@ -9,20 +9,20 @@ import sys
 from pathlib import Path
 
 # The migration directory remains at repository root while the sole Runtime
-# source (and its ``app`` import package) lives below apps/runtime.
+# service source lives below apps/runtime.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_ROOT = REPO_ROOT / "apps" / "runtime"
-for import_root in (RUNTIME_ROOT, REPO_ROOT):
+for import_root in (REPO_ROOT, RUNTIME_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
 # Import your models
-from app.core.async_db import BaseModel
-from app.core.config import settings
+from apps.runtime.core.async_db import BaseModel
+from apps.runtime.config import settings
 # Import every model package explicitly so autogenerate sees the same metadata
 # used by the runtime.  This import is metadata-only; it does not create/drop
 # tables and does not execute a migration.
-import app.models  # noqa: F401
+import apps.runtime.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

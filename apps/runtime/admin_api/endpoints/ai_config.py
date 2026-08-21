@@ -1,0 +1,47 @@
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.runtime.api.deps import get_async_session, require_control_plane_scope
+from apps.runtime.admin_api.endpoints.control_plane_errors import rollback_and_map_control_plane
+from apps.runtime.core.contexts import ControlPlaneContext
+from apps.runtime.schemas.ai_config import AIConfigActivateRequest, AIConfigCreate, AIConfigResponse
+from apps.runtime.schemas.base import GenericResponse
+from apps.runtime.service.ai_config_service import AIConfigService
+
+router = APIRouter(prefix="/ai-configs", tags=["AI Config ControlPlane"])
+control = require_control_plane_scope()
+
+async def get_service(db: AsyncSession = Depends(get_async_session)) -> AIConfigService:
+    return AIConfigService(db)
+
+@router.post("", response_model=GenericResponse[AIConfigResponse], status_code=status.HTTP_201_CREATED)
+async def create(payload: AIConfigCreate, _: ControlPlaneContext = Depends(control), service: AIConfigService = Depends(get_service), db: AsyncSession = Depends(get_async_session)):
+    try:
+        data = await service.create(payload)
+    except Exception as exc:
+        return await rollback_and_map_control_plane(db, exc)
+    return GenericResponse(message="AI Config 已创建", data=data)
+
+@router.post("/validate", response_model=GenericResponse[AIConfigResponse])
+async def validate(payload: AIConfigActivateRequest, _: ControlPlaneContext = Depends(control), service: AIConfigService = Depends(get_service), db: AsyncSession = Depends(get_async_session)):
+    try:
+        data = await service.validate(payload.id, payload.expected_state_version)
+    except Exception as exc:
+        return await rollback_and_map_control_plane(db, exc)
+    return GenericResponse(message="AI Config 已验证", data=data)
+
+@router.post("/activate", response_model=GenericResponse[AIConfigResponse])
+async def activate(payload: AIConfigActivateRequest, _: ControlPlaneContext = Depends(control), service: AIConfigService = Depends(get_service), db: AsyncSession = Depends(get_async_session)):
+    try:
+        data = await service.activate(payload.id, payload.expected_state_version)
+    except Exception as exc:
+        return await rollback_and_map_control_plane(db, exc)
+    return GenericResponse(message="AI Config 已激活", data=data)
+
+@router.get("", response_model=GenericResponse[AIConfigResponse])
+async def get_active(config_key: str = Query(...), modality_type: str = Query(...), task_type: str = Query(...), _: ControlPlaneContext = Depends(control), service: AIConfigService = Depends(get_service), db: AsyncSession = Depends(get_async_session)):
+    try:
+        data = await service.get_active(config_key=config_key, modality_type=modality_type, task_type=task_type)
+    except Exception as exc:
+        return await rollback_and_map_control_plane(db, exc)
+    return GenericResponse(message="Active AI Config 查询成功", data=data)

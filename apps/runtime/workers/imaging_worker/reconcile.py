@@ -10,18 +10,18 @@ from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.async_db import async_engine, session_factory
-from app.core.config import settings
-from app.core.imaging.object_store import (
+from apps.runtime.core.async_db import async_engine, session_factory
+from apps.runtime.config import settings
+from apps.runtime.core.imaging.object_store import (
     OSSObjectStore,
     ObjectStorageGateway,
     ObjectStoreError,
 )
-from app.core.messaging.config import runtime_config
-from app.crud.image import ImageDal
-from app.crud.object_reconcile_cursor import ObjectReconcileCursorDal
-from app.service.image_service import ImageService, ImageStateConflictError
-from app.service.imaging_execution_service import ImagingExecutionService
+from apps.runtime.core.messaging.config import runtime_config
+from apps.runtime.crud.image import ImageDal
+from apps.runtime.crud.object_reconcile_cursor import ObjectReconcileCursorDal
+from apps.runtime.service.image_service import ImageService, ImageStateConflictError
+from apps.runtime.service.imaging_execution_service import ImagingExecutionService
 
 from .image_validation import ImageValidationWorker
 

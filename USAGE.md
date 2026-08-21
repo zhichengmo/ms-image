@@ -60,8 +60,8 @@ python apps/runtime/start_user_api.py
 python apps/runtime/start_admin_api.py
 ```
 
-从仓库根目录直接使用模块路径时，Runtime 会自动注入唯一的
-`apps/runtime` import root；Worker 也可以使用同一套 fully-qualified module path：
+从仓库根目录直接使用模块路径时，Runtime 使用唯一的
+`apps.runtime` namespace；Worker 也使用同一套 fully-qualified module path：
 
 ```bash
 uvicorn apps.runtime.main:app --host 0.0.0.0 --port 8000
@@ -69,7 +69,7 @@ celery -A apps.runtime.workers.imaging_worker.celery_app:celery_app worker \
   --loglevel=INFO --queues=imaging.image.validate
 ```
 
-Compose 容器仍使用镜像内 `/app` 作为 import root，不需要复制第二份 `app` 或 `workers` 源码。
+Compose 容器仍使用镜像内仓库根 `/app` 作为 `apps.runtime` import root，不需要复制第二份源码。
 
 ### 3.3 Docker Compose（容器编排）
 
@@ -128,7 +128,7 @@ Model（数据库模型）
 
 - API 不直接访问数据库，不编排多个 DAL。
 - Service 接收 `AsyncSession`，负责业务校验、状态流转、幂等和多实体编排。
-- CRUD/DAL 统一继承 `app.core.crud.DalBase`；不得绕过基类直接操作 session。
+- CRUD/DAL 统一继承 `apps.runtime.core.crud.DalBase`；不得绕过基类直接操作 session。
 - Model 不承载 HTTP（网络接口）语义；Schema 不访问数据库。
 - 资源 ID 放 query（查询参数）或 request body（请求体），不使用 `/{id}`。
 - OSS、Broker 和 Provider 外部 I/O 不得在数据库事务内执行。

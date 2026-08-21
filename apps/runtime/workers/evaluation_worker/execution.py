@@ -9,20 +9,20 @@ from typing import Any, Callable
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.evaluation import JsonArtifactStore
-from app.core.imaging.object_store import (
+from apps.runtime.core.evaluation import JsonArtifactStore
+from apps.runtime.core.imaging.object_store import (
     OSSObjectStore,
     ObjectStorageGateway,
     ObjectStoreError,
 )
-from app.schemas.evaluation_execution import EvaluationInputManifest
-from app.service.evaluation_execution_service import (
+from apps.runtime.schemas.evaluation_execution import EvaluationInputManifest
+from apps.runtime.service.evaluation_execution_service import (
     EvaluationExecutionClaim,
     EvaluationExecutionConflict,
     EvaluationExecutionService,
     StoredEvaluationArtifact,
 )
-from app.service.evaluation_fake_scorer import (
+from apps.runtime.service.evaluation_fake_scorer import (
     EvaluationScoringError,
     FakeEvaluationScorer,
     ScoredArtifact,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.service.imaging_execution_service import ImagingExecutionService, StageExecutionStateConflict
+from apps.runtime.service.imaging_execution_service import ImagingExecutionService, StageExecutionStateConflict
 
 
 class StageExecutionWorker:

@@ -6,12 +6,12 @@ import argparse
 import asyncio
 from datetime import datetime
 
-from app.core.async_db import evaluation_async_engine, evaluation_session_factory
-from app.core.config import settings
-from app.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat, wait_for_shutdown
-from app.core.messaging.outbox_relay import OutboxPublishEnvelope, OutboxRelay
-from app.crud.evaluation import EvaluationOutboxDal
-from app.service.evaluation_execution_service import EvaluationExecutionService
+from apps.runtime.core.async_db import evaluation_async_engine, evaluation_session_factory
+from apps.runtime.config import settings
+from apps.runtime.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat, wait_for_shutdown
+from apps.runtime.core.messaging.outbox_relay import OutboxPublishEnvelope, OutboxRelay
+from apps.runtime.crud.evaluation import EvaluationOutboxDal
+from apps.runtime.service.evaluation_execution_service import EvaluationExecutionService
 
 from .celery_app import celery_app, runtime, topology
 

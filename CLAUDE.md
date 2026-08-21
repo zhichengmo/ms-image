@@ -60,7 +60,7 @@ API（接口层） -> Service（业务服务层） -> CRUD/DAL（数据访问层
 
 - API 负责路由、鉴权、依赖注入和统一响应。
 - Service 接收 `AsyncSession`（异步数据库会话），负责业务校验、状态流转、幂等和多实体编排。
-- 实体 DAL 继承 `app.core.crud.DalBase`；API、Service、Worker 和脚本不得直接拼 SQLAlchemy 查询。Runtime 的 `app` 包只存在于 `apps/runtime/app`，不得在仓库根恢复第二份。
+- 实体 DAL 继承 `apps.runtime.core.crud.DalBase`；API、Service、Worker 和脚本不得直接拼 SQLAlchemy 查询。Runtime 后端只存在于 `apps/runtime`，不得在仓库根恢复第二份 `app`/`workers` 源码。
 - 不新增 Repository（仓储层）、第二套 CRUDBase、DatabaseService（数据库服务）或平行 service 包。
 - Schema（接口结构）不访问数据库，Model（数据库模型）不承载 HTTP（网络接口）语义。
 

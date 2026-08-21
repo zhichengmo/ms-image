@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from app.core.async_db import async_engine, session_factory
-from app.core.messaging.outbox_relay import (
+from apps.runtime.core.async_db import async_engine, session_factory
+from apps.runtime.core.messaging.outbox_relay import (
     OutboxPublishEnvelope,
     OutboxRelay,
 )
-from app.core.config import settings
-from app.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat
-from app.crud.outbox import OutboxDal
+from apps.runtime.config import settings
+from apps.runtime.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat
+from apps.runtime.crud.outbox import OutboxDal
 
 from .celery_app import celery_app, runtime, topology
 

@@ -18,11 +18,10 @@ COPY apps/runtime/requirements.txt ./requirements.txt
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the one Runtime source tree into the import root.  This is a packaging
-# layout only; the repository still has one authoritative apps/runtime/app.
-COPY apps/runtime/app ./app
-COPY apps/runtime/workers ./workers
-COPY apps/runtime/main.py ./main.py
+# Copy the one Runtime service root into the repository-root namespace.
+RUN mkdir -p apps/runtime
+COPY apps/__init__.py ./apps/__init__.py
+COPY apps/runtime ./apps/runtime
 COPY prompts ./prompts
 # Keep only the committed, non-secret qualification artifacts used by Runtime
 # config; do not copy the rest of the repository's artifact archive.
@@ -36,4 +35,4 @@ RUN mkdir -p logs
 EXPOSE 8000 8001
 
 # Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "apps.runtime.main:app", "--host", "0.0.0.0", "--port", "8000"]

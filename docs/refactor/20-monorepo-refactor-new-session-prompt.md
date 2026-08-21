@@ -49,7 +49,7 @@ find . -maxdepth 3 -type d -not -path './.git*' | sort
 不要把文档里记录的历史 Git SHA 当成当前事实。以本次会话实际命令输出为准。
 
 当前工作树已知存在用户未提交的文档、handoff 文件以及可能的
-`/Users/mozhicheng/workspace/code/cy-code/ms-image/app/models/evaluation.py`
+`/Users/mozhicheng/workspace/code/cy-code/ms-image/apps/runtime/models/evaluation.py`
 改动。它们不是本任务的清理对象。禁止使用：
 
 ```bash
@@ -366,15 +366,28 @@ MR-1 的 Runtime 单一源码迁移已经完成；当前第一实施切片是“
 
 ## 5.1 阶段 MR-1 已完成结构
 
-MR-1 已完成一次**可回滚的机械性 Runtime 迁移**。为避免一次性改写所有 Python import，当前仍保留内部 `app` 包名：
+MR-1 已完成一次**可回滚的机械性 Runtime 迁移**。`apps/runtime/` 本身就是
+Runtime 后端服务根；所有运行时代码使用显式的 `apps.runtime.*` 命名空间：
 
 ```text
 ms-image/
 ├── apps/
 │   └── runtime/
-│       ├── app/                 # 现有 app/ 的唯一新位置；内部继续 from app...
-│       ├── workers/             # 现有 imaging/evaluation worker 的唯一新位置
+│       ├── api/                 # 用户 API；内部保留 api_v1 路由版本
+│       ├── admin_api/           # 管理 API
+│       ├── core/                # 连接、DalBase、消息、对象存储等横切能力
+│       ├── crud/
+│       ├── models/
+│       ├── schemas/
+│       ├── service/             # 项目规范固定使用单数 service
+│       ├── stages/
+│       ├── workers/
+│       │   ├── imaging_worker/
+│       │   └── evaluation_worker/
+│       ├── lib/
 │       ├── main.py              # 现有 Runtime FastAPI entry
+│       ├── config.py
+│       ├── lifespan.py
 │       ├── start_user_api.py
 │       ├── start_admin_api.py
 │       ├── run_servers.py
@@ -390,13 +403,15 @@ ms-image/
 └── ...
 ```
 
-这里的 `apps/runtime/app/` 是当前唯一 Runtime 源布局，不代表永久强制要求 `app` 作为 Python 包名。是否改为显式命名空间包必须另行设计和授权；不得在 MR-1F 中重复移动。
+`apps/runtime/` 是当前唯一 Runtime 源布局；`apps.runtime.*`
+是当前正式 import 合同。任何未来命名空间调整都必须单独设计、验证和授权，
+不得在其他功能切片中再次搬迁。
 
 严禁同时保留两份可运行源码，例如：
 
 ```text
-/app + /apps/runtime/app
-/worker + /apps/runtime/workers
+./app + ./apps/runtime
+./workers + ./apps/runtime/workers
 ```
 
 必须是 `git mv` 或等价的单一真相迁移；不得复制后让两份长期并行。
@@ -406,39 +421,39 @@ ms-image/
 ```text
 apps/
 ├── runtime/
-│   ├── app/
-│   │   ├── api/
-│   │   ├── admin_api/
-│   │   ├── core/
-│   │   ├── models/
-│   │   ├── crud/
-│   │   ├── schemas/
-│   │   └── service/
-│   ├── workers/
-│   │   ├── imaging_worker/
-│   │   └── evaluation_worker/   # 迁出之前仍是 Runtime 侧 worker
+│   ├── api/
+│   ├── admin_api/
+│   ├── core/
+│   ├── crud/
+│   ├── models/
+│   ├── schemas/
+│   ├── service/
+│   ├── stages/
+│   └── workers/                 # imaging/evaluation 迁出前仍归 Runtime
 │   ├── main.py
-│   ├── config.py                # 只有重构确实需要时再抽出
-│   └── lifespan.py              # 只有重构确实需要时再抽出
+│   ├── config.py
+│   └── lifespan.py
 │
 ├── ai_control/                  # 到 AI-A 才创建真实代码
 │   ├── api/
+│   ├── core/
 │   ├── models/
 │   ├── crud/
 │   ├── schemas/
 │   ├── service/
-│   ├── outbox/
+│   └── outbox/
 │   ├── main.py
 │   ├── config.py
 │   └── lifespan.py
 │
 └── evaluation_control/          # 达到独立拆分条件才创建真实代码
     ├── api/
+    ├── core/
     ├── models/
     ├── crud/
     ├── schemas/
     ├── service/
-    ├── workers/
+    └── workers/
     ├── main.py
     └── config.py
 ```
@@ -657,7 +672,7 @@ Schema 是接口/事件边界，不访问数据库
 
 ```text
 - 不新增第二套 CRUDBase、Repository、DatabaseService；
-- 所有数据访问经现有 app.core.crud.DalBase 的实体 DAL；
+- 所有数据访问经现有 `apps.runtime.core.crud.DalBase` 的实体 DAL；
 - API endpoint 不写复杂 SQL、多 DAL 编排或业务状态机；
 - Service 不依赖 FastAPI Request / Depends / Router；
 - CRUD 不返回 HTTP GenericResponse；

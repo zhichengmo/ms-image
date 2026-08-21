@@ -109,7 +109,7 @@ flowchart TD
 API（接口层） -> Service（业务层） -> CRUD/DAL（数据访问层） -> Model/DB（模型/数据库）
 ```
 
-- 数据访问统一复用 `app.core.crud.DalBase`，不得新增 Repository（仓储层）、第二套 CRUDBase 或 DatabaseService（数据库服务）。
+- 数据访问统一复用 `apps.runtime.core.crud.DalBase`，不得新增 Repository（仓储层）、第二套 CRUDBase 或 DatabaseService（数据库服务）。
 - Service 接收 `AsyncSession`（异步数据库会话）并初始化实体 DAL；API、Service、Worker 和脚本不得直接拼装 SQLAlchemy 查询。
 - 每张目标 MySQL 表使用服务端生成、非空、独立的 `id VARCHAR(64)` 单列主键。
 - 不使用 Foreign Key（外键）、数据库 Enum（枚举）、联合主键或 `tenant_id`（租户字段）。
