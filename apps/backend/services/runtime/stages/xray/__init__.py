@@ -1,4 +1,4 @@
-"""XRay prompt/schema selection helpers; no state persistence lives here."""
+"""Pure XRay prompt/schema selection helpers."""
 
 from .prompt_commands import (
     XRayPromptCommand,
