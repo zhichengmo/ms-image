@@ -13,12 +13,14 @@ from apps.backend.core.imaging.object_store import (
 )
 from apps.backend.core.imaging.manifest import canonical_json_bytes
 from apps.backend.crud.image import ImageDal
+from apps.backend.crud.object_reconcile_cursor import ObjectReconcileCursorDal
 from apps.backend.crud.outbox import OutboxDal
 from apps.backend.crud.series import SeriesDal
 from apps.backend.crud.session import SessionDal
 from apps.backend.crud.study import StudyDal
 from apps.backend.models.image import Image
 from apps.backend.models.imaging_base import new_opaque_id
+from apps.backend.models.object_reconcile_cursor import ObjectReconcileCursor
 from apps.backend.schemas.image import (
     ImageAbortCommand,
     ImageCompleteUploadRequest,
@@ -99,6 +101,25 @@ class ImageObjectCandidate:
 
 
 @dataclass(frozen=True)
+class ImageReadyReconcileCursor:
+    """Frozen cursor lease and position facts used by the one-shot reconciler."""
+
+    cursor_id: str
+    state_version: int
+    lease_generation: int
+    last_ready_updated_at: datetime | None
+    last_ready_image_id: str | None
+
+
+@dataclass(frozen=True)
+class ImageReadyReconcileCandidate:
+    """Minimal ready-image pagination facts; object validation stays in the worker."""
+
+    image_id: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class ImageUploadOperationCandidate:
     image_id: str
     state_version: int
@@ -119,6 +140,7 @@ class ImageService:
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
         self.image_dal = ImageDal(db)
+        self.object_reconcile_cursor_dal = ObjectReconcileCursorDal(db)
         self.outbox_dal = OutboxDal(db)
         self.study_service = StudyService(db)
         self.upload_workflow = ImageUploadWorkflow(self)
@@ -1114,6 +1136,98 @@ class ImageService:
             return None
         return self._object_candidate(image)
 
+    async def claim_ready_reconcile_cursor(
+        self,
+        *,
+        cursor_key: str,
+        owner_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> ImageReadyReconcileCursor | None:
+        cursor = await self.object_reconcile_cursor_dal.get_by_key(cursor_key)
+        if cursor is None:
+            await self.object_reconcile_cursor_dal.create_idempotent(cursor_key)
+        claimed = await self.object_reconcile_cursor_dal.claim(
+            cursor_key=cursor_key,
+            owner_id=owner_id,
+            now=now,
+            lease_expires_at=lease_expires_at,
+        )
+        return self._ready_reconcile_cursor(claimed) if claimed is not None else None
+
+    async def list_ready_reconcile_candidates(
+        self,
+        *,
+        cursor: ImageReadyReconcileCursor,
+        limit: int,
+    ) -> list[ImageReadyReconcileCandidate]:
+        images = await self.image_dal.list_ready_after(
+            updated_at=cursor.last_ready_updated_at,
+            image_id=cursor.last_ready_image_id,
+            limit=limit,
+        )
+        return [
+            ImageReadyReconcileCandidate(
+                image_id=image.id,
+                updated_at=image.updated_at,
+            )
+            for image in images
+        ]
+
+    async def heartbeat_ready_reconcile_cursor(
+        self,
+        *,
+        cursor: ImageReadyReconcileCursor,
+        owner_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> bool:
+        return await self.object_reconcile_cursor_dal.heartbeat(
+            cursor_id=cursor.cursor_id,
+            owner_id=owner_id,
+            lease_generation=cursor.lease_generation,
+            now=now,
+            lease_expires_at=lease_expires_at,
+        )
+
+    async def advance_ready_reconcile_cursor(
+        self,
+        *,
+        cursor: ImageReadyReconcileCursor,
+        owner_id: str,
+        now: datetime,
+        last: ImageReadyReconcileCandidate | None,
+        has_candidates: bool,
+        next_scan_at: datetime,
+    ) -> bool:
+        advanced = await self.object_reconcile_cursor_dal.advance(
+            cursor_id=cursor.cursor_id,
+            expected_version=cursor.state_version,
+            owner_id=owner_id,
+            lease_generation=cursor.lease_generation,
+            now=now,
+            last_ready_updated_at=(
+                last.updated_at
+                if last is not None
+                else (
+                    cursor.last_ready_updated_at
+                    if not has_candidates
+                    else None
+                )
+            ),
+            last_ready_image_id=(
+                last.image_id
+                if last is not None
+                else (
+                    cursor.last_ready_image_id
+                    if not has_candidates
+                    else None
+                )
+            ),
+            next_scan_at=next_scan_at,
+        )
+        return advanced is not None
+
     async def invalidate_ready_image(
         self,
         *,
@@ -1547,6 +1661,18 @@ class ImageService:
             expected_size_bytes=image.size_bytes or image.expected_size_bytes,
         )
 
+    @staticmethod
+    def _ready_reconcile_cursor(
+        cursor: ObjectReconcileCursor,
+    ) -> ImageReadyReconcileCursor:
+        return ImageReadyReconcileCursor(
+            cursor_id=cursor.id,
+            state_version=cursor.state_version,
+            lease_generation=cursor.lease_generation,
+            last_ready_updated_at=cursor.last_ready_updated_at,
+            last_ready_image_id=cursor.last_ready_image_id,
+        )
+
 
 __all__ = [
     "ImageIdempotencyConflictError",
@@ -1557,5 +1683,7 @@ __all__ = [
     "ImageValidationClaim",
     "ImageValidationEventCandidate",
     "ImageObjectCandidate",
+    "ImageReadyReconcileCandidate",
+    "ImageReadyReconcileCursor",
     "ImageUploadOperationCandidate",
 ]

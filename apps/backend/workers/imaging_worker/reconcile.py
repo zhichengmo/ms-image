@@ -18,9 +18,10 @@ from apps.backend.core.imaging.object_store import (
     ObjectStoreError,
 )
 from apps.backend.core.messaging.config import runtime_config
-from apps.backend.crud.image import ImageDal
-from apps.backend.crud.object_reconcile_cursor import ObjectReconcileCursorDal
-from apps.backend.services.runtime.service.image_service import ImageService, ImageStateConflictError
+from apps.backend.services.runtime.service.image_service import (
+    ImageService,
+    ImageStateConflictError,
+)
 from apps.backend.services.runtime.service.imaging_execution_service import ImagingExecutionService
 
 from .image_validation import ImageValidationWorker
@@ -156,16 +157,20 @@ class ImageReconciler:
         owner = f"reconcile:ready:{now.timestamp():.6f}"[:128]
         async with self.session_factory() as session:
             async with session.begin():
-                cursors = ObjectReconcileCursorDal(session)
-                cursor = await cursors.get_by_key(self.READY_CURSOR_KEY)
-                if cursor is None:
-                    await cursors.create_idempotent(self.READY_CURSOR_KEY)
-                cursor = await cursors.claim(cursor_key=self.READY_CURSOR_KEY, owner_id=owner, now=now, lease_expires_at=now + timedelta(seconds=lease_seconds))
+                cursor = await ImageService(session).claim_ready_reconcile_cursor(
+                    cursor_key=self.READY_CURSOR_KEY,
+                    owner_id=owner,
+                    now=now,
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                )
         if cursor is None:
             return {"cursor_unavailable": 1}
         async with self.session_factory() as session:
             async with session.begin():
-                images = await ImageDal(session).list_ready_after(updated_at=cursor.last_ready_updated_at, image_id=cursor.last_ready_image_id, limit=limit)
+                images = await ImageService(session).list_ready_reconcile_candidates(
+                    cursor=cursor,
+                    limit=limit,
+                )
         images = images[:1]
         outcomes: dict[str, int] = {}
         for image in images:
@@ -183,7 +188,7 @@ class ImageReconciler:
                 )
             )
             try:
-                outcome = await self.verify_ready_image(image_id=image.id)
+                outcome = await self.verify_ready_image(image_id=image.image_id)
             finally:
                 stop_heartbeat.set()
                 await heartbeat
@@ -197,9 +202,19 @@ class ImageReconciler:
         last = images[-1] if images and outcomes.get("retry", 0) == 0 else None
         async with self.session_factory() as session:
             async with session.begin():
-                cursors = ObjectReconcileCursorDal(session)
-                advanced = await cursors.advance(cursor_id=cursor.id, expected_version=cursor.state_version, owner_id=owner, lease_generation=cursor.lease_generation, now=datetime.utcnow(), last_ready_updated_at=last.updated_at if last else (cursor.last_ready_updated_at if images else None), last_ready_image_id=last.id if last else (cursor.last_ready_image_id if images else None), next_scan_at=datetime.utcnow() if last else datetime.utcnow() + timedelta(seconds=60))
-        if advanced is None:
+                advanced = await ImageService(session).advance_ready_reconcile_cursor(
+                    cursor=cursor,
+                    owner_id=owner,
+                    now=datetime.utcnow(),
+                    last=last,
+                    has_candidates=bool(images),
+                    next_scan_at=(
+                        datetime.utcnow()
+                        if last is not None
+                        else datetime.utcnow() + timedelta(seconds=60)
+                    ),
+                )
+        if not advanced:
             outcomes["cursor_advance_conflict"] = outcomes.get("cursor_advance_conflict", 0) + 1
         return outcomes
 
@@ -207,10 +222,9 @@ class ImageReconciler:
         now = datetime.utcnow()
         async with self.session_factory() as session:
             async with session.begin():
-                return await ObjectReconcileCursorDal(session).heartbeat(
-                    cursor_id=cursor.id,
+                return await ImageService(session).heartbeat_ready_reconcile_cursor(
+                    cursor=cursor,
                     owner_id=owner_id,
-                    lease_generation=cursor.lease_generation,
                     now=now,
                     lease_expires_at=now + timedelta(seconds=lease_seconds),
                 )
