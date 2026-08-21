@@ -8,21 +8,21 @@ from alembic import context
 import sys
 from pathlib import Path
 
-# The migration directory remains at repository root while the sole Runtime
-# service source lives below apps/runtime.
+# The migration directory remains at repository root while backend code lives
+# below apps/backend.
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_ROOT = REPO_ROOT / "apps" / "runtime"
-for import_root in (REPO_ROOT, RUNTIME_ROOT):
+BACKEND_ROOT = REPO_ROOT / "apps" / "backend"
+for import_root in (REPO_ROOT, BACKEND_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
 # Import your models
-from apps.runtime.core.async_db import BaseModel
-from apps.runtime.config import settings
-# Import every model package explicitly so autogenerate sees the same metadata
-# used by the runtime.  This import is metadata-only; it does not create/drop
-# tables and does not execute a migration.
-import apps.runtime.models  # noqa: F401
+from apps.backend.core.async_db import BaseModel
+from apps.backend.core.config import settings
+# Import every model package explicitly so autogenerate sees the metadata used
+# by the Runtime and Evaluation Control applications.  These imports are
+# metadata-only; they do not create/drop tables and do not execute a migration.
+import apps.backend.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

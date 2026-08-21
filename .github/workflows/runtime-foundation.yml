@@ -1,4 +1,4 @@
-name: Runtime foundation
+name: Monorepo application foundation
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  runtime-boundary:
+  application-boundary:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -21,49 +21,91 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install static checker
-        run: python -m pip install --disable-pip-version-check ruff==0.8.4
+      - name: Install application dependencies and static checker
+        run: |
+          python -m pip install --disable-pip-version-check -r apps/backend/requirements.txt
+          python -m pip install --disable-pip-version-check ruff==0.8.4
 
       - name: Check Python style and syntax
         run: |
-          ruff check apps/runtime evaluation/replay
-          python -m compileall -q apps/runtime evaluation/replay
+          ruff check apps evaluation/replay
+          python -m compileall -q apps evaluation/replay
 
-      - name: Check single Runtime source boundary
+      - name: Check application source boundaries
         shell: bash
         run: |
-          test -d apps/runtime
-          test -d apps/runtime/workers
-          test -d apps/runtime/api
-          test -d apps/runtime/admin_api
-          test -d apps/runtime/models
-          test -d apps/runtime/crud
-          test -d apps/runtime/schemas
-          test -d apps/runtime/service
-          test -d apps/runtime/stages
-          test -f apps/runtime/main.py
-          test -f apps/runtime/config.py
-          test -f apps/runtime/lifespan.py
+          test -d apps/backend/core
+          test -d apps/backend/crud
+          test -d apps/backend/models
+          test -d apps/backend/schemas
+          test -d apps/backend/services
+          test -f apps/backend/Dockerfile
+          test -f apps/backend/requirements.txt
+          test -d apps/backend/services/runtime/api
+          test -d apps/backend/services/runtime/admin_api
+          test -d apps/backend/services/runtime/service
+          test -d apps/backend/services/runtime/stages
+          test -f apps/backend/services/runtime/main.py
+          test -f apps/backend/services/runtime/config.py
+          test -f apps/backend/services/runtime/lifespan.py
+          test -d apps/backend/services/ai_control/api
+          test -d apps/backend/services/ai_control/service
+          test -d apps/backend/services/ai_control/outbox
+          test -f apps/backend/services/ai_control/main.py
+          test -f apps/backend/services/ai_control/config.py
+          test -f apps/backend/services/ai_control/lifespan.py
+          test -d apps/backend/services/evaluation_control/api
+          test -d apps/backend/services/evaluation_control/service
+          test -f apps/backend/services/evaluation_control/main.py
+          test -f apps/backend/services/evaluation_control/config.py
+          test -f apps/backend/services/evaluation_control/lifespan.py
+          test -f apps/backend/schemas/ai_config.py
+          test -f apps/backend/models/evaluation.py
+          test -f apps/backend/crud/evaluation.py
+          test -d apps/backend/workers/imaging_worker
+          test -d apps/backend/workers/evaluation_worker
+          test ! -e apps/backend/services/runtime/workers
+          test ! -e apps/backend/services/evaluation_control/workers
           test ! -e app
           test ! -e workers
           test ! -e main.py
+          test ! -e apps/runtime
+          test ! -e apps/ai_control
+          test ! -e apps/evaluation_control
           test "$(git ls-files 'app/**' 'workers/**' 'main.py' | wc -l | tr -d ' ')" = "0"
-          test "$(git ls-files 'apps/runtime/**' | wc -l | tr -d ' ')" -gt "0"
+          test "$(git ls-files 'apps/runtime/**' 'apps/ai_control/**' 'apps/evaluation_control/**' | wc -l | tr -d ' ')" = "0"
+          test "$(git ls-files 'apps/backend/**' | wc -l | tr -d ' ')" -gt "0"
 
-      - name: Check active Runtime path references
+      - name: Check retired source path references
         shell: bash
         run: |
           if rg -n --glob '*.py' --glob '*.yml' --glob '*.yaml' \
-            'services/runtime|services\.runtime|apps/runtime/backend|apps/runtime/app' \
+            'apps/runtime|apps/ai_control|apps/evaluation_control|apps\.runtime|apps\.ai_control|apps\.evaluation_control' \
             apps docker-compose.yml alembic_migrations; then
-            echo "Found stale Runtime path reference"
+            echo "Found retired source path reference"
             exit 1
           fi
+          if find apps/backend/services/runtime -type f \( \
+            -name 'ai_config.py' -o -name 'ai_config_service.py' -o \
+            -name 'evaluation.py' -o -name 'evaluation_execution_service.py' -o \
+            -name 'evaluation_export_service.py' -o -name 'evaluation_fake_scorer.py' -o \
+            -name 'evaluation_paired_ab.py' \
+          \) -print -quit | grep -q .; then
+            echo "Found a control-plane module still owned by Runtime"
+            exit 1
+          fi
+
+      - name: Check application imports
+        run: |
+          python -c "import apps.backend.services.runtime.main"
+          python -c "import apps.backend.services.ai_control.main"
+          python -c "import apps.backend.services.evaluation_control.main"
+          python -c "import apps.backend.workers.evaluation_worker.celery_app"
 
       - name: Check Compose definitions
         run: |
           docker compose --env-file /dev/null config --quiet
           docker compose --env-file /dev/null --profile broker config --quiet
 
-      - name: Build Runtime image
-        run: docker build -f apps/runtime/Dockerfile -t ms-image-runtime:ci .
+      - name: Build shared application image
+        run: docker build -f apps/backend/Dockerfile -t ms-image-applications:ci .

@@ -28,7 +28,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
+      dockerfile: apps/backend/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -40,8 +40,6 @@ services:
     env_file: *runtime-env-files
     depends_on:
       mysql:
-        condition: service_healthy
-      mysql-evaluation:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -56,8 +54,8 @@ services:
   admin:
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
-    command: ["uvicorn", "apps.runtime.main:admin_app", "--host", "0.0.0.0", "--port", "8001"]
+      dockerfile: apps/backend/Dockerfile
+    command: ["uvicorn", "apps.backend.services.runtime.main:admin_app", "--host", "0.0.0.0", "--port", "8001"]
     ports:
       - "127.0.0.1:8001:8001"
     environment:
@@ -82,15 +80,61 @@ services:
       timeout: 5s
       retries: 5
 
+  ai-control:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["uvicorn", "apps.backend.services.ai_control.main:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: false
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  evaluation-control:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["uvicorn", "apps.backend.services.evaluation_control.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    ports:
+      - "127.0.0.1:8003:8003"
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: false
+    env_file: *runtime-env-files
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mysql-evaluation:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   imaging-worker:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
-    command: ["celery", "-A", "apps.runtime.workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
+      dockerfile: apps/backend/Dockerfile
+    command: ["celery", "-A", "apps.backend.workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.runtime.workers.imaging_worker.celery_app:celery_app inspect ping -d imaging-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      test: ["CMD-SHELL", "celery -A apps.backend.workers.imaging_worker.celery_app:celery_app inspect ping -d imaging-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -112,11 +156,11 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
-    command: ["celery", "-A", "apps.runtime.workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
+      dockerfile: apps/backend/Dockerfile
+    command: ["celery", "-A", "apps.backend.workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
     stop_grace_period: 30s
     healthcheck:
-      test: ["CMD-SHELL", "celery -A apps.runtime.workers.evaluation_worker.celery_app:celery_app inspect ping -d evaluation-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
+      test: ["CMD-SHELL", "celery -A apps.backend.workers.evaluation_worker.celery_app:celery_app inspect ping -d evaluation-worker@$$HOSTNAME --timeout=5 | grep -q pong"]
       interval: 15s
       timeout: 10s
       retries: 3
@@ -138,8 +182,8 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
-    command: ["python", "-m", "apps.runtime.workers.imaging_worker.outbox_relay"]
+      dockerfile: apps/backend/Dockerfile
+    command: ["python", "-m", "apps.backend.workers.imaging_worker.outbox_relay"]
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; import os; import time; p=Path(os.getenv('IMAGING_RELAY_HEARTBEAT_PATH', '/tmp/ms-image-imaging-relay.heartbeat')); raise SystemExit(0 if p.is_file() and time.time() - p.stat().st_mtime <= 60 else 1)"]
@@ -161,8 +205,8 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: apps/runtime/Dockerfile
-    command: ["python", "-m", "apps.runtime.workers.evaluation_worker.outbox_relay"]
+      dockerfile: apps/backend/Dockerfile
+    command: ["python", "-m", "apps.backend.workers.evaluation_worker.outbox_relay"]
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "python", "-c", "from pathlib import Path; import os; import time; p=Path(os.getenv('EVALUATION_RELAY_HEARTBEAT_PATH', '/tmp/ms-image-evaluation-relay.heartbeat')); raise SystemExit(0 if p.is_file() and time.time() - p.stat().st_mtime <= 60 else 1)"]
