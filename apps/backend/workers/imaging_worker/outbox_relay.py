@@ -12,15 +12,17 @@ from apps.backend.core.messaging.outbox_relay import (
 )
 from apps.backend.core.config import settings
 from apps.backend.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat
-from apps.backend.crud.outbox import OutboxDal
+from apps.backend.services.runtime.service.runtime_outbox_relay_service import (
+    RuntimeOutboxRelayService,
+)
 
 from .celery_app import celery_app, runtime, topology
 
 
 def publish(envelope: OutboxPublishEnvelope) -> str:
     task_name = {
-        OutboxDal.IMAGE_DESTINATION_KEY: topology.task_name,
-        OutboxDal.STAGE_DESTINATION_KEY: "imaging.execute_stage",
+        RuntimeOutboxRelayService.IMAGE_DESTINATION_KEY: topology.task_name,
+        RuntimeOutboxRelayService.STAGE_DESTINATION_KEY: "imaging.execute_stage",
     }.get(envelope.destination_key)
     if task_name is None:
         raise ValueError("outbox_destination_not_registered")
@@ -44,7 +46,7 @@ relay = OutboxRelay(
     publish=publish,
     runtime=runtime,
     owner_prefix="relay:imaging",
-    dal_factory=OutboxDal,
+    outbox_service_factory=RuntimeOutboxRelayService,
 )
 
 

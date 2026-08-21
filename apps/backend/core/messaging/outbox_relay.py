@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import inspect
 import socket
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from .config import BrokerRuntimeConfig
@@ -42,8 +42,61 @@ class OutboxPublishEnvelope:
     message: dict[str, Any]
 
 
+class OutboxRelayService(Protocol):
+    """Service boundary required by the generic relay persistence workflow."""
+
+    async def claim_publish(
+        self,
+        *,
+        event_id: str,
+        owner_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> Any: ...
+
+    def validate_publish_event(self, event: Any) -> dict[str, Any]: ...
+
+    async def mark_dead_letter(
+        self,
+        *,
+        event_id: str,
+        owner_id: str,
+        failed_at: datetime,
+        error_code: str,
+        error_message: str,
+    ) -> bool: ...
+
+    async def mark_retry(
+        self,
+        *,
+        event_id: str,
+        owner_id: str,
+        failed_at: datetime,
+        next_retry_at: datetime,
+        error_code: str,
+        error_message: str,
+    ) -> bool: ...
+
+    async def list_publishable_global(
+        self, *, now: datetime, limit: int = 100
+    ) -> list[Any]: ...
+
+    async def mark_published(
+        self,
+        *,
+        event_id: str,
+        owner_id: str,
+        broker_message_id: str,
+        published_at: datetime,
+    ) -> bool: ...
+
+    async def reconcile_expired_publish_leases(
+        self, *, now: datetime, max_attempts: int, limit: int = 100
+    ) -> dict[str, int]: ...
+
+
 class OutboxRelay:
-    """Relay target outbox events without owning consumer execution state."""
+    """Relay target outbox events without owning service persistence details."""
 
     def __init__(
         self,
@@ -52,22 +105,22 @@ class OutboxRelay:
         publish: Callable[[OutboxPublishEnvelope], Any],
         runtime: BrokerRuntimeConfig,
         owner_prefix: str,
-        dal_factory: Callable[[Any], Any],
+        outbox_service_factory: Callable[[Any], OutboxRelayService],
     ):
         if runtime.relay_lease_seconds <= 0 or runtime.max_attempts <= 0:
             raise ValueError("outbox_relay_runtime_invalid")
         self.session_factory = session_factory
         self.publish = publish
         self.runtime = runtime
-        self.dal_factory = dal_factory
+        self.outbox_service_factory = outbox_service_factory
         self.owner_id = f"{owner_prefix}:{socket.gethostname()}:{uuid4().hex[:12]}"[:128]
 
     async def _claim_one(self, event_id: str) -> dict[str, Any] | None:
         now = datetime.utcnow()
         async with self.session_factory() as db:
             async with db.begin():
-                dal = self.dal_factory(db)
-                claimed = await dal.claim_publish(
+                outbox_service = self.outbox_service_factory(db)
+                claimed = await outbox_service.claim_publish(
                     event_id=event_id,
                     owner_id=self.owner_id,
                     now=now,
@@ -77,9 +130,9 @@ class OutboxRelay:
                 if claimed is None:
                     return None
                 try:
-                    message = dal.validate_publish_event(claimed)
+                    message = outbox_service.validate_publish_event(claimed)
                 except ValueError:
-                    marked = await dal.mark_dead_letter(
+                    marked = await outbox_service.mark_dead_letter(
                         event_id=claimed.id,
                         owner_id=self.owner_id,
                         failed_at=datetime.utcnow(),
@@ -108,9 +161,9 @@ class OutboxRelay:
         error_code = safe_error(exc)
         async with self.session_factory() as db:
             async with db.begin():
-                dal = self.dal_factory(db)
+                outbox_service = self.outbox_service_factory(db)
                 if attempt_count >= self.runtime.max_attempts:
-                    marked = await dal.mark_dead_letter(
+                    marked = await outbox_service.mark_dead_letter(
                         event_id=event_id,
                         owner_id=self.owner_id,
                         failed_at=failed_at,
@@ -120,7 +173,7 @@ class OutboxRelay:
                     outcome = "dead_lettered"
                 else:
                     delay_seconds = min(300, 2 ** max(0, attempt_count - 1))
-                    marked = await dal.mark_retry(
+                    marked = await outbox_service.mark_retry(
                         event_id=event_id,
                         owner_id=self.owner_id,
                         failed_at=failed_at,
@@ -145,7 +198,7 @@ class OutboxRelay:
             return result
         async with self.session_factory() as db:
             async with db.begin():
-                rows = await self.dal_factory(db).list_publishable_global(
+                rows = await self.outbox_service_factory(db).list_publishable_global(
                     now=datetime.utcnow(), limit=limit
                 )
                 candidates = [row.id for row in rows]
@@ -167,7 +220,7 @@ class OutboxRelay:
                 confirmed_at = datetime.utcnow()
                 async with self.session_factory() as db:
                     async with db.begin():
-                        marked = await self.dal_factory(db).mark_published(
+                        marked = await self.outbox_service_factory(db).mark_published(
                             event_id=envelope.event_id,
                             owner_id=self.owner_id,
                             broker_message_id=str(broker_message_id or envelope.event_id),
@@ -193,7 +246,7 @@ class OutboxRelay:
             return {"disabled": 1, "retry_wait": 0, "dead_lettered": 0}
         async with self.session_factory() as db:
             async with db.begin():
-                result = await self.dal_factory(db).reconcile_expired_publish_leases(
+                result = await self.outbox_service_factory(db).reconcile_expired_publish_leases(
                     now=datetime.utcnow(),
                     max_attempts=self.runtime.max_attempts,
                     limit=limit,

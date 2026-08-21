@@ -10,14 +10,16 @@ from apps.backend.services.evaluation_control.config import settings
 from apps.backend.core.async_db import evaluation_async_engine, evaluation_session_factory
 from apps.backend.core.messaging.lifecycle import install_shutdown_handlers, touch_heartbeat, wait_for_shutdown
 from apps.backend.core.messaging.outbox_relay import OutboxPublishEnvelope, OutboxRelay
-from apps.backend.crud.evaluation import EvaluationOutboxDal
 from apps.backend.services.evaluation_control.service.evaluation_execution_service import EvaluationExecutionService
+from apps.backend.services.evaluation_control.service.evaluation_outbox_relay_service import (
+    EvaluationOutboxRelayService,
+)
 
 from .celery_app import celery_app, runtime, topology
 
 
 def publish(envelope: OutboxPublishEnvelope) -> str:
-    if envelope.destination_key != EvaluationOutboxDal.DESTINATION_KEY:
+    if envelope.destination_key != EvaluationOutboxRelayService.DESTINATION_KEY:
         raise ValueError("evaluation_outbox_destination_not_registered")
     result = celery_app.send_task(
         topology.task_name,
@@ -39,7 +41,7 @@ relay = OutboxRelay(
     publish=publish,
     runtime=runtime,
     owner_prefix="relay:evaluation",
-    dal_factory=EvaluationOutboxDal,
+    outbox_service_factory=EvaluationOutboxRelayService,
 )
 
 
