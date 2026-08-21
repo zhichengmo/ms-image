@@ -50,7 +50,20 @@ jobs:
           test "$(git ls-files 'app/**' 'workers/**' 'main.py' | wc -l | tr -d ' ')" = "0"
           test "$(git ls-files 'apps/runtime/**' | wc -l | tr -d ' ')" -gt "0"
 
+      - name: Check active Runtime path references
+        shell: bash
+        run: |
+          if rg -n --glob '*.py' --glob '*.yml' --glob '*.yaml' \
+            'services/runtime|services\.runtime|apps/runtime/backend|apps/runtime/app' \
+            apps docker-compose.yml alembic_migrations; then
+            echo "Found stale Runtime path reference"
+            exit 1
+          fi
+
       - name: Check Compose definitions
         run: |
           docker compose --env-file /dev/null config --quiet
           docker compose --env-file /dev/null --profile broker config --quiet
+
+      - name: Build Runtime image
+        run: docker build -f apps/runtime/Dockerfile -t ms-image-runtime:ci .
