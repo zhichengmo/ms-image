@@ -31,6 +31,7 @@ class BrokerRuntimeConfig:
     relay_lease_seconds: int
     worker_lease_seconds: int
     max_attempts: int
+    worker_concurrency: int
 
 
 def broker_url(*, source: Any = settings) -> str:
@@ -61,6 +62,7 @@ def runtime_config(*, source: Any = settings, prefix: str = "IMAGING") -> Broker
         relay_lease_seconds=value("RELAY_LEASE_SECONDS"),
         worker_lease_seconds=value("WORKER_LEASE_SECONDS"),
         max_attempts=value("WORKER_MAX_ATTEMPTS"),
+        worker_concurrency=value("WORKER_CONCURRENCY"),
     )
 
 

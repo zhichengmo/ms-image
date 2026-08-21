@@ -173,6 +173,9 @@ class Settings(BaseSettings):
     IMAGING_RELAY_HEARTBEAT_PATH: str = "/tmp/ms-image-imaging-relay.heartbeat"
     IMAGING_WORKER_LEASE_SECONDS: int = 120
     IMAGING_WORKER_MAX_ATTEMPTS: int = 5
+    # A worker handles one leased message at a time by default.  Scale with
+    # replicas before increasing this value so queue ownership stays clear.
+    IMAGING_WORKER_CONCURRENCY: int = Field(default=1, ge=1)
     EVALUATION_BROKER_EXCHANGE: str = "evaluation.v1"
     EVALUATION_BROKER_QUEUE: str = "evaluation.job.execute"
     EVALUATION_BROKER_ROUTING_KEY: str = "evaluation.job.execute"
@@ -182,6 +185,9 @@ class Settings(BaseSettings):
     EVALUATION_RELAY_HEARTBEAT_PATH: str = "/tmp/ms-image-evaluation-relay.heartbeat"
     EVALUATION_WORKER_LEASE_SECONDS: int = 120
     EVALUATION_WORKER_MAX_ATTEMPTS: int = 5
+    # Keep offline Evaluation processing in the same single-lane contract as
+    # Imaging unless an explicitly qualified scale-out plan is available.
+    EVALUATION_WORKER_CONCURRENCY: int = Field(default=1, ge=1)
     READINESS_TIMEOUT_SECONDS: float = 3.0
 
     # Runtime operational alerts. A zero threshold disables that rule;

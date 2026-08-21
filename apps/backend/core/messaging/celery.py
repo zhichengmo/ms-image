@@ -49,6 +49,10 @@ def create_celery_app(
         task_acks_late=True,
         task_acks_on_failure_or_timeout=False,
         task_reject_on_worker_lost=True,
+        # The deployment contract uses one active task per worker process and
+        # one reserved task per process.  Add throughput by scaling replicas,
+        # not by silently increasing the unfinished work per worker.
+        worker_concurrency=runtime.worker_concurrency,
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
         # RabbitMQ's AMQP channel must enter confirm mode before the relay
