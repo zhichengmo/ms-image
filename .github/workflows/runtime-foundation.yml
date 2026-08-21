@@ -26,20 +26,20 @@ jobs:
 
       - name: Check Python style and syntax
         run: |
-          ruff check services/runtime evaluation/replay
-          python -m compileall -q services/runtime evaluation/replay
+          ruff check apps/runtime evaluation/replay
+          python -m compileall -q apps/runtime evaluation/replay
 
       - name: Check single Runtime source boundary
         shell: bash
         run: |
-          test -d services/runtime/app
-          test -d services/runtime/workers
-          test -f services/runtime/main.py
+          test -d apps/runtime/app
+          test -d apps/runtime/workers
+          test -f apps/runtime/main.py
           test ! -e app
           test ! -e workers
           test ! -e main.py
           test "$(git ls-files 'app/**' 'workers/**' 'main.py' | wc -l | tr -d ' ')" = "0"
-          test "$(git ls-files 'services/runtime/app/**' 'services/runtime/workers/**' | wc -l | tr -d ' ')" -gt "0"
+          test "$(git ls-files 'apps/runtime/app/**' 'apps/runtime/workers/**' | wc -l | tr -d ' ')" -gt "0"
 
       - name: Check Compose definitions
         run: |

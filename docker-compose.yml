@@ -28,7 +28,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -56,7 +56,7 @@ services:
   admin:
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     command: ["uvicorn", "main:admin_app", "--host", "0.0.0.0", "--port", "8001"]
     ports:
       - "127.0.0.1:8001:8001"
@@ -86,7 +86,7 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     command: ["celery", "-A", "workers.imaging_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=imaging.image.validate", "--hostname=imaging-worker@%h"]
     stop_grace_period: 30s
     healthcheck:
@@ -112,7 +112,7 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     command: ["celery", "-A", "workers.evaluation_worker.celery_app:celery_app", "worker", "--loglevel=INFO", "--queues=evaluation.job.execute", "--hostname=evaluation-worker@%h"]
     stop_grace_period: 30s
     healthcheck:
@@ -138,7 +138,7 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     command: ["python", "-m", "workers.imaging_worker.outbox_relay"]
     stop_grace_period: 30s
     healthcheck:
@@ -161,7 +161,7 @@ services:
     profiles: ["broker"]
     build:
       context: .
-      dockerfile: services/runtime/Dockerfile
+      dockerfile: apps/runtime/Dockerfile
     command: ["python", "-m", "workers.evaluation_worker.outbox_relay"]
     stop_grace_period: 30s
     healthcheck:

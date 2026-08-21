@@ -20,7 +20,7 @@
 cd /Users/mozhicheng/workspace/code/cy-code/ms-image
 python -m venv .venv
 source .venv/bin/activate
-pip install -r services/runtime/requirements.txt
+pip install -r apps/runtime/requirements.txt
 cp .env.example .env-01
 ```
 
@@ -50,22 +50,22 @@ BROKER_ENABLED=false
 ### 3.1 同时启动用户端和管理端
 
 ```bash
-python services/runtime/run_servers.py
+python apps/runtime/run_servers.py
 ```
 
 ### 3.2 分别启动
 
 ```bash
-python services/runtime/start_user_api.py
-python services/runtime/start_admin_api.py
+python apps/runtime/start_user_api.py
+python apps/runtime/start_admin_api.py
 ```
 
 从仓库根目录直接使用模块路径时，Runtime 会自动注入唯一的
-`services/runtime` import root；Worker 也可以使用同一套 fully-qualified module path：
+`apps/runtime` import root；Worker 也可以使用同一套 fully-qualified module path：
 
 ```bash
-uvicorn services.runtime.main:app --host 0.0.0.0 --port 8000
-celery -A services.runtime.workers.imaging_worker.celery_app:celery_app worker \
+uvicorn apps.runtime.main:app --host 0.0.0.0 --port 8000
+celery -A apps.runtime.workers.imaging_worker.celery_app:celery_app worker \
   --loglevel=INFO --queues=imaging.image.validate
 ```
 

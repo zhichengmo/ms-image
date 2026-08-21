@@ -11,18 +11,18 @@ RUN apt-get update && apt-get install -y \
 
 # The repository root remains the build context so the single prompt asset
 # tree and root-level environment/configuration files stay available.  The
-# Dockerfile itself lives with the Runtime source under services/runtime.
+# Dockerfile itself lives with the Runtime source under apps/runtime.
 # Copy requirements first to leverage Docker cache.
-COPY services/runtime/requirements.txt ./requirements.txt
+COPY apps/runtime/requirements.txt ./requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the one Runtime source tree into the import root.  This is a packaging
-# layout only; the repository still has one authoritative services/runtime/app.
-COPY services/runtime/app ./app
-COPY services/runtime/workers ./workers
-COPY services/runtime/main.py ./main.py
+# layout only; the repository still has one authoritative apps/runtime/app.
+COPY apps/runtime/app ./app
+COPY apps/runtime/workers ./workers
+COPY apps/runtime/main.py ./main.py
 COPY prompts ./prompts
 # Keep only the committed, non-secret qualification artifacts used by Runtime
 # config; do not copy the rest of the repository's artifact archive.

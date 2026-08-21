@@ -9,9 +9,9 @@ import sys
 from pathlib import Path
 
 # The migration directory remains at repository root while the sole Runtime
-# source (and its ``app`` import package) lives below services/runtime.
+# source (and its ``app`` import package) lives below apps/runtime.
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_ROOT = REPO_ROOT / "services" / "runtime"
+RUNTIME_ROOT = REPO_ROOT / "apps" / "runtime"
 for import_root in (RUNTIME_ROOT, REPO_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))

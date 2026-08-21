@@ -27,7 +27,7 @@ class PromptCatalog:
     @classmethod
     def target_xray(cls, catalog_revision: str) -> "PromptCatalog":
         # Resolve the single repository/container prompt tree from either the
-        # source checkout (services/runtime/app/...) or the packaged image
+        # source checkout (apps/runtime/app/...) or the packaged image
         # (/app/app/...).  Do not hard-code a source-layout parent index.
         root = next(
             (

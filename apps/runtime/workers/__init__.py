@@ -2,7 +2,7 @@
 
 Workers keep importing the single Runtime ``app`` package.  Add the Runtime
 directory when a worker is launched from the repository root through its
-fully-qualified ``services.runtime.workers`` module path.
+fully-qualified ``apps.runtime.workers`` module path.
 """
 
 from pathlib import Path

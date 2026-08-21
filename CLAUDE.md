@@ -2,7 +2,7 @@
 
 状态：`CURRENT_PROJECT_CONTEXT`（当前项目上下文）
 
-本仓库是宠物多模态影像 AI（人工智能）服务，不是 MS-Scaffold（通用微服务脚手架）。当前唯一 Runtime 源码位于 `services/runtime/`，在线 Session/Study/Series/Image、Task/Stage、provider-disabled AI Call、Report、Evaluation Job/Outbox/Relay/Worker、readiness 和 Operational Status 已有代码；状态为 `ONLINE_CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`。真实 Provider 仍未资格化，医学准确率保持 `UNKNOWN`，发布保持 `NO-GO`。
+本仓库是宠物多模态影像 AI（人工智能）服务，不是 MS-Scaffold（通用微服务脚手架）。当前唯一 Runtime 源码位于 `apps/runtime/`，在线 Session/Study/Series/Image、Task/Stage、provider-disabled AI Call、Report、Evaluation Job/Outbox/Relay/Worker、readiness 和 Operational Status 已有代码；状态为 `ONLINE_CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`。真实 Provider 仍未资格化，医学准确率保持 `UNKNOWN`，发布保持 `NO-GO`。
 
 ## 必读顺序
 
@@ -60,7 +60,7 @@ API（接口层） -> Service（业务服务层） -> CRUD/DAL（数据访问层
 
 - API 负责路由、鉴权、依赖注入和统一响应。
 - Service 接收 `AsyncSession`（异步数据库会话），负责业务校验、状态流转、幂等和多实体编排。
-- 实体 DAL 继承 `app.core.crud.DalBase`；API、Service、Worker 和脚本不得直接拼 SQLAlchemy 查询。Runtime 的 `app` 包只存在于 `services/runtime/app`，不得在仓库根恢复第二份。
+- 实体 DAL 继承 `app.core.crud.DalBase`；API、Service、Worker 和脚本不得直接拼 SQLAlchemy 查询。Runtime 的 `app` 包只存在于 `apps/runtime/app`，不得在仓库根恢复第二份。
 - 不新增 Repository（仓储层）、第二套 CRUDBase、DatabaseService（数据库服务）或平行 service 包。
 - Schema（接口结构）不访问数据库，Model（数据库模型）不承载 HTTP（网络接口）语义。
 
@@ -85,7 +85,7 @@ API（接口层） -> Service（业务服务层） -> CRUD/DAL（数据访问层
 
 - Runtime 已实现在线影像、Task/Stage、provider-disabled Call、Report、Evaluation 执行骨架、双库 readiness 和运行状态聚合；代码尚未迁移或真实运行验证。
 - Compose 的 `ms_image` 与 `ms_image_eval` 保持独立；没有生成迁移脚本，也没有创建 `ai_control` 或 `evaluation_control` 空服务。
-- Runtime user/admin API、imaging/evaluation worker 和 relay 都从 `services/runtime` 启动；新增跨服务合同前不得创建共享 ORM、Repository 或通用 shared 包。
+- Runtime user/admin API、imaging/evaluation worker 和 relay 都从 `apps/runtime` 启动；新增跨服务合同前不得创建共享 ORM、Repository 或通用 shared 包。
 - 当前医学准确率为 `UNKNOWN`，生产发布为 `NO-GO`。
 - 现有代码中的 MS-Scaffold 字符串属于待清理遗留实现，不是项目身份。
 

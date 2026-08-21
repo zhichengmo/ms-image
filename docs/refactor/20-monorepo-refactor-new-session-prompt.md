@@ -129,7 +129,7 @@ MongoEngine CRUDBase
 目标 Monorepo 的概念边界是：
 
 ```text
-services/
+apps/
   runtime/              # 在线病例执行面：现在必须先稳定的服务
   ai_control/           # AI / Prompt 管理控制面：后续 Phase A 才实现
   evaluation_control/   # 独立评测治理面：满足拆分条件后才实现
@@ -351,7 +351,7 @@ MR-1 的 Runtime 单一源码迁移已经完成；当前第一实施切片是“
 推荐的渐进式目标是：
 
 ```text
-阶段 MR-1：已完成，现有 Runtime 作为唯一源码收敛到 services/runtime；
+阶段 MR-1：已完成，现有 Runtime 作为唯一源码收敛到 apps/runtime；
 阶段 MR-1F：收敛部署、启动入口、Worker/Relay 生命周期、遗留引用与无 Secret 验证；
 阶段 MR-2：在出现真实跨服务 Release 合同时按需抽取无状态合同包；
 阶段 AI-A：真正开始 ai_control 的 Connection/Model/Prompt/Schema 控制面；
@@ -370,7 +370,7 @@ MR-1 已完成一次**可回滚的机械性 Runtime 迁移**。为避免一次�
 
 ```text
 ms-image/
-├── services/
+├── apps/
 │   └── runtime/
 │       ├── app/                 # 现有 app/ 的唯一新位置；内部继续 from app...
 │       ├── workers/             # 现有 imaging/evaluation worker 的唯一新位置
@@ -390,13 +390,13 @@ ms-image/
 └── ...
 ```
 
-这里的 `services/runtime/app/` 是当前唯一 Runtime 源布局，不代表永久强制要求 `app` 作为 Python 包名。是否改为显式命名空间包必须另行设计和授权；不得在 MR-1F 中重复移动。
+这里的 `apps/runtime/app/` 是当前唯一 Runtime 源布局，不代表永久强制要求 `app` 作为 Python 包名。是否改为显式命名空间包必须另行设计和授权；不得在 MR-1F 中重复移动。
 
 严禁同时保留两份可运行源码，例如：
 
 ```text
-/app + /services/runtime/app
-/worker + /services/runtime/workers
+/app + /apps/runtime/app
+/worker + /apps/runtime/workers
 ```
 
 必须是 `git mv` 或等价的单一真相迁移；不得复制后让两份长期并行。
@@ -404,7 +404,7 @@ ms-image/
 ## 5.2 最终服务结构（不是 MR-1 的一次性实施清单）
 
 ```text
-services/
+apps/
 ├── runtime/
 │   ├── app/
 │   │   ├── api/
@@ -546,7 +546,7 @@ UNKNOWN：当前不可证明，不能假设
 
 - 重新核对 Git HEAD、branch、dirty state；
 - 再次确认没有与用户改动冲突；
-- 确认 `services/runtime` 仍是唯一 Runtime 源目录；
+- 确认 `apps/runtime` 仍是唯一 Runtime 源目录；
 - 确认 `prompts/` 是否仍留在仓库根作为单一资产目录（默认是）；
 - 确认 migration 目录处理方式，但不执行 migration；
 - 给出精确变更清单后再操作。

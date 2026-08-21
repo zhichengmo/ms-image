@@ -39,7 +39,7 @@
 - 当前分支：以实时 `git branch --show-current` 为准；本次 Runtime Foundation 分支为 `codex/monorepo-runtime-foundation`。
 - 16 号 QJ 收敛静态审计基线：`2fa2a8b5cd01777204e4952641b97174d9dc5879`（仅用于解释该文档的审计范围，不是当前 worktree HEAD）。
 - 开始实施前必须执行 `git rev-parse HEAD`，并以当前 worktree 与 `.agent-handoff/snapshot.md` 的 HEAD 为实现事实；截至 2026-08-20 的已知 HEAD 是 `9fdd1c64655bbf27af7c0359d58f39df3c467775`，其冻结了 17 号 Prompt 运行合同。
-- 当前工作树可能已有用户未提交的文档/handoff 与 `services/runtime/app/models/evaluation.py` 格式改动；禁止 `reset`、`clean`、`checkout`、`git add -A` 或整文件覆盖。
+- 当前工作树可能已有用户未提交的文档/handoff 与 `apps/runtime/app/models/evaluation.py` 格式改动；禁止 `reset`、`clean`、`checkout`、`git add -A` 或整文件覆盖。
 - 本次新建/更新的文档可能同样未提交；开始前必须重新运行 `git status --short`、`git diff --name-status`、`git diff --stat`。
 
 ### 2.2 当前工程状态
@@ -152,13 +152,13 @@ XRay 新能力只能通过 Profile、Prompt、Schema、Stage handler 和 Stage o
 优先核查：
 
 ```text
-services/runtime/main.py
-services/runtime/run_servers.py
+apps/runtime/main.py
+apps/runtime/run_servers.py
 docker-compose.yml
-services/runtime/workers/imaging_worker/
-services/runtime/workers/evaluation_worker/
-services/runtime/app/core/messaging/config.py
-services/runtime/app/core/readiness.py
+apps/runtime/workers/imaging_worker/
+apps/runtime/workers/evaluation_worker/
+apps/runtime/app/core/messaging/config.py
+apps/runtime/app/core/readiness.py
 ```
 
 输出：明确 Runtime user/admin、imaging/evaluation worker/relay 的职责；不得恢复或复制已删除的 legacy XRay worker。

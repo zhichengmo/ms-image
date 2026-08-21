@@ -135,7 +135,7 @@ class Settings(BaseSettings):
         if self.ALGORITHM == "RS256" and not self.SECRET_KEY:
             key_path = Path(self.RSA_PUBLIC_KEY_PATH)
             if not key_path.is_absolute():
-                # The source lives below services/runtime while the container
+                # The source lives below apps/runtime while the container
                 # packages it below /app.  Find the first existing key along
                 # the runtime/repository parent chain without changing the
                 # configured relative path contract.

@@ -8,7 +8,7 @@
 
 MS-Image 是宠物多模态影像接入、AI（人工智能）诊断执行、报告和离线评测服务，不是用于生成其他 FastAPI 项目的脚手架。
 
-当前 Runtime 源码已唯一收敛到 `services/runtime/`，包含 Session/Study/Series/Image、Task/Stage、provider-disabled AI Call、Report、Evaluation Job/Outbox/Relay/Worker、readiness 与 Operational Status；Compose 同时定义在线和隔离 Evaluation MySQL。代码尚未迁移到真实 schema，也尚未完成真实 MySQL/OSS/RabbitMQ 演练；Provider 仍未资格化，医学准确率为 `UNKNOWN`，发布状态为 `NO-GO`。
+当前 Runtime 源码已唯一收敛到 `apps/runtime/`，包含 Session/Study/Series/Image、Task/Stage、provider-disabled AI Call、Report、Evaluation Job/Outbox/Relay/Worker、readiness 与 Operational Status；Compose 同时定义在线和隔离 Evaluation MySQL。代码尚未迁移到真实 schema，也尚未完成真实 MySQL/OSS/RabbitMQ 演练；Provider 仍未资格化，医学准确率为 `UNKNOWN`，发布状态为 `NO-GO`。
 
 ## 项目目的
 
@@ -123,9 +123,9 @@ API（接口层） -> Service（业务层） -> CRUD/DAL（数据访问层） ->
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r services/runtime/requirements.txt
+pip install -r apps/runtime/requirements.txt
 cp .env.example .env-01
-python services/runtime/run_servers.py
+python apps/runtime/run_servers.py
 ```
 
 - 用户 API（应用程序接口）：`http://localhost:8000/docs`

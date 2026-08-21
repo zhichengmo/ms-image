@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 # Keep the Runtime import root stable for both the container's `/app` layout
-# and direct repository-root imports such as `services.runtime.main:app`.
+# and direct repository-root imports such as `apps.runtime.main:app`.
 RUNTIME_ROOT = Path(__file__).resolve().parent
 if str(RUNTIME_ROOT) not in sys.path:
     sys.path.insert(0, str(RUNTIME_ROOT))
