@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,6 +8,7 @@ from apps.backend.core.imaging.object_store import (
     MultipartPart,
     OSSObjectStore,
     ObjectHead,
+    ObjectStorageGateway,
     ObjectValidation,
 )
 from apps.backend.core.imaging.manifest import canonical_json_bytes
@@ -19,17 +20,25 @@ from apps.backend.crud.study import StudyDal
 from apps.backend.models.image import Image
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.schemas.image import (
+    ImageAbortCommand,
+    ImageCompleteUploadRequest,
     ImageCreate,
+    ImageListMultipartPartsRequest,
     ImageMultipartPartReceipt,
+    ImageMultipartPartsResponse,
+    ImageMultipartUploadTicket,
     ImagePrepareMultipartRequest,
+    ImagePreparePartsRequest,
     ImagePrepareUploadRequest,
     ImageReplaceRequest,
     ImageReplaceMultipartRequest,
     ImageResponse,
+    ImageUploadTicket,
 )
 from apps.backend.schemas.outbox import ValidateImageMessage
 from apps.backend.services.runtime.service.session_service import SessionAccessDeniedError, SessionNotFoundError
 from apps.backend.services.runtime.service.study_service import StudyService, StudyStateConflictError
+from apps.backend.services.runtime.service.image_upload_workflow import ImageUploadWorkflow
 
 
 class ImageServiceError(ValueError):
@@ -105,12 +114,14 @@ class ImageUploadOperationCandidate:
 
 class ImageService:
     def __init__(self, db: AsyncSession):
+        self.db = db
         self.session_dal = SessionDal(db)
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
         self.image_dal = ImageDal(db)
         self.outbox_dal = OutboxDal(db)
         self.study_service = StudyService(db)
+        self.upload_workflow = ImageUploadWorkflow(self)
 
     @staticmethod
     def _response(image: Image) -> ImageResponse:
@@ -188,6 +199,110 @@ class ImageService:
     ) -> ImageResponse:
         return self._response(
             await self._owned_image(image_id=image_id, requester_id=requester_id)
+        )
+
+    async def issue_direct_upload(
+        self,
+        *,
+        payload: ImagePrepareUploadRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageUploadTicket:
+        return await self.upload_workflow.issue_direct_upload(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def issue_direct_replacement(
+        self,
+        *,
+        payload: ImageReplaceRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageUploadTicket:
+        return await self.upload_workflow.issue_direct_replacement(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def issue_multipart_upload(
+        self,
+        *,
+        payload: ImagePrepareMultipartRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageMultipartUploadTicket:
+        return await self.upload_workflow.issue_multipart_upload(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def issue_multipart_replacement(
+        self,
+        *,
+        payload: ImageReplaceMultipartRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageMultipartUploadTicket:
+        return await self.upload_workflow.issue_multipart_replacement(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def issue_multipart_part_urls(
+        self,
+        *,
+        payload: ImagePreparePartsRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageMultipartPartsResponse:
+        return await self.upload_workflow.issue_multipart_part_urls(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def list_multipart_parts(
+        self,
+        *,
+        payload: ImageListMultipartPartsRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> list[ImageMultipartPartReceipt]:
+        return await self.upload_workflow.list_multipart_parts(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def complete_upload_workflow(
+        self,
+        *,
+        payload: ImageCompleteUploadRequest,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageResponse:
+        return await self.upload_workflow.complete_upload(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
+        )
+
+    async def abort_upload_workflow(
+        self,
+        *,
+        payload: ImageAbortCommand,
+        requester_id: str,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> ImageResponse:
+        return await self.upload_workflow.abort_upload(
+            payload=payload,
+            requester_id=requester_id,
+            gateway_factory=gateway_factory,
         )
 
     async def prepare_direct_upload(
