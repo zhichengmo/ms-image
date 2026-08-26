@@ -340,3 +340,12 @@
 | v2 Task 创建前同时校验规范化 `gateway_profile_json`、`capability_manifest.provider_disabled` 和 `gateway_profile_sha256` | Compiler 已根据同一 profile 输出 capability manifest，但原 Admission 一律要求 `provider_disabled=true`，会拒绝正式网络路径所需的 qualified/provider-enabled Config，形成内部合同矛盾 | `6057ec9`；`task_service.py:284-334`；`config_compiler.py:460-465`；86 个定向合同测试 |
 | 保持 v1 provider-disabled 兼容链，不在本切片变更 Snapshot、Retry、unknown 或数据库契约 | v1 非终态 Task 尚未确认清零；本次只修复冻结准入，不应跨越 P0 数据库授权或引入运行时行为变化 | `task_service.py:326-334`；用户固定约束 |
 | 真实 imaging Worker 仍只以 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY` 作为 Platform 出站配置；当前缺失时停止真实资格化，不回退到已删除的 Gateway selector/secret 链 | 这与 `ms-ai-fast` 请求合同一致；本机 Settings 已证实该成对配置当前未就绪，代码会在 Gateway 网络边界 fail-closed | `core/config.py:228-280`；`gateway_client.py:39-81`；本轮非敏感 Settings presence 核验 |
+
+## 2026-08-26 — 方案二 XRay 猫/犬 Primary Prompt 发布边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 以 `vet-platform` 已发布的猫/犬 XRay 全图 Prompt 为工程候选来源，分别整理为 `ms-image` 猫/犬 Primary Prompt | 现有 `ms-image` Primary Prompt 仅一行，不能承担完整 Study 主读；方案二保留已沉淀的技术质量、全图扫查、防漏诊与防过诊规则，同时移除旧 specialist 依赖、变量、状态与输出合同。两条来源均不是医学确认结论。 | 来源表 `ai_prompt_template`：猫 `678`、犬 `679`；本轮发布回读记录。 |
+| XRay 是独立 `xray` 模态，Nacos module 使用 `x-ray`；Primary 必须使用 `cat` / `dog` variant，禁止 `default` fallback | 猫犬影像不能共享或互相兜底 Prompt。将物种写入内部 key 和 Nacos variant，使不合法 key 或物种组合在 Nacos 读取前失败关闭。 | `prompt_source.py:29-58, 81-151`；`test_ai_prompt_control_plane_contracts.py:573-615`。 |
+| 发布 `ms-image.x-ray.primary.cat.zh-CN@1.0.0` 与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`，不发布 Targeted 或 A/B 变体 | v2 Primary 只消费一份冻结 Prompt，且 FamilyRouting 当前固定 `primary_final`；Targeted 无路由入口。用户当前优先 P0/P1/E1 工程链，不执行医学评测。 | Nacos read-after-write；用户当前指令；`stages/xray/family_routing.py`。 |
+| Nacos 发布不视为 Config 激活、Worker Runtime 或医学放行 | 旧 MySQL 未具备兼容的 Runtime 控制面表，不能安全导入/编译/冻结；当前先完成工程 AI 链，医学验证后置。 | P0 审计；`.agent-handoff/snapshot.md`；24 号运行时指南。 |

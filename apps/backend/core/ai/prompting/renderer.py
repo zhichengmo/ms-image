@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from uuid import uuid4
 from typing import Any, Mapping
 
 from jinja2 import Environment, StrictUndefined, TemplateError, meta
@@ -34,6 +35,30 @@ def normalize_prompt_content(value: str) -> str:
 
 def _to_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _escape_literal_dollars(value: Any, *, token: str) -> Any:
+    """Protect literal ``$`` values injected through Jinja before $ expansion.
+
+    Templates retain ms-ai-fast's ``$VARIABLE`` compatibility syntax.  The
+    expansion pass must only operate on placeholders written in the template,
+    not on literal JSON content contributed by a Jinja variable (for example
+    JSON Schema's ``$schema`` key).  The token is per-render and restored
+    before the rendered Prompt is hashed or sent to the model.
+    """
+    if isinstance(value, str):
+        return value.replace("$", token)
+    if isinstance(value, Mapping):
+        return {
+            (key.replace("$", token) if isinstance(key, str) else key):
+            _escape_literal_dollars(item, token=token)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_escape_literal_dollars(item, token=token) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_escape_literal_dollars(item, token=token) for item in value)
+    return value
 
 
 def _jinja_environment() -> Environment:
@@ -122,14 +147,23 @@ class PromptRenderer:
             for name in required | optional
             if name in safe_variables
         }
+        # A Jinja value may itself be JSON with literal ``$`` keys.  Protect
+        # those values before the legacy $ placeholder pass, then restore the
+        # exact literal characters before calculating the frozen Prompt hash.
+        dollar_escape_token = f"__MS_IMAGE_LITERAL_DOLLAR_{uuid4().hex}__"
+        jinja_variables = {
+            name: _escape_literal_dollars(value, token=dollar_escape_token)
+            for name, value in variables.items()
+        }
         try:
-            rendered = _jinja_environment().from_string(normalized).render(**variables)
+            rendered = _jinja_environment().from_string(normalized).render(
+                **jinja_variables
+            )
         except TemplateError as exc:
             raise PromptRenderError("prompt_template_render_failed") from exc
 
-        missing_dollar = sorted(
-            {name for name in _DOLLAR_PATTERN.findall(rendered) if name not in variables}
-        )
+        dollar_placeholders = set(_DOLLAR_PATTERN.findall(normalized))
+        missing_dollar = sorted(dollar_placeholders - set(variables))
         if missing_dollar:
             raise PromptRenderError("prompt_required_variable_missing")
 
@@ -140,6 +174,7 @@ class PromptRenderer:
             return "" if value is None else str(value)
 
         rendered = _DOLLAR_PATTERN.sub(replace_placeholder, rendered)
+        rendered = rendered.replace(dollar_escape_token, "$")
         if not rendered or len(rendered) > max_prompt_chars:
             raise PromptRenderError("prompt_rendered_length_invalid")
         context = {name: variables[name] for name in sorted(variables)}

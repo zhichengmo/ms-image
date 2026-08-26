@@ -1,18 +1,5 @@
 # 当前工作日志
 
-## 2026-08-24 — Prompt Runtime / AI Gateway D3 最终收敛
-
-- 分离 legacy 与 structured Prompt 消息合同；structured 固定为 developer 规则 + user 安全上下文，并对 developer 引用 user context fail closed。
-- 收紧外部变量别名，移除高歧义映射；统一 Runtime 入口为 `AIRequestService.prepare_call()`。
-- Stage handler 改为纯 `StageExecutionPlan`，Worker 完成 prepare+commit → 事务外网络 → finalize/consume+commit 三段事务。
-- 修复 Attempt 终态重放：已 succeeded/failed/cancelled 直接返回；unknown 可向 succeeded/failed 收敛；unknown 重复标记不延后 reconcile。
-- 修复明确失败时 Logical Call 已为 `running` 却未终态化的问题，现在 `prepared/running + pending` 都可收敛为 failed。
-- `load_attempt_for_network()` 增加 Attempt/Call 状态门禁，按 Task 冻结 series snapshot 读取 ready images、重建并复验 series manifest，冻结普通 `image_inputs` DTO。
-- Primary 对真实明确失败返回 failed；仅 `provider_disabled` 保持历史兼容。Targeted 只使用 `previous_output.complete_medical_result`。
-- 对照 `ms-ai-fast`：采用 Attempt、幂等键、网络前提交和追踪原则；不迁移 Jinja、直接 `img_url`、环境 API Key 或 raw response 直传模式。
-- 未接真实 OSS、Secret Manager、Provider 或加密响应存储；未新增独立测试脚本或新的迁移脚本。
-
-
 ## 2026-08-24 — Prompt → Gateway → Primary 组合链路验证
 
 - 使用不落盘的 Python heredoc 组合烟测串联 `normalize_imported_prompt`、`PromptRenderer`、`PromptMessageAssembler`、Fake signer/Secret/response store、`OpenAICompatibleGatewayAdapter` 的 `httpx.MockTransport` 和 `XRayJointPrimaryReaderStageHandler.consume_ai_call()`。
@@ -253,3 +240,11 @@
 - Task Admission 对 v2 Config 现在同时冻结并核验规范化 Gateway Profile：`provider_disabled == not provider_enabled`，且 capability manifest 的 profile SHA 必须等于规范化 profile 的 SHA。已资格化的 provider-enabled Config 得以进入既有冻结链；v1 provider-disabled 兼容链保持。
 - 验证：Ruff 通过；三份既有 AI 合同测试 `86 passed, 19 warnings`；compileall、diff/cached-diff check、commit 和 push 均通过。warning 仍是已有 Pydantic/datetime deprecation。
 - 无数据库、OSS、Broker、Provider 或医学写操作。随后以非敏感布尔 presence 核验本机 Settings：代码读取 `.env-01`，而 `.env` 与 `.env-01` 均无非空 `AI_PLATFORM_OPENAI_BASE_URL` / `AI_PLATFORM_API_KEY`，因此 `settings.ai_platform_configured=False`；OSS 为 ready、Broker enabled、MySQL DB configured。此事实说明真实 Worker Platform 配置仍未资格化，不恢复已删除的 `AI_GATEWAY_*` 链。
+
+## 2026-08-26 — 方案二 XRay 猫/犬 Primary Prompt 发布至 Nacos
+
+- 按用户明确选择的方案二，完整读取 `vet-platform` 猫/犬全图 XRay Prompt，提取技术质量、全图系统扫查、跨系统一致性、防漏诊与防过诊规则；未原样迁移旧 specialist 上游依赖、旧变量、旧状态或旧 JSON 输出。
+- 用户进一步确定 XRay 是独立 `xray` 模态、Nacos module 为 `x-ray`，并要求猫犬不再使用混合 `default`。代码将内部 key 固定为 `xray_cat_primary` / `xray_dog_primary`，强制 Nacos variant 为 `cat` / `dog`，XRay 请求不允许 default 或跨物种 fallback。
+- 先对两个正式 Data ID 及 latest 进行 Nacos 预检，确认不存在；随后创建 `ms-image.x-ray.primary.cat.zh-CN@1.0.0`（SHA-256：`0be1b353bc4527ff9d70c8dc871300b7b1dd0f746b7e56e81138bd1d23b96b64`）与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`（SHA-256：`b394ccb6cbcefd9f12ab8819e1ce7d743de5758cb0896f1734b13d13f3998022`）。
+- 两个候选的管理端 detail、运行时 exact/latest 以及 `NacosPromptSourceClient -> parse_nacos_prompt_payload -> PromptRenderer -> PromptMessageAssembler` 回读均通过。修复了 Jinja 注入 JSON Schema 的 `$schema`/`$value` 被遗留 `$VARIABLE` 扫描误识别的问题。
+- 未写 MySQL、未导入 `ai_prompt_template`、未编译/激活 Config、未创建 Task Snapshot，未调用 Provider；当前用户优先 P0/P1/E1 工程 AI 链，不开展医学评测。完整 Worker Runtime 与医学验证状态不变。

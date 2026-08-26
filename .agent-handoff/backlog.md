@@ -116,6 +116,13 @@
 - [ ] 对 45 张旧库表按“当前必留 / 历史影像报告保留或迁移 / 旧 AI 治理候选归档删除 / 空表候选删除”形成逐表清单；当前不得删除 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool`。
 - [ ] 用户确认精确保留与删除集合后，先审阅备份/归档目标、调用面移除和迁移 rollback，再执行任何实际表删除。
 
+## Nacos XRay 猫/犬 Primary Prompt 候选（2026-08-26）
+
+- [x] 依据 `vet-platform` 猫/犬全图旧 Prompt 的防漏诊、防过诊、技术限制和跨系统扫查规则，分别发布 `ms-image.x-ray.primary.cat.zh-CN@1.0.0` 与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`；严格变量仅为 `SAFE_STUDY_CONTEXT_JSON`、`OUTPUT_SCHEMA_JSON`，两个候选的 Nacos source/render/message 回读均已通过。
+- [x] XRay Prompt 身份已 fail-closed：内部 key 为 `xray_cat_primary` / `xray_dog_primary`，Nacos variant 为 `cat` / `dog`；禁止 XRay `default` fallback 和跨物种读取。
+- [ ] P0 数据库基线授权并落地后，使用既有 `PromptImportService` 分别导入指定 cat/dog `1.0.0`，再编译不可变 Primary Config、控制面审计并激活；不得由 Worker 读取 Nacos latest。
+- [ ] 当前用户优先 P0/P1/E1 的工程 AI 链：在 E1 冻结 Task 真实通过前，不进入 M1 医学评测、Q3 Prompt A/B、TargetedReview、FamilyRouting、Retry、Fallback 或 Race；当前 Candidate 不能作为医学基线或放行依据。
+
 ## 当前开发入口（2026-08-25）
 
 - [ ] 完成 P1 Worker Runtime Qualification（工作进程运行时资格化）：当前 AI/Prompt 代码已按 `ms-ai-fast` 收敛，隔离 OSS synthetic 已通过 PUT/HEAD/Worker GET/同机 signed GET/cleanup；仍需确认真实 Worker 加载 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`、Provider Attempt Lookup 与同一冻结任务的 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report 非敏感证据。

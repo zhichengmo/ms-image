@@ -186,15 +186,25 @@ class PromptImportService:
             raise AIControlStateConflictError("ai_prompt_template_key_version_exists")
 
         requested_variant = payload.variant
-        resolved: tuple[str, str, ImportedPromptRecord] | None = None
-        for candidate in variant_candidates(requested_variant):
-            data_id = nacos_data_id(
-                service_code=payload.service_code,
+        try:
+            candidates = variant_candidates(
+                requested_variant,
                 module_code=payload.module_code,
-                prompt_key=payload.prompt_key,
-                variant=candidate,
-                locale=payload.locale,
             )
+        except PromptSourceError as exc:
+            raise AIControlValidationError(str(exc)) from exc
+        resolved: tuple[str, str, ImportedPromptRecord] | None = None
+        for candidate in candidates:
+            try:
+                data_id = nacos_data_id(
+                    service_code=payload.service_code,
+                    module_code=payload.module_code,
+                    prompt_key=payload.prompt_key,
+                    variant=candidate,
+                    locale=payload.locale,
+                )
+            except PromptSourceError as exc:
+                raise AIControlValidationError(str(exc)) from exc
             record = await self._fetch_nacos(
                 data_id=data_id,
                 release_or_version=(

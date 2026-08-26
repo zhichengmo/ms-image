@@ -30,10 +30,32 @@ NACOS_DEFAULT_VARIANT = "default"
 NACOS_MODULE_CODE_MAP = {
     "intelligent_inquiry": "ai-doc",
     "image_recognition": "ai-pic",
+    # XRay is an independent imaging modality in ms-image. Keep the
+    # internal modality type stable as ``xray`` while exposing the readable
+    # Nacos module segment ``x-ray``.
+    "xray": "x-ray",
     "video_behavior_analysis": "video-behavior-analysis",
     "ai_voice": "ai-voice",
     "audio_recognition": "audio-recognition",
 }
+
+# ``prompt_key`` is globally unique with its version in ai_prompt_template.
+# XRay Primary therefore carries its species in the internal key while sharing
+# the concise ms-ai-fast-compatible external Nacos role ``x-ray.primary``.
+NACOS_PROMPT_KEY_MAP = {
+    ("xray", "xray_cat_primary"): "primary",
+    ("xray", "xray_dog_primary"): "primary",
+}
+
+# An XRay Primary Prompt is species-specific.  Its Nacos variant is part of
+# that immutable identity, not a generic variant that may fall back to
+# ``default``.  Keeping this map next to the Nacos key map makes an invalid
+# internal key or a cat/dog mismatch fail before any Nacos read.
+NACOS_XRAY_PROMPT_VARIANT_MAP = {
+    "xray_cat_primary": "cat",
+    "xray_dog_primary": "dog",
+}
+XRAY_PROMPT_VARIANTS = frozenset(NACOS_XRAY_PROMPT_VARIANT_MAP.values())
 
 
 class PromptSourceError(ValueError):
@@ -75,17 +97,52 @@ def nacos_data_id(
     for name, value in values.items():
         if not isinstance(value, str) or not value.strip():
             raise PromptSourceError(f"prompt_source_{name}_invalid")
-    target_module = NACOS_MODULE_CODE_MAP.get(module_code.strip(), module_code.strip())
-    target_prompt_key = prompt_key.strip().replace("_", "-")
+    normalized_module_code = module_code.strip()
+    normalized_prompt_key = prompt_key.strip()
+    normalized_variant = variant.strip()
+    if normalized_module_code == "xray":
+        expected_variant = NACOS_XRAY_PROMPT_VARIANT_MAP.get(
+            normalized_prompt_key
+        )
+        if expected_variant is None:
+            raise PromptSourceError("prompt_source_xray_prompt_key_invalid")
+        if normalized_variant != expected_variant:
+            raise PromptSourceError("prompt_source_xray_variant_mismatch")
+    target_module = NACOS_MODULE_CODE_MAP.get(
+        normalized_module_code, normalized_module_code
+    )
+    target_prompt_key = NACOS_PROMPT_KEY_MAP.get(
+        (normalized_module_code, normalized_prompt_key),
+        normalized_prompt_key.replace("_", "-"),
+    )
     return (
         f"{service_code.strip()}.{target_module}.{target_prompt_key}."
-        f"{variant.strip()}.{locale.strip()}"
+        f"{normalized_variant}.{locale.strip()}"
     )
 
 
-def variant_candidates(requested_variant: str) -> list[str]:
-    """Use the requested variant first, then only ``default`` as fallback."""
+def variant_candidates(
+    requested_variant: str,
+    *,
+    module_code: str | None = None,
+) -> list[str]:
+    """Resolve Nacos variants, fail-closing XRay before generic fallback.
+
+    Existing modules retain the ms-ai-fast lookup order ``requested`` then
+    ``default``.  XRay cat/dog Primary Prompts must never use that fallback:
+    a missing species-specific Prompt is an import failure rather than a
+    chance to read a mixed-species candidate.
+    """
+    if not isinstance(requested_variant, str):
+        raise PromptSourceError("prompt_source_variant_invalid")
+    if module_code is not None and not isinstance(module_code, str):
+        raise PromptSourceError("prompt_source_module_code_invalid")
     requested = requested_variant.strip() or NACOS_DEFAULT_VARIANT
+    normalized_module_code = module_code.strip() if module_code is not None else ""
+    if normalized_module_code == "xray":
+        if requested not in XRAY_PROMPT_VARIANTS:
+            raise PromptSourceError("prompt_source_xray_variant_invalid")
+        return [requested]
     candidates = [requested]
     if requested != NACOS_DEFAULT_VARIANT:
         candidates.append(NACOS_DEFAULT_VARIANT)
@@ -336,7 +393,9 @@ __all__ = [
     "ImportedPromptRecord",
     "NACOS_DEFAULT_VARIANT",
     "NACOS_MODULE_CODE_MAP",
+    "NACOS_PROMPT_KEY_MAP",
     "NACOS_SOURCE_TYPE",
+    "NACOS_XRAY_PROMPT_VARIANT_MAP",
     "NacosPromptSourceClient",
     "PROMPT_SOURCE_RECEIPT_V1",
     "PromptSourceError",
@@ -348,4 +407,5 @@ __all__ = [
     "parse_nacos_prompt_payload",
     "receipt_sha256",
     "variant_candidates",
+    "XRAY_PROMPT_VARIANTS",
 ]

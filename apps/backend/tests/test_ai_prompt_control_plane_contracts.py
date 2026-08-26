@@ -55,6 +55,7 @@ from apps.backend.services.ai_control.service.prompt_template_service import (
     PromptTemplateService,
 )
 from apps.backend.services.ai_control.service.prompt_source import (
+    PromptSourceError,
     PromptSourceUnsafeError,
     build_source_receipt,
     nacos_data_id,
@@ -208,6 +209,28 @@ def test_renderer_is_deterministic_for_frozen_content_and_safe_context() -> None
         },
         max_prompt_chars=10_000,
     ).rendered_prompt_sha256
+
+
+def test_renderer_preserves_literal_dollars_in_jinja_injected_json() -> None:
+    rendered = PromptRenderer.render(
+        content=(
+            "上下文：{{ SAFE_STUDY_CONTEXT_JSON | tojson }}\n"
+            "Schema：{{ OUTPUT_SCHEMA_JSON | tojson }}"
+        ),
+        variables_json=VALID_VARIABLES,
+        safe_variables={
+            "SAFE_STUDY_CONTEXT_JSON": {"note": "literal $value remains data"},
+            "OUTPUT_SCHEMA_JSON": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+            },
+            "PRIMARY_RESULT_JSON": {"summary": "unused but required by contract"},
+        },
+        max_prompt_chars=10_000,
+    )
+
+    assert '"$schema"' in rendered.rendered_text
+    assert "literal $value remains data" in rendered.rendered_text
 
 
 @pytest.mark.parametrize(
@@ -545,6 +568,50 @@ def test_prompt_source_data_id_and_variant_fallback_order() -> None:
     )
     assert variant_candidates("v2") == ["v2", "default"]
     assert variant_candidates("default") == ["default"]
+
+
+def test_prompt_source_xray_uses_species_specific_primary_coordinates() -> None:
+    assert (
+        nacos_data_id(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_cat_primary",
+            variant="cat",
+            locale="zh-CN",
+        )
+        == "ms-image.x-ray.primary.cat.zh-CN"
+    )
+    assert (
+        nacos_data_id(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_dog_primary",
+            variant="dog",
+            locale="zh-CN",
+        )
+        == "ms-image.x-ray.primary.dog.zh-CN"
+    )
+    assert variant_candidates("cat", module_code="xray") == ["cat"]
+    assert variant_candidates("dog", module_code="xray") == ["dog"]
+
+    with pytest.raises(PromptSourceError, match="prompt_source_xray_variant_invalid"):
+        variant_candidates("default", module_code="xray")
+    with pytest.raises(PromptSourceError, match="prompt_source_xray_variant_mismatch"):
+        nacos_data_id(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_cat_primary",
+            variant="dog",
+            locale="zh-CN",
+        )
+    with pytest.raises(PromptSourceError, match="prompt_source_xray_prompt_key_invalid"):
+        nacos_data_id(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_primary",
+            variant="cat",
+            locale="zh-CN",
+        )
 
 
 def test_prompt_source_preserves_ms_ai_fast_template_semantics() -> None:

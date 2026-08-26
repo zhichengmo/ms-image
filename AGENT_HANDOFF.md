@@ -40,7 +40,7 @@
 
 - 最后更新：2026-08-26
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`
+- 当前状态：`.agent-handoff/snapshot.md`（含已发布但尚未导入/激活的 XRay 猫/犬 Primary Nacos 候选）
 - 下一动作：`.agent-handoff/backlog.md`
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`

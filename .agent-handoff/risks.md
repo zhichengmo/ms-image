@@ -12,7 +12,7 @@
 - Runtime RS256 公钥/Secret 与 Admin HS256 Secret 均未配置；保护接口和管理控制面不能被视为可用。旧项目公钥只有在确认新服务继续信任相同 issuer/audience 后才能迁移。
 - `secret_ref` 仍存在于既有 Control Plane 模型、Schema 与 Config 哈希输入中，但不再参与 Worker Provider 鉴权；彻底删除需要模型/字段/迁移授权。当前风险是遗留元数据可能误导后续实现，必须以 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY` 为唯一运行凭据合同。
 - 当前 OpenAI-compatible Provider（OpenAI 兼容模型提供方）没有已确认的原请求查询 API；`UnsupportedProviderAttemptLookup（不支持查询的安全实现）` 会重排 unknown Attempt（未知尝试），不会盲目重发。真实查询合同确认前，unknown 可能长期待对账。
-- 目标 Nacos namespace 已有并验证非医疗基础设施 smoke Prompt `ms-image.xray.chain-smoke.default.zh-CN@1.0.0`，但仍没有已确认可供 `ms-image` 导入和冻结的合格 XRay 医学 Prompt；不得把 smoke Prompt 当 Primary 候选。
+- 目标 Nacos namespace 现有非医疗 smoke Prompt；XRay 已另行发布猫/犬 Primary 候选 `ms-image.x-ray.primary.cat.zh-CN@1.0.0` 与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`（正文 SHA-256 已回读核验）。它们尚未导入 `ai_prompt_template`、编译/激活 Config 或冻结为 Task；不得把 Nacos 发布、渲染成功或旧 smoke 当作完整 Worker 或医学资格。历史 XRay `default` 发布物保留但不得使用。
 - `ms-ai-platform` 当前需手工启动 8062 才能承接 `ms-ai-fast`；没有已确认的常驻进程管理时会在 TCP connect 层失败。
 - Platform 模型池中的 qwen 端点受 API Key IP restriction 返回 403；当前 gpt-5-mini 后备可成功，但会增加失败日志和延迟，池健康并非全绿。
 - 现有迁移只完成离线或隔离环境演练；应用到共享非生产前仍需 baseline/stamp（基线/标记）审阅和明确授权。
@@ -55,7 +55,7 @@
 
 - 七项能力属于完整目标，但当前阶段均未因此自动启用；必须按 `P0-A（已完成） -> P0-B + Q0 + Q1 -> E1 -> M1 -> Primary Prompt A/B -> 第二模型最小资格化 -> Model A/B -> M2 -> Retry -> Fallback -> Race` 的依赖顺序逐项通过 Gate（门禁）。
 - 本轮完成 P0-A Prompt command 业务代码修正并扩展现有测试文件；没有修改数据库字段、运行环境或新增迁移/独立测试脚本。
-- 24 号文档和会话 Prompt 已同步，17/19/20/21/23 号历史/目标文档也已添加事实边界；但 active Primary Prompt/Config 尚未盘点或冻结，文档完整不等于运行合同完成。
+- 24 号文档和会话 Prompt 已同步，17/19/20/21/23 号历史/目标文档也已添加事实边界；Primary Nacos 候选已发布但尚未导入、编译、激活或冻结，文档或 Nacos 发布完整不等于运行合同完成。
 - 不恢复 `file_asset（公共文件资产表）`；不新增平行 Repository/CRUDBase/DatabaseService（仓储层/数据访问基类/数据库服务）。
 - `AI_PLATFORM_API_KEY`、Signed URL（签名地址）和 Provider 原始响应正文不得写入数据库、Nacos、Task Snapshot、审计或日志；数据库当前只保存 Provider Request ID、规范化结构化结果、响应 SHA 和 Attempt 审计事实，不保存原始响应对象引用。
 - Provider/OSS 网络 I/O 位于数据库事务外；数据库访问继续统一走 `DalBase（数据访问基类）` 和实体 DAL（数据访问层）。
