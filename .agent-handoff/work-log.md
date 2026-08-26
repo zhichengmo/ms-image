@@ -1,12 +1,5 @@
 # 当前工作日志
 
-## 2026-08-24 — 业务 `$var` 别名与 JSON 示例兼容
-
-- 新增 `PROMPT_PLACEHOLDER_ALIASES`（`base_info/pet_profile/patient_info/study_context/question/content/case_text → SAFE_STUDY_CONTEXT_JSON`；`previous_answer/past_history/primary_result → PRIMARY_RESULT_JSON`；`output_schema/schema → OUTPUT_SCHEMA_JSON`），导入时把 `$base_info`/`{{ base_info }}` 归一化为 `{{ SAFE_* }}`，运行时仍只看到 SAFE_*。
-- 修复 `PromptRenderer.validate_template` 对模板正文里合法 `}}`（如 JSON 示例）的误判：现在只拒绝未闭合的 `{{` 与未映射的 `$` 词汇，`}}` 按字面量允许。
-- 用「$base_info + 内嵌 JSON 示例」跑通 导入 → 渲染 → prompt-message-contract.v1 → Gateway JSON → accepted。
-- 测试从 49 项到 52 项；新增 `$base_info` 归一化、`$previous_answer` 映射、模板内 `}}` 字面量用例。
-
 ## 2026-08-24 — Prompt Runtime / AI Gateway D3 最终收敛
 
 - 分离 legacy 与 structured Prompt 消息合同；structured 固定为 developer 规则 + user 安全上下文，并对 developer 引用 user context fail closed。
@@ -253,3 +246,10 @@
 - P0 只读连接真实 `ms_image`：45 表、无 `alembic_version`。`ai_prompt_template`（375 行）、`ai_api_connection`（96 行）、`ai_model_pool`（19 行）和 `session_record`（5772 行）已存在且与当前 Runtime ORM/迁移定义不兼容；其他目标 Runtime 表缺失。
 - 当前 `20260824_01` 会新建上述同名控制面表，禁止直接对该旧库执行 `alembic upgrade head`。未执行任何 DDL/DML、迁移或外部 Worker/Provider 测试。
 - 代码审计同时发现未使用的 legacy `response_object_ref_json` 仍保留于 AI Call/Attempt 模型、DAL 和未部署迁移；当前不改动，待 P0 数据库方案和授权后统一处理。
+
+## 2026-08-26 — 提交 v2 Task Admission 一致性修正并完成 P1 配置差距核验
+
+- 审阅现有未提交 diff 后，只提交 `apps/backend/services/runtime/service/task_service.py` 与现有 `apps/backend/tests/test_ai_gateway_attempt_contracts.py`；提交 `6057ec9 fix(xray): admit qualified provider configs` 已推送到 `origin/codex/prompt-runtime-ai-gateway`。
+- Task Admission 对 v2 Config 现在同时冻结并核验规范化 Gateway Profile：`provider_disabled == not provider_enabled`，且 capability manifest 的 profile SHA 必须等于规范化 profile 的 SHA。已资格化的 provider-enabled Config 得以进入既有冻结链；v1 provider-disabled 兼容链保持。
+- 验证：Ruff 通过；三份既有 AI 合同测试 `86 passed, 19 warnings`；compileall、diff/cached-diff check、commit 和 push 均通过。warning 仍是已有 Pydantic/datetime deprecation。
+- 无数据库、OSS、Broker、Provider 或医学写操作。随后以非敏感布尔 presence 核验本机 Settings：代码读取 `.env-01`，而 `.env` 与 `.env-01` 均无非空 `AI_PLATFORM_OPENAI_BASE_URL` / `AI_PLATFORM_API_KEY`，因此 `settings.ai_platform_configured=False`；OSS 为 ready、Broker enabled、MySQL DB configured。此事实说明真实 Worker Platform 配置仍未资格化，不恢复已删除的 `AI_GATEWAY_*` 链。

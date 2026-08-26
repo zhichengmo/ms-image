@@ -332,3 +332,11 @@
 |---|---|---|
 | 在用户明确选择数据库边界并授权前，不对 `ms_image` 执行 `alembic upgrade head` | 真实库无 `alembic_version`；现有 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record` 均已存在且有数据，结构也不符合 Runtime ORM；`20260824_01` 会直接 `create_table` 同名控制面表 | 2026-08-26 只读 `information_schema` 审计；`20260824_01_ai_prompt_control_plane_phase_a_c.py:112,236,263,289` |
 | 将 `response_object_ref_json` 作为待 P0 处理的遗留源代码合同，而不是现有运行路径 | 当前 Service/Worker 没有写入该字段，但 Model、DAL 和未部署 migration 仍声明“原始响应对象引用”，与用户已决定的“不存原始 Provider 响应 OSS 对象”不一致；直接删除需要与数据库兼容计划一起审阅 | `models/ai_call.py:61`、`models/ai_call_attempt.py:86-89`、`crud/ai_call.py:62`、`crud/ai_call_attempt.py:79`、`20260824_02...:269` |
+
+## 2026-08-26 — Task Admission 与 v2 Gateway Profile 必须作同一冻结事实校验
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| v2 Task 创建前同时校验规范化 `gateway_profile_json`、`capability_manifest.provider_disabled` 和 `gateway_profile_sha256` | Compiler 已根据同一 profile 输出 capability manifest，但原 Admission 一律要求 `provider_disabled=true`，会拒绝正式网络路径所需的 qualified/provider-enabled Config，形成内部合同矛盾 | `6057ec9`；`task_service.py:284-334`；`config_compiler.py:460-465`；86 个定向合同测试 |
+| 保持 v1 provider-disabled 兼容链，不在本切片变更 Snapshot、Retry、unknown 或数据库契约 | v1 非终态 Task 尚未确认清零；本次只修复冻结准入，不应跨越 P0 数据库授权或引入运行时行为变化 | `task_service.py:326-334`；用户固定约束 |
+| 真实 imaging Worker 仍只以 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY` 作为 Platform 出站配置；当前缺失时停止真实资格化，不回退到已删除的 Gateway selector/secret 链 | 这与 `ms-ai-fast` 请求合同一致；本机 Settings 已证实该成对配置当前未就绪，代码会在 Gateway 网络边界 fail-closed | `core/config.py:228-280`；`gateway_client.py:39-81`；本轮非敏感 Settings presence 核验 |

@@ -5,30 +5,36 @@
 - 最后更新：2026-08-26
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前分支：`codex/prompt-runtime-ai-gateway`
-- 当前 HEAD：`325dd8e42d596e0b28a22ece3806da001ec4f2a6`（已推送至 `origin/codex/prompt-runtime-ai-gateway`）。
-- 当前目标：先完成 P0 Database Baseline，再继续 P1 最小代码切片（允许已资格化的 Provider-enabled Config 冻结为 Task）和真实 Worker 链资格化。
+- 当前 HEAD：`6057ec950cf329e34a3da308f07a928f7dabb086`（已推送至 `origin/codex/prompt-runtime-ai-gateway`）。
+- 当前目标：在 P0 数据库边界未授权变更的前提下，完成 P1 的真实 Worker 配置差距确认；随后只能在明确数据库方案和真实 Worker 配置就绪后取得 E1 同一冻结任务证据。
 - 当前状态：`MS_IMAGE_CORE_AI_NETWORK_CHAIN_PASSED / FULL_WORKER_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
 
-## 本轮只读代码与 P0 审计事实
+## 本轮已提交的最小业务修正
 
-- 当前工作树干净；`325dd8e` 已提交并推送，`git push origin HEAD` 返回 `Everything up-to-date`。本轮没有业务源码改动、没有数据库写入或迁移。
-- AI/Prompt 请求链直接使用 `GatewayClient` 和 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`，保持与 `ms-ai-fast` 同语义；旧 `EnvironmentReferenceSecretResolver`、`OpenAICompatibleGatewayAdapter`、`OSSEncryptedResponseStore`、`GatewayRuntimeDependencies` 及 `AI_GATEWAY_*` / `MS_IMAGE_AI_SECRET_*` 生产引用扫描均无残留。
-- 代码仍存在未被运行路径使用的 legacy `response_object_ref_json` 模型/DAL/未部署迁移字段：`models/ai_call.py`、`models/ai_call_attempt.py`、`crud/ai_call.py`、`crud/ai_call_attempt.py`、`20260824_02...`。它与“Provider 原始响应不存 OSS/对象引用”的当前合同不一致；删除或兼容处理必须在 P0 确定数据库方案后按授权处理，当前未改动。
-- `TaskService._validate_assignable_config()` 仍将 `capability_manifest.provider_disabled is True` 作为 Task 冻结前提；而 `AIRequestService` 网络路径要求 `provider_enabled + qualification_status=qualified`。这是下一最小业务代码切片，但严格顺序要求先完成 P0。
-- P0 只读连接 `ms_image` 成功：MySQL `9.3.0`、45 张物理表、无 `alembic_version`；目标 Runtime 表中仅旧的 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool` 同名存在。
-- 这些同名表含既有数据且结构与当前 ORM/迁移不兼容：`ai_prompt_template` 375 行、`ai_api_connection` 96 行、`ai_model_pool` 19 行、`session_record` 5772 行；`ai_config_record`、Task/Stage/Outbox/Call/Attempt/Report 等目标表不存在。现有 `20260824_01` 会直接 `create_table` 同名控制面表，因此不得直接对 `ms_image` 执行 `alembic upgrade head`。
+- 提交并推送 `6057ec9 fix(xray): admit qualified provider configs`，只改 `apps/backend/services/runtime/service/task_service.py` 与既有 `apps/backend/tests/test_ai_gateway_attempt_contracts.py`。
+- v2 Task Admission 现规范化冻结的 `gateway_profile_json`，并要求 `capability_manifest.provider_disabled == not gateway_profile.provider_enabled` 与 `gateway_profile_sha256` 匹配。因而已资格化、启用 Provider 的 v2 Config 能被安全冻结；profile/capability 不一致、未资格化 Provider 或无效 profile 都会在 Task 创建前拒绝。
+- v1 provider-disabled 兼容链保持不变；未改 Task Snapshot 字段、Outbox、Worker、unknown、重试、医学状态、模型、表或迁移。
+
+## P0/P1 当前事实与阻断
+
+- P0 只读连接 `ms_image`：MySQL `9.3.0`、45 张物理表、无 `alembic_version`。有数据的 `ai_prompt_template`（375）、`ai_api_connection`（96）、`ai_model_pool`（19）、`session_record`（5772）同名但与 Runtime ORM/迁移不兼容；`ai_config_record`、Task/Stage/Outbox/Call/Attempt/Report 等目标表不存在。当前禁止在旧库执行 `alembic upgrade head`。
+- AI/Prompt 运行代码与 `ms-ai-fast` 同语义：`GatewayClient` 仅使用 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`；旧 Secret Resolver、Gateway Adapter、response store、`AI_GATEWAY_*` 和 `MS_IMAGE_AI_SECRET_*` 生产链均已删除。Worker 只从 Task Snapshot 读取冻结 Prompt/Config，不读 Nacos latest。
+- 当前本地非敏感 Settings 核验：`Settings.Config.env_file` 指向 `.env-01`；`.env` 与 `.env-01` 均没有非空 `AI_PLATFORM_OPENAI_BASE_URL` / `AI_PLATFORM_API_KEY`，本进程 `settings.ai_platform_configured=False`。OSS Settings 为 ready、Broker enabled、MySQL DB configured，但这不构成 Worker 可调用 Platform 的证据。不得恢复旧 `AI_GATEWAY_*` 配置；应将上述两个现有 ms-ai-fast 配置安全注入真实 imaging Worker 启动环境。
+- OSS signer 已限制 profile/object/version/hash/size/MIME、HTTPS host allowlist 和 30–900 秒 TTL；隔离对象的本机 PUT/HEAD/Worker GET/signed GET/cleanup 曾通过。Provider 外部读取短签名 URL 仍为 `UNKNOWN`。
+- unknown Attempt 不盲目重发：默认 `UnsupportedProviderAttemptLookup` 仅重排原请求对账；尚缺真实 Platform/Provider 原请求查询合同和有界终态策略。
+- 未被运行路径写入的 legacy `response_object_ref_json` 仍在 AI Call/Attempt 模型、DAL 和未部署 migration 中；删除/兼容必须等待 P0 数据库方案和明确迁移授权。
 
 ## 本轮验证
 
-- `python -m pytest apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_models.py -q`：`81 passed, 19 warnings`。
-- 相关 AI、Control Plane、Runtime、Worker 目录 `compileall`：`COMPILE_OK`。
-- `git show --check HEAD`、`git diff --check`：通过；工作树干净。
-- 未运行真实 MySQL Schema 迁移、Outbox、Broker、正式 Worker、Provider 外网 signed GET 或医学验证。
+- `python -m ruff check apps/backend/services/runtime/service/task_service.py apps/backend/tests/test_ai_gateway_attempt_contracts.py`：PASS。
+- `python -m pytest apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_models.py -q`：`86 passed, 19 warnings`。
+- `python -m compileall -q apps/backend/services/runtime/service/task_service.py apps/backend/tests/test_ai_gateway_attempt_contracts.py`：PASS。
+- `git diff --check`、cached diff check、commit、`git push origin HEAD`：PASS；当前业务工作树干净。
+- 未运行 MySQL Schema migration、真实 Outbox/Broker/Celery/Worker、Provider 外网 signed GET、同一冻结 Task 全链或医学验证。
 
-## 下一动作、阻断与边界
+## 下一动作与边界
 
-- P0 的唯一阻断是数据库边界选择：必须由用户明确选择新 Runtime 数据库，或授权为旧 `ms_image` 设计经审阅的兼容/迁移方案；在此之前不迁移、不建库、不改表。
-- P0 通过后，下一最小代码切片只改 `apps/backend/services/runtime/service/task_service.py` 和现有 `apps/backend/tests/test_ai_gateway_attempt_contracts.py`；不新增表、字段、迁移、配置或 Service。
-- 之后才用同一冻结 Task 获取 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report 的非敏感证据。
-- unknown 仍不能盲目重发；当前默认 Provider lookup 是 unsupported，真实 Provider 原请求查询合同尚未确认。
-- Python 不得改写 `normal / abnormal / review_required / non_diagnostic`；不恢复 `file_asset`、不删除 v1 兼容链、Worker 不读取 Nacos latest。
+1. 用户/部署环境将 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY` 成对注入实际 imaging Worker 进程（不写入数据库、Nacos、Task Snapshot、日志或交接材料）；然后只读确认 Worker `Settings` 的 presence，不输出值。
+2. 用户明确选择 P0：独立 Runtime 数据库，或旧 `ms_image` 的备份/兼容/baseline/stamp/rollback 方案并授权迁移。此前不建库、不迁移、不改表。
+3. 两项前提具备后，以同一冻结 Task 采集 MySQL -> Outbox -> Broker -> Worker -> OSS -> ms-ai-platform -> Provider -> Attempt -> Stage -> Report 的脱敏证据；unknown、取消、重复投递和迟到结果另行验证。
+4. 不进入 M1/Q3/Q4/M2/R1/R2/R3；Python 不得改写 `normal / abnormal / review_required / non_diagnostic`，不恢复 `file_asset`，不删除 v1 链。

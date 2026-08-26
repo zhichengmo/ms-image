@@ -8,7 +8,7 @@
 - 2026-08-26 P1 synthetic probe 已证明当前进程可对隔离对象进行 AES256 写入、HEAD、直读 GET、同机 signed GET 与 cleanup；但 Provider 外部网络是否能访问相同 signed URL 仍为 `UNKNOWN`，不能把本机读取误报为 Provider/Worker 完整链资格化。
 - `ms_image` 当前无 MySQL foreign key 和 trigger；若错误删除旧 Prompt / AI 表，不会被数据库阻止。`ai_prompt_template`、`ai_api_connection`、`ai_model_pool` 仍被当前控制面映射，`session_record` 仍被当前 Session 模型映射；删除前必须先移除调用面并确认备份/归档。
 - `ms_image_eval（评测库）` 当前不可连接/不存在，Evaluation Plane（评测面）不能运行。
-- AI 请求运行合同已改为与 `ms-ai-fast` 一致的 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY -> GatewayClient` 直连；旧 `AI_GATEWAY_*` 开关、环境引用 Secret Resolver 和 Provider 原始响应 OSS response store 已从生产链删除。真实 Worker 启动进程是否加载这两个 Platform 配置仍未通过完整任务链验证，不能仅凭 `.env` 存在或交互进程调用判定合格。
+- AI 请求运行合同已改为与 `ms-ai-fast` 一致的 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY -> GatewayClient` 直连；旧 `AI_GATEWAY_*` 开关、环境引用 Secret Resolver 和 Provider 原始响应 OSS response store 已从生产链删除。本机 2026-08-26 非敏感 Settings 核验显示 `.env` 与实际读取的 `.env-01` 均无此成对非空配置，`settings.ai_platform_configured=False`；真实 imaging Worker 未安全注入这两个现有 Platform 配置前，不能执行或宣称 Worker Platform 资格化。
 - Runtime RS256 公钥/Secret 与 Admin HS256 Secret 均未配置；保护接口和管理控制面不能被视为可用。旧项目公钥只有在确认新服务继续信任相同 issuer/audience 后才能迁移。
 - `secret_ref` 仍存在于既有 Control Plane 模型、Schema 与 Config 哈希输入中，但不再参与 Worker Provider 鉴权；彻底删除需要模型/字段/迁移授权。当前风险是遗留元数据可能误导后续实现，必须以 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY` 为唯一运行凭据合同。
 - 当前 OpenAI-compatible Provider（OpenAI 兼容模型提供方）没有已确认的原请求查询 API；`UnsupportedProviderAttemptLookup（不支持查询的安全实现）` 会重排 unknown Attempt（未知尝试），不会盲目重发。真实查询合同确认前，unknown 可能长期待对账。

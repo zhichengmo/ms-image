@@ -54,7 +54,7 @@
 - [ ] 明确 Runtime/Admin JWT（运行时/管理端令牌）信任和密钥生命周期；完成保护 API 与 Control Plane 鉴权配置。
 - [ ] 保持数据库 Connection/Model Pool/Prompt/AI Config 的冻结与审计事实；`secret_ref` 仅作为遗留兼容元数据，不再配置 `MS_IMAGE_AI_SECRET_*` 或进入 Worker 鉴权链。字段级删除等待明确迁移授权。
 - [ ] 配置并接线资格化 Artifact（证据产物）签名键；确认签名键格式、轮换和调用入口，不能只在 `.env` 声明后就视为闭环。
-- [ ] 在真实 Worker 启动环境确认 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY` 被加载，并验证 OSS 影像短签名、MySQL、RabbitMQ/Celery、Provider、Attempt/Stage/Report 同一冻结任务全链。
+- [ ] 将 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY` 成对安全注入真实 imaging Worker 启动环境（不恢复 `AI_GATEWAY_*`）；本机 2026-08-26 Settings 核验为 `ai_platform_configured=False`。注入后只读确认 presence，再验证 OSS 影像短签名、MySQL、RabbitMQ/Celery、Provider、Attempt/Stage/Report 的同一冻结任务全链。
 - [ ] 跑通 Outbox（事务发件箱）→ Worker（工作进程）→ OSS（对象存储）→ Provider（模型提供方）→ Attempt/Stage finalize（物理尝试/阶段终态化）→ DecisionFinalization（结果定稿）→ Report（报告）。
 - [ ] 验证重复消息、unknown Attempt、事务边界、冻结 Config（配置）和完整 Artifact（证据产物）。
 
