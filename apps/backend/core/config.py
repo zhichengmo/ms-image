@@ -281,7 +281,9 @@ class Settings(BaseSettings):
 
     class Config:
         case_sensitive = True
-        env_file = '.env-01'
+        # Keep the worker's file-backed configuration source aligned with
+        # ms-ai-fast. Process environment variables still take precedence.
+        env_file = '.env'
         env_file_encoding = 'utf-8'
         extra = 'ignore'
 

@@ -55,7 +55,6 @@ from apps.backend.services.ai_control.service.prompt_template_service import (
     PromptTemplateService,
 )
 from apps.backend.services.ai_control.service.prompt_source import (
-    PromptSourceError,
     PromptSourceUnsafeError,
     build_source_receipt,
     nacos_data_id,
@@ -629,6 +628,19 @@ def test_runtime_gate_requires_ms_ai_fast_platform_configuration(monkeypatch) ->
     assert AIRequestService._runtime_gate_allows() is True
     monkeypatch.setattr(settings, "AI_PLATFORM_API_KEY", "")
     assert AIRequestService._runtime_gate_allows() is False
+
+
+def test_default_environment_file_and_template_match_ms_ai_fast_platform_contract() -> None:
+    assert Settings.Config.env_file == ".env"
+
+    env_example = (Path(__file__).resolve().parents[3] / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    assert "AI_PLATFORM_OPENAI_BASE_URL=" in env_example
+    assert "AI_PLATFORM_API_KEY=" in env_example
+    assert "AI_PLATFORM_TIMEOUT_SECONDS=120" in env_example
+    assert "GEMINI_API_KEYS=" not in env_example
+    assert "AI_GATEWAY_" not in env_example
 
 
 def test_prompt_nacos_settings_accept_ms_ai_fast_environment_contract(
