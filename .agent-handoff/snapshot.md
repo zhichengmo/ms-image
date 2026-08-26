@@ -5,37 +5,30 @@
 - 最后更新：2026-08-26
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前分支：`codex/prompt-runtime-ai-gateway`
-- 当前 HEAD：`492a249c98175bf818ce092451585db766d73e76`
-- 当前目标：保持完整 XRay（X 光）阶段顺序不变，同时将 `ms-image` 的 AI 请求和 Prompt/Nacos 链严格收敛到 `/Users/mozhicheng/workspace/code/cy-code/ms-ai-fast` 的直接运行合同，删除偏离参考链的 Secret Resolver、Provider 原始响应加密存储和 Gateway 适配包装。
+- 当前 HEAD：`325dd8e42d596e0b28a22ece3806da001ec4f2a6`（已推送至 `origin/codex/prompt-runtime-ai-gateway`）。
+- 当前目标：先完成 P0 Database Baseline，再继续 P1 最小代码切片（允许已资格化的 Provider-enabled Config 冻结为 Task）和真实 Worker 链资格化。
 - 当前状态：`MS_IMAGE_CORE_AI_NETWORK_CHAIN_PASSED / FULL_WORKER_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
 
-## 当前代码事实
+## 本轮只读代码与 P0 审计事实
 
-- AI 请求直接使用 `apps/backend/core/ai/gateway_client.py:GatewayClient`；运行凭据只来自 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY`，与 `ms-ai-fast` 同语义。正式 Worker 不再解析冻结 `secret_ref`，也不存在 `MS_IMAGE_AI_SECRET_*` 或 `env-secret://...` 运行链。
-- Prompt/Nacos 使用共享 `NACOS_*` 配置；请求参数为 `namespaceId/promptKey/version/label`。Prompt 正文保持 Nacos 原文，渲染采用 Jinja `StrictUndefined`、`tojson` 和 `$variable`，允许冻结合同中声明的任意合法变量名。
-- Gateway messages 固定为单条 `user` message，内容是完整渲染后的 Nacos Prompt；遗留 `message_contract_json` 字段仅为现有模型/数据库兼容元数据，不再改变实际 Provider messages。
-- Provider 原始响应不再写入自定义 OSS response store；数据库保留 Provider Request ID、规范化结构化结果、响应 SHA 和 Attempt 审计事实，不保存原始响应正文或 response object reference。
-- OSS signer 仅用于向 Provider 提供受限制的影像短期读取 URL。unknown Attempt 仍通过 `ProviderAttemptLookup` 边界处理；默认 `UnsupportedProviderAttemptLookup` 禁止盲目重发，但尚无真实 Provider 原请求查询能力。
-- 已删除 `OpenAICompatibleGatewayAdapter`、`EnvironmentReferenceSecretResolver`、`OSSEncryptedResponseStore`、`GatewayRuntimeDependencies` 及其相关文件/生产引用；生产代码扫描无残留。
+- 当前工作树干净；`325dd8e` 已提交并推送，`git push origin HEAD` 返回 `Everything up-to-date`。本轮没有业务源码改动、没有数据库写入或迁移。
+- AI/Prompt 请求链直接使用 `GatewayClient` 和 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`，保持与 `ms-ai-fast` 同语义；旧 `EnvironmentReferenceSecretResolver`、`OpenAICompatibleGatewayAdapter`、`OSSEncryptedResponseStore`、`GatewayRuntimeDependencies` 及 `AI_GATEWAY_*` / `MS_IMAGE_AI_SECRET_*` 生产引用扫描均无残留。
+- 代码仍存在未被运行路径使用的 legacy `response_object_ref_json` 模型/DAL/未部署迁移字段：`models/ai_call.py`、`models/ai_call_attempt.py`、`crud/ai_call.py`、`crud/ai_call_attempt.py`、`20260824_02...`。它与“Provider 原始响应不存 OSS/对象引用”的当前合同不一致；删除或兼容处理必须在 P0 确定数据库方案后按授权处理，当前未改动。
+- `TaskService._validate_assignable_config()` 仍将 `capability_manifest.provider_disabled is True` 作为 Task 冻结前提；而 `AIRequestService` 网络路径要求 `provider_enabled + qualification_status=qualified`。这是下一最小业务代码切片，但严格顺序要求先完成 P0。
+- P0 只读连接 `ms_image` 成功：MySQL `9.3.0`、45 张物理表、无 `alembic_version`；目标 Runtime 表中仅旧的 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool` 同名存在。
+- 这些同名表含既有数据且结构与当前 ORM/迁移不兼容：`ai_prompt_template` 375 行、`ai_api_connection` 96 行、`ai_model_pool` 19 行、`session_record` 5772 行；`ai_config_record`、Task/Stage/Outbox/Call/Attempt/Report 等目标表不存在。现有 `20260824_01` 会直接 `create_table` 同名控制面表，因此不得直接对 `ms_image` 执行 `alembic upgrade head`。
 
-## 本切片验证
+## 本轮验证
 
 - `python -m pytest apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_models.py -q`：`81 passed, 19 warnings`。
-- 相关 AI、Control Plane Service、Runtime Service 和 Worker 目录 `compileall`：`COMPILE_OK`。
-- 旧 Gateway/Secret/Response Store 配置与类名生产代码扫描：无输出；Provider 原始响应存储路径扫描：无输出；`git diff --check`：`DIFF_CHECK_OK`。
-- 本轮未执行真实 MySQL、OSS、Broker、Nacos、Provider 或医学验证；上述离线验证不能升级为完整 Worker Runtime 或医学放行。
+- 相关 AI、Control Plane、Runtime、Worker 目录 `compileall`：`COMPILE_OK`。
+- `git show --check HEAD`、`git diff --check`：通过；工作树干净。
+- 未运行真实 MySQL Schema 迁移、Outbox、Broker、正式 Worker、Provider 外网 signed GET 或医学验证。
 
 ## 下一动作、阻断与边界
 
-- 下一最小动作仍是 P1 Worker Runtime Qualification：用同一冻结 Task 取得 MySQL -> Outbox -> Broker -> Worker -> OSS image signing -> `GatewayClient` -> Provider -> Attempt -> Stage -> Report 的真实非敏感证据。
-- 真实 Worker 启动进程是否加载 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY` 尚未在完整任务链中验证；不得用交互进程或单次核心 AI 请求替代该证据。
-- `secret_ref` 仍存在于既有 Control Plane 模型、Schema 和 Config 哈希输入中，但不参与 Worker Provider 鉴权。彻底删除该字段需要表/字段/迁移授权，本切片不执行。
-- Provider 原请求查询仍为 `UnsupportedProviderAttemptLookup`；unknown 不盲发，但可能长期等待对账。
-- 数据库 baseline/migration、建表、改表、删表和重命名均未获本切片授权；不得执行。
-- Python 不得改写 `normal / abnormal / review_required / non_diagnostic` 医学结论；`MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO` 保持不变。
-
-## 当前活动文件
-
-- AI/Prompt 主链：`apps/backend/core/ai/gateway_client.py`、`apps/backend/core/ai/prompting/renderer.py`、`apps/backend/core/ai/prompting/message_contract.py`、`apps/backend/services/ai_control/service/prompt_source.py`、`apps/backend/core/config.py`。
-- Runtime/Worker：`apps/backend/services/runtime/service/ai_request_service.py`、`apps/backend/services/runtime/service/ai_attempt_reconcile_service.py`、`apps/backend/workers/imaging_worker/stage_execution.py`、`apps/backend/workers/imaging_worker/ai_attempt_reconcile.py`、`apps/backend/workers/imaging_worker/reconcile.py`、`apps/backend/workers/imaging_worker/celery_app.py`。
-- 现有测试：`apps/backend/tests/test_ai_prompt_control_plane_contracts.py`、`apps/backend/tests/test_ai_gateway_attempt_contracts.py`、`apps/backend/tests/test_ai_prompt_control_plane_models.py`。
+- P0 的唯一阻断是数据库边界选择：必须由用户明确选择新 Runtime 数据库，或授权为旧 `ms_image` 设计经审阅的兼容/迁移方案；在此之前不迁移、不建库、不改表。
+- P0 通过后，下一最小代码切片只改 `apps/backend/services/runtime/service/task_service.py` 和现有 `apps/backend/tests/test_ai_gateway_attempt_contracts.py`；不新增表、字段、迁移、配置或 Service。
+- 之后才用同一冻结 Task 获取 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report 的非敏感证据。
+- unknown 仍不能盲目重发；当前默认 Provider lookup 是 unsupported，真实 Provider 原请求查询合同尚未确认。
+- Python 不得改写 `normal / abnormal / review_required / non_diagnostic`；不恢复 `file_asset`、不删除 v1 兼容链、Worker 不读取 Nacos latest。

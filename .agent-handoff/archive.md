@@ -100,3 +100,6 @@
 - [work-log-20260826T021827462973Z.md](archive/work-log-20260826T021827462973Z.md): work log exceeded 64 KiB or 30 dated sections
 - [work-log-20260826T034647987386Z.md](archive/work-log-20260826T034647987386Z.md): work log exceeded 64 KiB or 30 dated sections
 - [validation-20260826T034647989149Z.md](archive/validation-20260826T034647989149Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260826T052855322286Z.md](archive/work-log-20260826T052855322286Z.md): work log exceeded 64 KiB or 30 dated sections
+
+- [validation-20260826T053000000000Z.md](archive/validation-20260826T053000000000Z.md): semantic compaction of validation history to satisfy current-state size limit

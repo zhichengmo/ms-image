@@ -1,12 +1,5 @@
 # 当前工作日志
 
-## 2026-08-24 — `$var` 占位符支持
-
-- 问题定位：`prompt_source.normalize_imported_prompt` 一律拒绝 `$...`；`PromptRenderer` 只认 `{{ NAME }}`。`$var` 本身非风险，风险是 Jinja 语句/过滤器/函数/未声明变量。
-- `PromptRenderer` 增加 `$NAME`（大写安全变量）作为 `{{ NAME }}` 的等价占位符，替换后不再误判嵌入 JSON 的 `}}`；对 `$base_info` 这类非白名单/小写变量抛 `prompt_dollar_placeholder_unsupported`，对未声明 `$NAME` 抛 `prompt_placeholder_undeclared`；`$100` 等数字仍作字面量。
-- `prompt_source.normalize_imported_prompt` 改为接受 `$SAFE_*`，仍拒绝 `$base_info` 等未映射业务变量。
-- 测试从 49 项到 51 项；用 `$SAFE_*` 跑通「渲染 → prompt-message-contract.v1 → Gateway JSON → accepted 结果」链路。
-
 ## 2026-08-24 — 业务 `$var` 别名与 JSON 示例兼容
 
 - 新增 `PROMPT_PLACEHOLDER_ALIASES`（`base_info/pet_profile/patient_info/study_context/question/content/case_text → SAFE_STUDY_CONTEXT_JSON`；`previous_answer/past_history/primary_result → PRIMARY_RESULT_JSON`；`output_schema/schema → OUTPUT_SCHEMA_JSON`），导入时把 `$base_info`/`{{ base_info }}` 归一化为 `{{ SAFE_* }}`，运行时仍只看到 SAFE_*。
@@ -252,3 +245,11 @@
 - 更新既有 Prompt/Gateway 测试以匹配参考链；没有新增独立测试脚本、迁移脚本、表、字段、Service 或微服务。
 - 生产扫描确认旧类名、`AI_GATEWAY_*`、`AI_PROMPT_NACOS_*`、`MS_IMAGE_AI_SECRET_*`、`env-secret://`、`SAFE_PROMPT_VARIABLES` 和 Provider 原始响应存储路径无残留。
 - 未运行真实 MySQL、OSS、Broker、Nacos、Provider、完整 Worker Runtime 或医学验证。
+
+## 2026-08-26 — 已核验提交与 P0 只读数据库基线，等待数据库边界决定
+
+- 核验分支 `codex/prompt-runtime-ai-gateway` 的 `325dd8e42d596e0b28a22ece3806da001ec4f2a6` 已与 `origin/codex/prompt-runtime-ai-gateway` 同步；工作树干净，额外 `git push origin HEAD` 为 `Everything up-to-date`。
+- 离线代码验证：三个现有 AI 合同测试文件 `81 passed, 19 warnings`；相关目录 `compileall` 通过；`git show --check HEAD`、`git diff --check` 通过；已删除 Gateway/Secret/Response Store 生产标识扫描无结果。
+- P0 只读连接真实 `ms_image`：45 表、无 `alembic_version`。`ai_prompt_template`（375 行）、`ai_api_connection`（96 行）、`ai_model_pool`（19 行）和 `session_record`（5772 行）已存在且与当前 Runtime ORM/迁移定义不兼容；其他目标 Runtime 表缺失。
+- 当前 `20260824_01` 会新建上述同名控制面表，禁止直接对该旧库执行 `alembic upgrade head`。未执行任何 DDL/DML、迁移或外部 Worker/Provider 测试。
+- 代码审计同时发现未使用的 legacy `response_object_ref_json` 仍保留于 AI Call/Attempt 模型、DAL 和未部署迁移；当前不改动，待 P0 数据库方案和授权后统一处理。

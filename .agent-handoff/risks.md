@@ -71,3 +71,5 @@
 - 新增 Nacos Prompt `ms-image.xray.ai-gateway-e2e.default.zh-CN@1.0.0` 是非医疗 E2E smoke；不得导入为 Primary Prompt 或作为任何医学准确率依据。
 - 历史核心网络烟测曾使用临时 Secret 映射；该实现已被 2026-08-26 用户决策覆盖。当前生产代码只从 Worker 进程 Settings 读取 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY`，完整 Worker Runtime 仍须证明实际启动器加载配置以及冻结任务全链事实。
 - Platform 已至少一次返回满足严格 Schema 的结果；模型偶发不遵从结构化输出时，Gateway 的 fail-closed Schema 拒绝仍是预期正确行为，不能用 Python 修补医学/结构化结果。
+- 2026-08-26 P0 只读审计进一步确认：`ms_image` 中已存在且有数据的 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record` 与当前 Runtime ORM/`20260824_01` 的同名表定义不兼容；该 migration 会直接 create 同名表。未先确定新 Runtime 数据库或获审阅的兼容迁移，直接 `alembic upgrade head` 必然高风险，当前禁止执行。
+- 2026-08-26 代码审计确认 Provider 原始响应 OSS store 的运行调用已删除，但 `response_object_ref_json` 仍在 AI Call/Attempt Model、DAL allowed fields 和未部署 migration 中作为遗留声明。它当前未被 Service/Worker 写入，却可能误导未来部署；应在 P0 数据库方案和字段迁移授权后统一消除或明确兼容。

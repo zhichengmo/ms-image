@@ -325,3 +325,10 @@
 | Prompt/Nacos 使用共享 `NACOS_*`、原始 Prompt 正文、`StrictUndefined/tojson/$variable` 与单条 user message | 避免 `SAFE_*` 别名和 developer/user 二次拆分形成第二套 Prompt 语言，保持参考链语义 | `prompt_source.py`、`renderer.py`、`message_contract.py`；Prompt 合同测试 |
 | `secret_ref` 暂留为 Control Plane/数据库兼容元数据，但不得进入 Worker Provider 鉴权 | 删除字段需要模型、Schema 和迁移授权；当前用户要求的是删除运行链，不允许擅自改表 | `ai_api_connection.py`、`ai_control.py`、`config_compiler.py`；当前无迁移授权 |
 | 本决策覆盖同日“Gateway 启用后固定 Secret Resolver + AES256 response store”的旧决策；旧记录保留为历史，不再代表当前生产代码 | 防止后续会话按已删除实现继续扩展；以最新用户明确决定和当前源码为准 | 本节；`.agent-handoff/snapshot.md`；81 个定向测试通过 |
+
+## 2026-08-26 — P0 阻断：禁止直接将当前 Alembic 链应用到旧 `ms_image`
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 在用户明确选择数据库边界并授权前，不对 `ms_image` 执行 `alembic upgrade head` | 真实库无 `alembic_version`；现有 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record` 均已存在且有数据，结构也不符合 Runtime ORM；`20260824_01` 会直接 `create_table` 同名控制面表 | 2026-08-26 只读 `information_schema` 审计；`20260824_01_ai_prompt_control_plane_phase_a_c.py:112,236,263,289` |
+| 将 `response_object_ref_json` 作为待 P0 处理的遗留源代码合同，而不是现有运行路径 | 当前 Service/Worker 没有写入该字段，但 Model、DAL 和未部署 migration 仍声明“原始响应对象引用”，与用户已决定的“不存原始 Provider 响应 OSS 对象”不一致；直接删除需要与数据库兼容计划一起审阅 | `models/ai_call.py:61`、`models/ai_call_attempt.py:86-89`、`crud/ai_call.py:62`、`crud/ai_call_attempt.py:79`、`20260824_02...:269` |
