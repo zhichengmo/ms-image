@@ -365,6 +365,181 @@ def test_gateway_profile_normalization_is_stable() -> None:
     assert normalize_gateway_profile(dict(disabled)) == disabled
 
 
+def _frozen_task_config(
+    *,
+    gateway_profile: dict[str, Any] | None,
+    capability_provider_disabled: bool,
+    config_contract_version: str = "ai-config.v2",
+):
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.core.pipeline import build_default_registry, compile_profile_contract
+
+    registry = build_default_registry()
+    profile_key = "xray_primary_v1"
+    _, profile_sha = compile_profile_contract(profile_key, registry)
+    capability_manifest = {"provider_disabled": capability_provider_disabled}
+    if gateway_profile is not None:
+        normalized = normalize_gateway_profile(gateway_profile)
+        capability_manifest["gateway_profile_sha256"] = sha256_json(normalized)
+    return SimpleNamespace(
+        status="active",
+        config_contract_version=config_contract_version,
+        profile_key=profile_key,
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256=profile_sha,
+        stage_registry_contract_version=registry.CONTRACT_VERSION,
+        compiled_pipeline_json={"profile_key": profile_key},
+        capability_manifest_json=capability_manifest,
+        gateway_profile_json=gateway_profile,
+        provider_plan_json={"enabled": False},
+    )
+
+
+@pytest.mark.parametrize(
+    ("gateway_profile", "provider_disabled"),
+    [
+        (
+            {
+                "contract_version": "ai-gateway-profile.v1",
+                "adapter_key": "openai-compatible",
+                "provider_enabled": False,
+                "qualification_status": "disabled",
+                "streaming_mode": "json",
+                "image_url_ttl_seconds": 300,
+                "allowed_actual_models": [],
+            },
+            True,
+        ),
+        (
+            {
+                "contract_version": "ai-gateway-profile.v1",
+                "adapter_key": "openai-compatible",
+                "provider_enabled": True,
+                "qualification_status": "qualified",
+                "streaming_mode": "json",
+                "image_url_ttl_seconds": 300,
+                "allowed_actual_models": ["provider-model"],
+            },
+            False,
+        ),
+    ],
+)
+def test_task_assignment_accepts_consistent_frozen_v2_gateway_profile(
+    gateway_profile: dict[str, Any], provider_disabled: bool
+) -> None:
+    from apps.backend.core.pipeline import build_default_registry
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    service = object.__new__(TaskService)
+    service.registry = build_default_registry()
+    config = _frozen_task_config(
+        gateway_profile=gateway_profile,
+        capability_provider_disabled=provider_disabled,
+    )
+
+    profile_key, _, _ = service._validate_assignable_config(
+        config=config,
+        allowed_profiles=frozenset({"xray_primary_v1"}),
+    )
+
+    assert profile_key == "xray_primary_v1"
+
+
+def test_task_assignment_rejects_v2_gateway_capability_mismatch() -> None:
+    from apps.backend.core.pipeline import build_default_registry
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    service = object.__new__(TaskService)
+    service.registry = build_default_registry()
+    config = _frozen_task_config(
+        gateway_profile={
+            "contract_version": "ai-gateway-profile.v1",
+            "adapter_key": "openai-compatible",
+            "provider_enabled": True,
+            "qualification_status": "qualified",
+            "streaming_mode": "json",
+            "image_url_ttl_seconds": 300,
+            "allowed_actual_models": ["provider-model"],
+        },
+        capability_provider_disabled=True,
+    )
+
+    with pytest.raises(
+        TaskStateConflictError, match="task_config_gateway_profile_mismatch"
+    ):
+        service._validate_assignable_config(
+            config=config,
+            allowed_profiles=frozenset({"xray_primary_v1"}),
+        )
+
+
+def test_task_assignment_rejects_unqualified_v2_provider_profile() -> None:
+    from apps.backend.core.pipeline import build_default_registry
+    from apps.backend.services.runtime.service import task_service
+
+    service = object.__new__(task_service.TaskService)
+    service.registry = build_default_registry()
+    config = _frozen_task_config(
+        gateway_profile={
+            "contract_version": "ai-gateway-profile.v1",
+            "adapter_key": "openai-compatible",
+            "provider_enabled": False,
+            "qualification_status": "disabled",
+            "streaming_mode": "json",
+            "image_url_ttl_seconds": 300,
+            "allowed_actual_models": [],
+        },
+        capability_provider_disabled=True,
+    )
+    config.gateway_profile_json = {
+        "contract_version": "ai-gateway-profile.v1",
+        "adapter_key": "openai-compatible",
+        "provider_enabled": True,
+        "qualification_status": "disabled",
+        "streaming_mode": "json",
+        "image_url_ttl_seconds": 300,
+        "allowed_actual_models": ["provider-model"],
+    }
+
+    with pytest.raises(
+        task_service.TaskStateConflictError,
+        match="gateway_profile_qualification_required",
+    ):
+        service._validate_assignable_config(
+            config=config,
+            allowed_profiles=frozenset({"xray_primary_v1"}),
+        )
+
+
+def test_task_assignment_preserves_v1_provider_disabled_compatibility() -> None:
+    from apps.backend.core.pipeline import build_default_registry
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    service = object.__new__(TaskService)
+    service.registry = build_default_registry()
+    config = _frozen_task_config(
+        gateway_profile=None,
+        capability_provider_disabled=True,
+        config_contract_version="ai-config.v1",
+    )
+
+    profile_key, _, _ = service._validate_assignable_config(
+        config=config,
+        allowed_profiles=frozenset({"xray_primary_v1"}),
+    )
+
+    assert profile_key == "xray_primary_v1"
+
+
 def test_gateway_profile_rejects_ttl_above_oss_signer_limit() -> None:
     profile = normalize_gateway_profile(None)
     profile["image_url_ttl_seconds"] = 901

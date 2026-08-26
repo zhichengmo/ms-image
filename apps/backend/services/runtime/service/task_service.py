@@ -10,6 +10,11 @@ from apps.backend.core.ai.config_contract import (
     is_v2_config,
     legacy_activation_slot,
 )
+from apps.backend.core.ai.gateway.contracts import (
+    GatewayContractError,
+    normalize_gateway_profile,
+)
+from apps.backend.core.ai.prompting.contracts import sha256_json
 from apps.backend.core.contexts import CallerContext
 from apps.backend.core.pipeline import (
     ZERO_MODEL_PROFILE,
@@ -284,14 +289,21 @@ class TaskService:
     ) -> tuple[str, dict, str]:
         """Validate only the active Config facts required before Task freezing."""
         capability_manifest = config.capability_manifest_json
-        if (
-            config.status != "active"
-            or not isinstance(capability_manifest, dict)
-            or capability_manifest.get("provider_disabled") is not True
-        ):
+        if config.status != "active" or not isinstance(capability_manifest, dict):
             raise TaskStateConflictError("task_config_invalid")
 
         if is_v2_config(config):
+            try:
+                gateway_profile = normalize_gateway_profile(config.gateway_profile_json)
+            except GatewayContractError as exc:
+                raise TaskStateConflictError(str(exc)) from exc
+            if (
+                capability_manifest.get("provider_disabled")
+                is not (not gateway_profile["provider_enabled"])
+                or capability_manifest.get("gateway_profile_sha256")
+                != sha256_json(gateway_profile)
+            ):
+                raise TaskStateConflictError("task_config_gateway_profile_mismatch")
             profile_key = config.profile_key
             required_snapshot_fields = (
                 config.config_sha256,
@@ -314,7 +326,8 @@ class TaskService:
         else:
             provider_plan = config.provider_plan_json
             if (
-                not isinstance(provider_plan, dict)
+                capability_manifest.get("provider_disabled") is not True
+                or not isinstance(provider_plan, dict)
                 or provider_plan.get("enabled") is not False
             ):
                 raise TaskStateConflictError("task_config_invalid")
