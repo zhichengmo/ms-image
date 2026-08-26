@@ -4,13 +4,13 @@
 
 状态：`CURRENT`
 
-日期：2026-08-18
+日期：2026-08-19
 
 目标服务：`ms-image`
 
 目标 MySQL 数据库：`ms_image`
 
-> 本文是开发前的当前唯一集成设计，不代表数据库已经创建、旧数据已经迁移或代码已经完成。
+> 本文是当前唯一集成设计与实施合同。P1（影像接入底座）代码已实现，但数据库尚未迁移且未做真实运行演练；P2+ 目标代码尚未完成。本文不代表数据库已经创建、旧数据已经迁移、真实运行已经通过或医学准确率已达标。
 > 本文只整理设计，不生成 Alembic、数据迁移脚本、测试脚本，也不修改当前数据库。
 
 本文分成两个主部分：
@@ -112,9 +112,7 @@ Provider 变化不能自动继承下表结论，必须生成带代码版本/工�
 | [`p0-runtime-manifest.json`](artifacts/p0-runtime-manifest.json) | user/admin 入口为 8000/8001；开发基础设施绑定 localhost；Broker（消息代理） disabled | 开发 Compose 端口不等于生产拓扑；生产网关、admin 隔离和 host 暴露策略必须单独确认 | `CONFIRMED` / `UNKNOWN` |
 | [`p0-unknowns.md`](artifacts/p0-unknowns.md) | 网关转发、JWT claims、Alembic/secret 注入、Rabbit 拓扑、live DB/Redis/Rabbit、Provider（AI 服务提供方） 原子落库和图像合同仍未决 | 这些项目是上线门禁，不得在设计中伪装成已确定的部署合同 | `UNKNOWN` |
 
-因此，本文中的“10 张在线表、4 张评测表、服务责任和事务边界”全部是 `DESIGNED / NOT IMPLEMENTED`
-的目标闭环；当前实现和本地 artifact 只为其中部分可靠性语义提供 `CONFIRMED` 基线。任何建表、迁移或
-生产发布前，必须重新完成 live schema、Broker/Worker、Provider 图像/Schema 和安全边界资格验证。
+上述 Artifact（产物）是 2026-08-11 的历史证据，不能覆盖 2026-08-19 已提交的 P1 代码。当前“10 张在线表、4 张评测表、服务责任和事务边界”处于混合状态：P1 的 Session/Study/Series/Image、API、对象校验与 Image Outbox/Relay/Worker 是 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`（代码已实现/未迁移/未做真实运行验证）；Task/Stage/AI/Report、评测四表和医学链仍是 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）。任何建表、迁移或生产发布前，必须重新完成 live schema、Broker/Worker、Provider 图像/Schema 和安全边界资格验证。
 真实多模态输入、完整原图发送和逐图 receipt 目前均为 `UNKNOWN / BLOCKED`。
 
 ### 0.3 当前医学与统计证据基线
@@ -268,13 +266,12 @@ Topology/OOD 和 Harness 不得成为这条基线链的隐含前置条件。每�
 
 ### 1.3 当前代码基线与目标差距
 
-当前代码不是本文 10 张通用表的实现。它是 validation-only、zero-model 的 XRay 工程骨架；
-后续允许大规模重构，但迁移必须以这张差距表为事实起点：
+当前代码已经实现本文通用影像底座的一部分：P1 的 Session/Study/Series/Image、API、对象上传/校验、Image Outbox/Relay/Worker、替换和 Study finalize 已提交；它仍不是完整十表、Task/Stage/AI/Report 或医学链实现。后续迁移和 P2+ 实施必须以这张差距表为事实起点：
 
 | 范围 | 当前代码事实 | 目标设计 | 状态 |
 |---|---|---|---|
-| ORM | 5 张遗留 AI 配置表 + 10 张 `xray_accuracy_*` 表 | 10 张通用在线表 + 独立 4 张 `evaluation_*` 表 | `CONFIRMED / PROPOSED` |
-| 业务根 | `XRaySession/XRayRun`，Run 仍固定 validation-only | `session_record/study_record/task_record`，XRay（X 光） 仅是 modality | `CONFIRMED / PROPOSED` |
+| ORM | P1 已有 Session/Study/Series/Image 与 Image Outbox 代码；5 张遗留 AI 配置表 + 10 张 `xray_accuracy_*` 表仍存在 | 10 张通用在线表 + 独立 4 张 `evaluation_*` 表 | `CONFIRMED / PARTIAL` |
+| 业务根 | P1 已有 Session/Study/Series/Image；旧 `XRaySession/XRayRun` 仍是兼容来源，Run 仍固定 validation-only | `session_record/study_record/task_record`，XRay（X 光） 仅是 modality | `CONFIRMED / PARTIAL` |
 | 医学执行 | `XRayRun.ai_medical_status` 明确禁止写 verdict | 目标改为分支动态医学 owner：默认 Primary；候选分支成功时 TargetedReview；DecisionFinalization 只选择和校验 | `CONFIRMED / PROPOSED` |
 | 异步可靠性 | Run + Snapshot + Checkpoint + Trace（技术追踪） + Outbox（事务发件箱） 已形成同事务骨架 | 保留并通用化为 Task（任务） + Stage（阶段） + Outbox（事务发件箱）；Trace（技术追踪） 在 AuditSink 验收前不删除 | `CONFIRMED / PROPOSED` |
 | 阶段编排 | `TechnicalExecutor` 当前只执行 `request_gate`，无 StageRegistry/Profile Validator | 先实现版本化 Stage（阶段） Service（业务服务层）、静态 Registry 和 `xray_primary_v1` 固定 Profile 校验；Task（任务）/Stage（阶段）精确冻结执行图和 handler 版本 | `CONFIRMED_MISSING / CORE` |
@@ -389,7 +386,7 @@ MySQL 不声明 Foreign Key。Service 必须按资源 ID 验证逻辑父记录�
 
 ### 3.2 只保存 opaque ID（不透明标识）
 
-以下事实由上游公共服务拥有，`ms-image` 只保存完成业务所需的 opaque ID：
+以下事实属于外部业务域，`ms-image` 只保存完成业务所需的 opaque ID（不透明标识）：
 
 ```text
 subject_id
@@ -419,9 +416,11 @@ user / pet / medical_record 主表
 
 普通诊断调用方不能提交或覆盖 `run_mode`、`experiment_arm_id`、`chain_policy`、Provider、模型、Prompt 版本或 release fingerprint。控制平面必须独立权限、CAS version、不可变 artifact 和审计事件；在线服务不能读取验证目录、truth、failure-bank role 或 Holdout 标签。
 
-### 3.5 新旧系统集成边界
+### 3.5 旧系统迁移边界
 
-`vet-platform` 保留用户鉴权、病例/病历关系、用户可见任务兼容、生产报告兼容、灰度选择和回切开关。`ms-image` 拥有影像事实、Study 完整性、AI 执行、报告候选和 trace。Shadow 期间新服务只能保存候选结果，不能写旧 `report_content/report_status`；Gray/Active 期间同一用户可见 AI final 只能有一个服务拥有。
+`vet-platform` 是 XRay（X 光）旧系统和迁移来源，不是 `ms-image`（影像服务）的目标在线上游，也不参与目标运行时的鉴权、Task 创建、报告查询、灰度选择或回切。旧表、旧 OSS 对象、旧 API 行为和历史验证产物只能经 `LegacyMigrationAdapter`（旧系统迁移适配器）或离线评测导入，且必须保留 `source_system=vet-platform`（来源系统为旧平台）等来源追溯。
+
+目标 `ms-image` 自己拥有调用身份校验、资源 owner（所有者）校验、影像事实、Study 完整性、AI 执行、Report（报告）、Active Profile（生效流程配置）与 release routing（发布路由）。如未来需要 Shadow/Gray（影子/灰度）实验，也只能由 `ControlPlane`（控制面）冻结 `run_mode`、release fingerprint（发布指纹）和唯一 active owner（生效结果所有者）；它不得依赖旧系统写入、读取或回退旧 `report_content/report_status`。旧 V2 报告只能作为迁移追溯或离线比较证据，不能成为目标 Task/Report 的医学事实。
 
 ## 4. 模块闭环
 
@@ -498,7 +497,7 @@ flowchart TB
 
     OSS["OSS（对象存储）"]
     Provider["Provider（AI 服务提供方）"]
-    Consumer["vet-platform/授权下游（首期查询）"]
+    Consumer["Authorized Caller（授权调用端/首期查询）"]
 
     UserAPI --> SessionSvc
     UserAPI --> StudySvc
@@ -560,7 +559,7 @@ API Endpoint
   -> Model / MySQL
 ```
 
-| 服务 | 上游入口 | 核心处理 | 下游事实/事件 | 失败处理 |
+| 服务 | 调用入口 | 核心处理 | 输出事实/事件 | 失败处理 |
 |---|---|---|---|---|
 | `SessionService`（会话服务） | Session 创建、完成、关闭、取消 API（应用程序接口） | 按 source session 幂等；校验 `subject_id` 和调用身份权限；推进会话生命周期 | `session_record` | 重复请求返回已有 Session；身份冲突拒绝 |
 | `StudyService`（检查服务） | Study（影像检查）/Series（影像序列） 创建、Finalize API（应用程序接口） | 创建模态、Series（影像序列） 分组；校验 UID、顺序、revision、完整性 | `study_record`、`series_record` | Study（影像检查） 未完整时保持 `validating/partial`，不允许创建可诊断 Task（任务） |
@@ -683,7 +682,7 @@ Provider transport retry/fallback 仍由 `AIRequestService` 在节点预算内�
 |---|---|---:|---|---|
 | 公共 | `StudyPreparationStageService`（检查准备阶段服务） | 否 | 加载冻结 revision 与有序原图；校验完整性、格式、投照覆盖、Provider capability、预算和泄漏；输出 `PreparedStudy` | 固定首节点 |
 | XRay（X 光） | `XRayJointPrimaryReaderStageService`（X 光联合主读阶段服务） | 是 | 一次读取完整原图，输出完整 `CompleteMedicalResult`：decision、findings、normal basis、coverage、limitations 和逐图 source refs | 固定在 Preparation 后 |
-| XRay（X 光）实验 | `XRayFamilyRoutingStageService`（X 光家族路由阶段服务） | 否 | 仅在 targeted Profile 中，根据 Primary 的疑点、冲突、高风险与配置化临床 Family 决定 `primary_final` 或最多一个 `targeted_review`；不读图、不改 verdict | 默认链不执行；targeted Profile 中固定在 Primary 后 |
+| XRay（X 光）实验 | `XRayFamilyRoutingStageService`（X 光家族路由阶段服务） | 否 | 仅在 targeted Profile 中，根据 Primary 的唯一 `family_key + focus_key`（专项键加关注键）候选、来源 Finding（影像发现）、充分覆盖、预注册失败假设、预算/deadline（截止时间）和配置化临床 Family 决定 `primary_final` 或最多一个 `targeted_review`；不读图、不改 verdict | 默认链不执行；targeted Profile 中固定在 Primary 后 |
 | XRay（X 光）实验 | `XRayTargetedReviewStageService`（X 光专项复核阶段服务） | 是 | 仅对选中 Family 再读完整原图与 Primary 结果，输出同一完整 Schema；成功后成为该分支 Final owner，不输出增量碎片 | 默认关闭；只能位于 Routing 后，最多一次 |
 | 公共 | `DecisionFinalizationStageService`（决策定稿阶段服务） | 否 | 按白名单分支选择 Primary 或 Targeted 的 accepted Stage/Call，校验完整结果、source refs、full_sent 与 owner 唯一性，返回定稿选择；随后由 ImagingExecutionService 调用 ReportService 原子持久化 | 固定末节点；不得调用模型、改判或自行 commit |
 
@@ -691,7 +690,7 @@ Family 必须区分两种含义，避免旧文档把它们混成“投票家族�
 
 | 名称 | 中文含义 | 作用 | 是否拆 Service/模型调用 |
 |---|---|---|---|
-| `clinical_family` | 临床专项家族：轴骨骼、四肢骨骼、心血管、呼吸、消化、泌尿生殖、全身性/非特异；头颅/胸腔属于独立 `body_scope` | 配置化表达复核问题域、Prompt 片段和评测分层 | 否；只是 Router 配置和 Targeted 输入 |
+| `clinical_family` | 临床专项家族：胸腔、腹腔、四肢骨关节、轴骨骼、头颈；心血管/呼吸/消化/泌尿生殖是报告子域，`whole_body`（全身）是跨家族覆盖标签 | 配置化表达复核问题域、Prompt 片段和评测分层 | 否；只是 Router 配置和 Targeted 输入 |
 | `source_family` | 来源家族，同一原图、crop、retry 和其派生输出的等价类 | 防止把同源输出当独立证据或多数票 | 否；属于 lineage（来源链）审计 |
 
 FamilyRouting 不按“发现数量”计票，不调用模型，也不能把 Primary 的 normal 改成 abnormal。它只决定是否值得
@@ -1120,7 +1119,7 @@ flowchart LR
 | 双向对账 | Reconcile Worker（对账工作进程） | 各 owner Service + `ObjectLifecycleService` | 各 owner DAL；不得写公共对象表 | `DB owner -> OSS` HEAD/hash 与 `OSS -> DB owner` inventory | 一致保持；漂移阻断；孤儿隔离；不自动认领 |
 | 保留与删除 | Lifecycle Worker（生命周期工作进程） | 各 owner Service + `ObjectLifecycleService` + `AuditSink` | owner 表保留 ObjectRef/领域状态；AuditSink 保存 deletion proof（删除证明） | legal hold/retention/reference 审批后物理删除 | 删除可审计、可证明，历史 ObjectRef 不被清空；AuditSink 未验收则禁止删除 |
 
-上述链路均遵循 `API/Worker -> Service -> CRUD(DalBase) -> Model/DB`；OSS SDK 只出现在 `ObjectStorageGateway` 内。当前表和模块仍是 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现），该表描述的是开发合同，不是已经跑通的运行事实。
+上述链路均遵循 `API/Worker -> Service -> CRUD(DalBase) -> Model/DB`；OSS SDK 只出现在 `ObjectStorageGateway` 内。原始影像直传、分片、旧系统内部导入与对象校验对应的 P1 代码已实现，但尚未迁移或做真实运行演练；Task、Stage、AI、Report、Evaluation 等其余表和模块仍是 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）。该表描述的是开发合同，不是已经跑通的运行事实。
 
 ## 6. 十张核心表
 
@@ -1136,7 +1135,7 @@ flowchart LR
 | `image_record.parent_image_id/upload_session_sha256` | 单源/多源不应有两套 lineage；上传会话摘要不属于长期影像事实 | `source_manifest_json`；上传审计进入 `AuditSink` |
 | `task_record.case_request_id/engineering_eligibility_*/terminal_reason/resolution_route/retry_count/image_count` | 无独立查询合同、属于评测分母，或可由 Task 双状态、Stage result、快照/Attempt/错误确定性推导 | Evaluation Artifact、`request_snapshot_*`、`attempt_no`、`stage_checkpoint_record.result_code`、`error_code` |
 | `task_record.delivery_status` | 首期只有授权查询和 Report 发布，没有 callback/ack、独立 delivery ID 或下游接收生命周期；与 current Report 指针和 `report_record.status` 双写会产生漂移 | `report_required + execution_status + current_report_id -> report_record.status`；未来出现真实下游确认合同后另开 ADR |
-| `task_record.result_owner` | 目标 Task 只拥有 `ms_image` 自身执行和报告；旧 V2 active/fallback owner 属于 `vet-platform` 灰度路由，复制进新库会产生无法由 source Stage/Call 证明的第二事实源 | 新报告由 `current_report_id -> source_stage_checkpoint_id/source_call_id` 证明；Shadow 由 `run_mode=shadow` 表达；旧链 owner 只留上游发布路由 |
+| `task_record.result_owner` | 目标 Task 只拥有 `ms_image` 自身执行和报告；旧 V2 active/fallback owner 只是旧系统迁移追溯，复制进新库会产生无法由 source Stage/Call 证明的第二事实源 | 新报告由 `current_report_id -> source_stage_checkpoint_id/source_call_id` 证明；Shadow 由 `ControlPlane` 冻结的 `run_mode=shadow` 表达；旧链 owner 只留来源追溯，不参与在线发布 |
 | `task_record.request_snapshot_object_sha256` | 与必填 `request_sha256` 在 canonical（规范化）快照下重复；两个摘要会形成漂移可能 | `request_sha256` 同时校验内联 JSON 或 OSS 对象实际载体，并作为大型快照 ObjectRef 的 SHA256 |
 | `task_record.final_read_mode/review_case_id/review_ack_id/review_ack_at` | 固定 FinalReader 已被推翻；首期人工复核不在范围内 | Profile fingerprint + Stage route；未来人审另开 ADR，不在 Task 预留字段 |
 | `stage_checkpoint_record.parent_stage_checkpoint_id/stage_type/compiled_pipeline_sha256` | DAG 可多父；类别与 Pipeline 摘要可由冻结 Task + Registry 推导 | `dependency_manifest_sha256`、`handler_key/version`、Task 的 `compiled_pipeline_sha256` |
@@ -1153,8 +1152,8 @@ flowchart LR
 
 | 字段组 | 为什么不能删除或合并 |
 |---|---|
-| `session_record.source_medical_record_id/started_at` | 前者是上游病历关联，后者是业务会话实际开始时间；都不同于本服务的 `id/created_at` |
-| `image_record.source_image_id/logical_image_key` | 前者用于上游对账，后者是本服务版本链身份；上游 ID 缺失或变化时仍须稳定管理影像版本 |
+| `session_record.source_medical_record_id/started_at` | 前者是外部业务或历史来源病历关联，后者是业务会话实际开始时间；都不同于本服务的 `id/created_at` |
+| `image_record.source_image_id/logical_image_key` | 前者用于历史来源或接入对账，后者是本服务版本链身份；来源 ID 缺失或变化时仍须稳定管理影像版本 |
 | `expected_*/resolved_*/requested_*/sent_*` | 分别表示调用方声明、本服务解析、计划请求和真实发送，合并会掩盖丢图或部分发送 |
 | 各 owner（所有者）表的完整 `ObjectRef`（对象引用） | `storage_profile/object_key/object_version_id/sha256/size/content_type/kms_key_version` 共同锁定对象和生命周期；不能退化成 URL 或公共文件表 |
 | Task（任务） 的 `execution_status/ai_medical_status` 与 Report（报告） 的 `status` | 工程完成、医学结论和报告生命周期互相正交，但分别只在 Task/Report owner 保存一次；首期不复制 `delivery_status` |
@@ -1172,9 +1171,9 @@ flowchart LR
 | `id` | `VARCHAR(64)` | 否 | 主键；服务端生成的记录 opaque ID；该表唯一的单列 `PRIMARY KEY` |
 | `created_at` | `DATETIME(6)` | 否 | 创建时间，UTC |
 | `updated_at` | `DATETIME(6)` | 否 | 最后更新时间，UTC |
-| `source_system` | `VARCHAR(64)` | 否 | 来源系统，例如 `vet-platform` |
-| `source_session_id` | `VARCHAR(128)` | 否 | 上游会话 ID，用于跨服务幂等 |
-| `source_medical_record_id` | `VARCHAR(128)` | 是 | 上游病历 opaque ID |
+| `source_system` | `VARCHAR(64)` | 否 | 历史或外部来源系统，例如旧 `vet-platform` |
+| `source_session_id` | `VARCHAR(128)` | 否 | 历史会话 ID 或外部业务引用，用于迁移追溯与幂等 |
+| `source_medical_record_id` | `VARCHAR(128)` | 是 | 外部病历 opaque ID（不透明标识）或旧系统来源引用 |
 | `subject_id` | `VARCHAR(128)` | 否 | 宠物或患者 opaque ID |
 | `requester_id` | `VARCHAR(128)` | 否 | 发起会话的用户或服务 opaque ID，来自可信认证上下文 |
 | `request_id` | `VARCHAR(128)` | 否 | 创建请求幂等 ID |
@@ -1182,7 +1181,7 @@ flowchart LR
 | `state_version` | `BIGINT` | 否 | Session CAS 版本，合法状态推进时递增 |
 | `started_at` | `DATETIME(6)` | 否 | 会话开始时间 |
 | `completed_at` | `DATETIME(6)` | 是 | 影像处理完成时间 |
-| `closed_at` | `DATETIME(6)` | 是 | 上游明确关闭时间 |
+| `closed_at` | `DATETIME(6)` | 是 | 调用方明确关闭时间 |
 | `cancelled_by_id` | `VARCHAR(128)` | 是 | 取消操作人或服务 opaque ID |
 | `cancel_reason` | `VARCHAR(200)` | 是 | 取消原因，脱敏且使用稳定业务语义 |
 | `cancelled_at` | `DATETIME(6)` | 是 | 取消时间，UTC |
@@ -1194,7 +1193,7 @@ INDEX  (subject_id, created_at)
 INDEX  (status, created_at)
 ```
 
-`source_system/source_session_id/source_medical_record_id/subject_id/requester_id/started_at` 创建后不可修改。`source_medical_record_id` 只承担上游关联和审计，不作为本服务聚合身份；没有真实按病历检索合同前不增加索引。`started_at` 是上游可信业务事件时间，`created_at` 是本服务落库时间，二者不得互相覆盖。主状态顺序为 `open -> processing -> completed -> closed`；首个 Study 创建后以 Session CAS 进入 `processing`，`open/processing` 可以转 `cancelled`。`completed` 表示上游已声明输入结束，且本会话不存在 `ingesting/validating` 的 Study/Image 或非终态 Task；`closed` 表示上游明确归档且不再接收新 Study，close 只能发生在 completed 后。完成、关闭和取消都必须携带 `expected_state_version`；`closed/cancelled` 为终态，重复同语义请求幂等返回，冲突推进拒绝。
+`source_system/source_session_id/source_medical_record_id/subject_id/requester_id/started_at` 创建后不可修改。`source_medical_record_id` 只承担外部业务或历史来源关联和审计，不作为本服务聚合身份；没有真实按病历检索合同前不增加索引。`started_at` 是可信业务事件时间，`created_at` 是本服务落库时间，二者不得互相覆盖。主状态顺序为 `open -> processing -> completed -> closed`；首个 Study 创建后以 Session CAS 进入 `processing`，`open/processing` 可以转 `cancelled`。`completed` 表示调用方已声明输入结束，且本会话不存在 `ingesting/validating` 的 Study/Image 或非终态 Task；`closed` 表示调用方明确归档且不再接收新 Study，close 只能发生在 completed 后。完成、关闭和取消都必须携带 `expected_state_version`；`closed/cancelled` 为终态，重复同语义请求幂等返回，冲突推进拒绝。
 
 Session 取消不做数据库级级联，也不隐式猜测子资源语义。存在 uploading/validating Image 或非终态 Task 时拒绝 Session cancel；调用方必须先通过 Image abort/Task cancel 的显式命令收口子资源，再取消 Session。这样不需要 Session 专用 Outbox 或跨大量子行的长事务。
 
@@ -1208,17 +1207,17 @@ Session 取消不做数据库级级联，也不隐式猜测子资源语义。存
 | `created_at` | `DATETIME(6)` | 否 | 创建时间，UTC |
 | `updated_at` | `DATETIME(6)` | 否 | 最后更新时间，UTC |
 | `session_id` | `VARCHAR(64)` | 否 | 所属 Session ID |
-| `source_study_id` | `VARCHAR(128)` | 否 | 上游 Study（影像检查） ID；未提供时生成稳定值 |
+| `source_study_id` | `VARCHAR(128)` | 否 | 外部或历史来源 Study（影像检查） ID；未提供时生成稳定值 |
 | `modality_type` | `VARCHAR(32)` | 否 | 模态；候选值：`xray`（X 光）、`ct`（计算机断层成像）、`mri`（磁共振成像）、`ultrasound`（超声）、`endoscopy`（内窥镜）、`pathology`（病理）、`clinical_photo`（临床照片）、`dental_xray`（牙科 X 光）、`other`（其他） |
 | `dicom_study_uid` | `VARCHAR(128)` | 是 | DICOM StudyInstanceUID |
-| `body_part` | `VARCHAR(128)` | 是 | 上游或 DICOM 提供的检查部位技术信息 |
+| `body_part` | `VARCHAR(128)` | 是 | 调用方或 DICOM 提供的检查部位技术信息 |
 | `metadata_schema_version` | `VARCHAR(64)` | 否 | Study（影像检查） 技术元数据白名单合同版本 |
 | `revision_no` | `BIGINT` | 否 | 当前影像集合修订号，从 1 递增 |
 | `revision_id` | `VARCHAR(64)` | 否 | 当前修订 opaque ID |
 | `revision_reason` | `VARCHAR(48)` | 是 | 当前修订原因；候选值：`initial`（初始）、`add`（补图）、`replace`（替换）、`delete`（删除）、`reorder`（重排）、`metadata_correction`（元数据纠正） |
 | `revision_changed_at` | `DATETIME(6)` | 否 | 当前修订生效时间，UTC |
-| `expected_image_count` | `INT` | 是 | 上游声明的当前修订预期数量；未知时为空 |
-| `expected_manifest_sha256` | `CHAR(64)` | 是 | 上游声明的有序清单摘要 |
+| `expected_image_count` | `INT` | 是 | 调用方声明的当前修订预期数量；未知时为空 |
+| `expected_manifest_sha256` | `CHAR(64)` | 是 | 调用方声明的有序清单摘要 |
 | `resolved_manifest_sha256` | `CHAR(64)` | 是 | 本服务解析校验后的有序清单摘要 |
 | `completeness_status` | `VARCHAR(32)` | 否 | 完整性；候选值：`unknown`（未知）、`partial`（不完整）、`complete`（完整）、`conflict`（冲突） |
 | `completeness_attested_by` | `VARCHAR(128)` | 是 | 完整性声明者标识 |
@@ -1251,11 +1250,11 @@ XRay 可只有一个 `default` Series；CT/MRI 通常有多个 Series，因此�
 | `created_at` | `DATETIME(6)` | 否 | 创建时间，UTC |
 | `updated_at` | `DATETIME(6)` | 否 | 最后更新时间，UTC |
 | `study_id` | `VARCHAR(64)` | 否 | 所属 Study（影像检查） ID |
-| `series_key` | `VARCHAR(128)` | 否 | Study（影像检查） 内稳定分组键；优先使用规范化上游 Series ID 或 DICOM UID，非 DICOM 可用 `default` |
+| `series_key` | `VARCHAR(128)` | 否 | Study（影像检查） 内稳定分组键；优先使用规范化来源 Series ID 或 DICOM UID，非 DICOM 可用 `default` |
 | `dicom_series_uid` | `VARCHAR(128)` | 是 | DICOM SeriesInstanceUID |
 | `series_no` | `INT` | 是 | 归一化 SeriesNumber 或非 DICOM（医学数字成像与通信标准）序列的稳定展示顺序；参与 Series 列表排序 |
 | `metadata_schema_version` | `VARCHAR(64)` | 否 | Series（影像序列） 技术元数据白名单合同版本 |
-| `expected_image_count` | `INT` | 是 | 上游声明的预期 Instance 数 |
+| `expected_image_count` | `INT` | 是 | 调用方声明的预期 Instance 数 |
 | `actual_image_count` | `INT` | 否 | 已通过校验的影像数 |
 | `manifest_sha256` | `CHAR(64)` | 是 | Series（影像序列） 内有序影像清单摘要 |
 | `status` | `VARCHAR(32)` | 否 | 状态；候选值：`ingesting`（接入中）、`validating`（校验中）、`ready`（已就绪）、`incomplete`（不完整）、`invalid`（无效） |
@@ -1284,7 +1283,7 @@ OSS 保存 bytes；该表保存影像域索引和可重放技术事实，不是�
 | `created_at` | `DATETIME(6)` | 否 | 创建时间，UTC |
 | `updated_at` | `DATETIME(6)` | 否 | 最后更新时间，UTC |
 | `series_id` | `VARCHAR(64)` | 否 | 所属 Series（影像序列） ID |
-| `source_image_id` | `VARCHAR(128)` | 是 | 上游影像 ID |
+| `source_image_id` | `VARCHAR(128)` | 是 | 外部或历史来源影像 ID |
 | `logical_image_key` | `VARCHAR(128)` | 否 | Series（影像序列） 内同一逻辑影像的稳定键，用于关联替换版本 |
 | `image_version_no` | `INT` | 否 | 同一逻辑影像版本号，从 1 递增 |
 | `supersedes_image_id` | `VARCHAR(64)` | 是 | 被当前版本替换的上一 Image（影像） ID，不声明外键 |
@@ -1337,11 +1336,11 @@ INDEX  (status, validation_lease_expires_at)
 
 ready 的原始 Image 行不能覆盖。同一逻辑影像替换时创建 `image_version_no+1` 的新行；新对象校验 ready 后，在一个短事务中将旧行 `ready -> superseded`、写 `supersedes_image_id`、重算 Series manifest，并以 Study CAS 生成新 revision。若 CAS 失败，新行不得成为当前 revision 的成员，由 reconcile 重试或隔离；旧对象按保留策略处置，但不得破坏历史 Task 快照。
 
-`source_image_id` 仅用于上游导入对账，不参与本服务版本唯一性；版本身份只由 `series_id + logical_image_key + image_version_no` 决定。上游重复或改变 `source_image_id` 时必须先解析到同一 `logical_image_key`，不能因此创建两条当前版本。
+`source_image_id` 仅用于历史导入或接入对账，不参与本服务版本唯一性；版本身份只由 `series_id + logical_image_key + image_version_no` 决定。来源重复或改变 `source_image_id` 时必须先解析到同一 `logical_image_key`，不能因此创建两条当前版本。
 
 ### 6.5 `task_record`（任务记录）
 
-一行是上游请求的一次诊断、质控、报告或资格验证任务。Task 只拥有业务聚合状态，不保存 Broker relay lease 或具体阶段 Worker lease。
+一行是调用方请求的一次诊断、质控、报告或资格验证任务。Task 只拥有业务聚合状态，不保存 Broker relay lease 或具体阶段 Worker lease。
 
 | 字段 | 类型 | 可空 | 中文备注 |
 |---|---|---:|---|
@@ -1549,7 +1548,7 @@ Outbox 保证的是“事务事件最终至少一次发布”，不是 exactly-o
 | `compiled_pipeline_json` | `JSON` | 否 | PipelineProfileValidator（流水线配置校验器）生成的规范化固定执行图；包含解析后的精确 handler、Schema binding、强制门禁、预算和确定性边 |
 | `compiled_pipeline_sha256` | `CHAR(64)` | 否 | 规范化可执行 DAG 摘要；进入 Task（任务）、Stage（阶段） 和 Release fingerprint |
 | `stage_registry_contract_version` | `VARCHAR(64)` | 否 | 编译时使用的 Stage（阶段） Registry（注册表） 与 Stage（阶段） 合同版本 |
-| `prompt_bundle_json` | `JSON` | 否 | 各阶段 Prompt（提示词） 内容、语言、版本、SHA256 |
+| `prompt_bundle_json` | `JSON` | 否 | 各阶段 Prompt（提示词）内容、语言、版本、SHA256，以及 `prompt_role/family_key/report_domain_keys/focus_key/strategy_key/species/input_scope/output_contract/eligibility/status` 等可追溯 manifest（清单） |
 | `schema_bundle_json` | `JSON` | 否 | 各阶段 JSON Schema、版本、SHA256 |
 | `model_policy_json` | `JSON` | 否 | requested model、参数、token/image budget、actual-model 要求 |
 | `provider_plan_json` | `JSON` | 否 | Provider（AI 服务提供方） 顺序、secret reference、超时和受控 fallback |
@@ -1781,14 +1780,14 @@ flowchart LR
 `outbox_record` 只拥有发布事实，`stage_checkpoint_record` 只拥有节点执行事实，
 `ai_call_record` 只拥有 Provider 调用事实，三者不能互相代替。
 
-| 上游表/事实 | 下游表/事实 | 基数 | 触发条件 | 下游可使用的前置条件 |
+| 来源表/事实 | 派生表/事实 | 基数 | 触发条件 | 派生事实可使用的前置条件 |
 |---|---|---:|---|---|
 | `session_record` | `study_record` | 1:N | 创建影像检查 | 调用身份可访问 Session，且 Session 未取消 |
 | `study_record` | `series_record` | 1:N | Study（影像检查） 按模态和 UID 分组 | Study（影像检查） identity 未冲突；Series（影像序列） key/UID 稳定 |
 | `series_record` | `image_record` | 1:N | 上传单个影像对象 | OSS（对象存储） HEAD、大小、MIME、SHA256 和顺序校验通过 |
 | 旧 `image_record` | 新 `image_record` | 1:N 版本链 | 替换同一逻辑影像 | 新版本 ready；旧版本 CAS 为 superseded；Study（影像检查） revision 原子递增 |
 | `study_record` + `series_record` + `image_record` | Study（影像检查） revision/manifest | N:1 | Finalize Study（影像检查） | 必需 Series（影像序列）/Image（影像） ready，manifest 可重算 |
-| `study_record` | `task_record` | 1:N | 上游提交一次诊断/质控请求 | Study（影像检查） revision 可分析，Task（任务） 冻结 revision 和 manifest |
+| `study_record` | `task_record` | 1:N | 调用方提交一次诊断/质控请求 | Study（影像检查） revision 可分析，Task（任务） 冻结 revision 和 manifest |
 | `task_record` | `stage_checkpoint_record` | 1:N | 创建首节点或恢复下一节点 | Task（任务） CAS 版本匹配；Stage（阶段） key 在 Config 中存在 |
 | `image_record` | `outbox_record` | 1:N | 上传完成受理、校验重试或对象对账 | `aggregate_type=image`；事件只含 Image（影像）ID/版本/trace，不含 bytes/signed URL |
 | `stage_checkpoint_record` | `outbox_record` | 1:N | 首 Stage（阶段）或下一 Stage 状态事务提交 | `aggregate_type=stage`；`aggregate_id/version` 即 Stage owner，避免重复 Task/Stage 专用列 |
@@ -1798,7 +1797,7 @@ flowchart LR
 | `ai_call_record` | `outbox_record` | 1:N | 已发送 Call 结果未知，需要延迟对账 | `aggregate_type=call`；只能携带原 Call ID、版本、幂等键引用和 trace，不创建第二逻辑调用 |
 | `ai_call_record` | `stage_checkpoint_record` | N:1 | Call 被接受 | Provider（AI 服务提供方） 回执、Schema、输入摘要和 lease/CAS 均通过 |
 | `task_record` + accepted Primary/Targeted Stage/Call | `report_record` | 1:N | DecisionFinalization 选择唯一 owner 并原子完成 | source Stage/Call 一致；报告内容不可覆盖；Task CAS 指向 current Report |
-| `report_record` | Task（任务）规范结果/上游兼容结果 | N:1 | 持久化、发布或作废 | 当前版本只能由 `task_record.current_report_id` 指向；Report status 是生命周期唯一事实源 |
+| `report_record` | Task（任务）规范结果/历史兼容视图 | N:1 | 持久化、发布或作废 | 当前版本只能由 `task_record.current_report_id` 指向；Report status 是生命周期唯一事实源 |
 
 每个核心写入链的事务边界：
 
@@ -1822,31 +1821,26 @@ Stage：claim/heartbeat（短事务） -> Provider/OSS（事务外） -> Stage/C
 
 | 合同 | 必须字段 | 语义 |
 |---|---|---|
-| `ClinicalFamilyAssessment`（临床家族评估） | `family_key/assessment_status/findings/source_image_refs/uncertainty_flags` | Primary 对每个已覆盖临床家族的结构化观察；不要求每个 Family 单独调用模型 |
+| `ClinicalFamilyAssessment`（临床家族评估） | `family_key/assessment_status/report_domain_keys/findings/source_image_refs/uncertainty_flags` | Primary 对每个已覆盖临床家族的结构化观察；不要求每个 Family 单独调用模型 |
 | `SourceFamily`（来源家族） | `source_family_id/root_image_refs/member_refs/transform_or_retry_refs` | 折叠同一原图、crop、retry 和派生输出，防止伪独立投票 |
-| `FamilyRouteDecision`（家族路由决定） | `route=primary_final\|targeted_review/selected_family_key/reason_codes/policy_version/input_sha256` | 确定性 Router 只决定是否触发一次专项复核，不产生医学 verdict |
+| `FamilyRouteDecision`（家族路由决定） | `route=primary_final\|targeted_review/selected_family_key/selected_focus_key/source_finding_ids/reason_codes/coverage_proof/policy_version/input_sha256` | 确定性 Router 只决定是否触发一次专项复核，不产生医学 verdict；`targeted_review` 必须有唯一专项/关注点、来源 Finding、覆盖证明、预注册原因与预算资格 |
 | `CompleteMedicalResult`（完整医学结果） | `decision/findings/normal_basis/coverage/families_not_assessed/limitations/review_reason/source_refs` | Primary 与 Targeted 共享的最终候选 Schema；Targeted 不得只返回 delta |
 
-`clinical_family`（临床专项家族）首期使用 7 个互斥性尽量高的稳定 key。它不是 Service、Stage 或模型
-调用数量；Primary 一次完整读片应覆盖影像中所有可评估家族，Router 最多选择一个家族用于 TargetedReview：
+`clinical_family`（临床专项家族）首期使用 5 个互斥性尽量高的稳定 key。它不是 Service、Stage 或模型调用数量；Primary 一次完整读片应覆盖影像中所有可评估家族，Router 最多选择一个家族和一个关注点用于 TargetedReview：
 
-| `family_key` | 中文名称 | 覆盖范围 | 旧配置归一化 |
+| `family_key` | 中文名称 | 覆盖范围 | 报告子域与边界 |
 |---|---|---|---|
-| `axial_skeleton` | 轴骨骼家族 | 颅骨、脊柱、肋骨、骨盆等轴向骨骼 | `骨骼` 中的轴向部分、`轴骨骼系统`、`头颅单项检测` 中的骨性部分、`脊柱单项检测` |
-| `appendicular_skeleton` | 四肢骨骼家族 | 肩带、骨盆带、四肢长骨和关节 | `四肢`、`四肢骨骼系统`、`骨骼` 中的附肢部分 |
-| `cardiovascular` | 心血管家族 | 心影、肺血管和相关循环征象 | `心血管`、`心血管系统`、`胸腔单项检测` 中的心血管部分 |
-| `respiratory` | 呼吸家族 | 气道、肺野、胸膜及呼吸相关征象 | `呼吸`、`呼吸系统`、`呼吸系统单项检测`、`胸腔单项检测` 中的呼吸部分 |
-| `digestive` | 消化家族 | 食管、胃肠道、肝胆等影像可见消化系统征象 | `消化`、`消化系统` |
-| `urinary_reproductive` | 泌尿生殖家族 | 肾脏、膀胱及影像可见生殖系统征象 | `泌尿生殖`、`泌尿生殖系统` |
-| `systemic_nonspecific` | 全身性/非特异家族 | 不能归入单一系统的全身性、分布性或非特异征象 | `全身性/非特异性专用`、总结阶段中的跨系统征象 |
+| `thoracic` | 胸腔家族 | 胸腔完整投照下的心肺、纵隔/胸膜、膈肌与胸壁关系 | `respiratory/cardiovascular/mediastinal_pleural/thoracic_wall`；不拆默认多调用 |
+| `abdominal` | 腹腔家族 | 腹腔完整投照下的消化、肝胆/脾、泌尿生殖关系 | `digestive/hepatobiliary_splenic/urinary_reproductive`；不按器官拆调用 |
+| `appendicular_orthopedic` | 四肢骨关节家族 | 前后肢、关节排列、长骨与相关软组织 | 前肢/后肢是区域；Family 保持唯一 |
+| `axial_orthopedic` | 轴骨骼家族 | 颈胸腰椎、骨盆/髋与排列 | 颈椎固定归本家族 |
+| `head_neck` | 头颈家族 | 头颅、鼻腔/口腔和颈部软组织 | 颈椎不归本家族；具体 focus 需评测后冻结 |
 
-旧配置中的 `头颅/胸腔/腹部/脊柱/四肢/全身` 是 `body_scope`（身体范围），猫/犬是
-`species`（物种），`器官检测/系统分析/裁剪区域定位/总结评估` 是 `stage_purpose`（阶段用途）。三者都
-不得继续拼进 `family_key`，也不得复制出猫/犬两套 Service。`胸腔单项检测` 可同时产生 cardiovascular
-和 respiratory assessment；`头颅单项检测` 的骨性发现归 axial_skeleton，其他发现按实际系统归类。
+`body_scope/anatomy_region`（身体范围/解剖区域）、`species`（物种）、`technical_capability`（技术能力）、`report_domain`（报告子域）和 `clinical_family`（临床专项家族）必须正交表达。`whole_body`（全身）不是第六个 Family：它只表示多区域输入、跨家族 Finding 或 coverage limitation（覆盖限制）。
 
-7 个 key 是首期可版本化候选词表，不是永远不变的医学本体。新增/拆分/合并家族必须创建新
-taxonomy/schema version，并用逐家族漏诊、误报、coverage 和样本量证明价值；不能只因旧 Prompt 名称存在就保留。
+5 个 key 是首期可版本化候选词表，不是永远不变的医学本体。新增、拆分或合并家族必须创建新 taxonomy/schema version，并同时证明稳定临床边界、输入覆盖合同、Gold/Failure Bank（可信金标准/失败样本库）分母、独立改进假设和最小 paired A/B（配对对照）实验价值。
+
+Prompt 角色只使用 `joint_primary_base`、`joint_primary_module`、`targeted_focus`、`review_strategy`、`technical_evidence` 和 `offline_evaluation`。完整专项、Focus/Strategy、Prompt Bundle 和评测合同见[XRay 专项完整设计](refactor/14-xray-specialty-design.md)。
 
 强制不变量：
 
@@ -1854,6 +1848,7 @@ taxonomy/schema version，并用逐家族漏诊、误报、coverage 和样本量
 同一原图 -> crop -> retry/派生输出，仍然只属于一个 source_family
 raw finding/reviewer 数量不得作为多数票或置信度
 FamilyRouting 不读取 Gold、不调用 Provider、不修改 Primary medical decision
+targeted_review 必须同时具有唯一 family_key + focus_key、来源 Finding、coverage proof、预注册 reason 和预算/deadline 资格
 primary_final 分支只能选择 Primary accepted Stage/Call
 targeted_review 分支只能在 Targeted 成功并通过完整 Schema 后选择 Targeted
 Targeted 技术失败不得静默回退为 Primary Final；Task 以技术失败关闭，医学状态 not_produced
@@ -1906,7 +1901,7 @@ Report final != Report published
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as vet-platform
+    participant U as Caller（调用方/接入端）
     participant API as MS-Image API
     participant DB as MySQL ms_image
     participant OSS as Object Storage
@@ -2162,7 +2157,7 @@ Schema、scorer 和 schedule 必须冻结。候选内部的 Router 规则、Targ
 |---|---:|---:|---|
 | STUDY_PREPARATION | 否 | 否 | Study revision、有序原图、投照覆盖、能力、预算和技术失败；不生成医学判断 |
 | XRAY_JOINT_PRIMARY_READER | 是 | 条件拥有 | Stage + accepted Call + 完整医学候选；`primary_final` 分支成为 Final owner |
-| XRAY_FAMILY_ROUTING | 否 | 否 | 输出 `primary_final/targeted_review`、selected family 和 reason；不计票、不改 verdict |
+| XRAY_FAMILY_ROUTING | 否 | 否 | 输出 `primary_final/targeted_review`、selected family/focus、来源 Finding、覆盖证明和 reason；不计票、不改 verdict |
 | XRAY_TARGETED_REVIEW | 是 | 条件拥有 | 只在已资格化分支运行；输出完整医学结果；成功时成为 Final owner |
 | DECISION_FINALIZATION | 否 | 否 | 校验并选择唯一 owner，原子生成 Report/Task 终态；不调用模型、不改 verdict |
 
@@ -2348,7 +2343,7 @@ Study 生成新 revision
 #### 链路 A：影像接入
 
 ```text
-vet-platform
+Caller（调用方/接入端）
   -> Session API
   -> SessionService
   -> session_record
@@ -2427,7 +2422,7 @@ Primary accepted Stage/Call
   -> DecisionFinalizationStageService 选择唯一 owner
   -> ReportService
   -> TX: DecisionFinalization Stage + Report revision + Task current_report_id/engineering/medical state
-  -> vet-platform 授权查询
+  -> Authorized Query API（授权查询接口）
   -> [显式发布命令] 校验 current pointer 后 Report final -> published
 ```
 
@@ -2753,7 +2748,7 @@ end_to_end_population_denominator
 
 Shadow 要求：异步旁路、不增加用户可见延迟、不写旧生产 Report、Task 标记 `run_mode=shadow` 且 Report 只保持 final 不对普通查询发布，并按预注册 strata 控制成本。Gray/Active 要求 release artifact、candidate fingerprint、holdout fingerprint 和 CAS version 一致，并完成队列、Provider、Report 查询/发布及回切演练。
 
-回滚只改变 `vet-platform` 的 release routing，不删除或重解释历史 Task/Stage/Call/Report：停止新服务分流、release state 回到 shadow、V2 恢复唯一 active owner。新增 trusted ABN 漏诊、NOR FP/review/non-diagnostic 超门槛、Final full-study 审计失败、actual model 漂移、队列超 SLA 或数据污染时立即 No-Go。旧 V2 fallback 结果不复制进目标 Task/Report；评测只纳入 source Stage/Call 可追溯的 ms-image 结果。
+回滚只改变 `ms-image` `ControlPlane`（控制面）的 release routing：停止候选 Profile（流程配置）发布，使新 Task 回到上一份已验证 Active Profile 或进入 `validation_only`（仅验证）状态；不删除或重解释历史 Task/Stage/Call/Report。新增 trusted ABN（可信异常）漏诊、NOR（可信正常）FP/review/non-diagnostic 超门槛、Final full-study 审计失败、actual model 漂移、队列超 SLA 或数据污染时立即 No-Go（禁止放行）。旧 V2 fallback（降级）结果不复制进目标 Task/Report；评测只纳入 source Stage/Call 可追溯的 `ms-image` 结果。
 
 ## 12. 为什么当前以 10 张作为候选基线
 
@@ -3112,7 +3107,7 @@ flowchart LR
 Harness 是不同业务能力，但共同使用 Job/Outbox/Run/Artifact 四类事实。只有人工审批后的候选配置
 可以进入在线 `AIConfigService`；评测模块不得直接写 Active Config、在线 Task 或 Report。
 
-| 上游事实 | 下游事实 | 基数 | 逻辑前置条件 |
+| 来源事实 | 派生事实 | 基数 | 逻辑前置条件 |
 |---|---|---:|---|
 | `evaluation_job_record` | `evaluation_outbox_record` | 1:N | Job、input/sanitization Artifact（不可变产物） 与首 Outbox（事务发件箱） 同事务创建 |
 | `evaluation_job_record` | `evaluation_run_record` | 1:N | dataset/truth/experiment/scorer fingerprint 全部冻结 |
@@ -3354,7 +3349,7 @@ INV-23 模型 `review_required`/`non_diagnostic` 必须由 selected owner 输出
 INV-24 `run_mode/experiment_arm_id/release_fingerprint` 必须来自受信控制面，普通诊断调用方不得覆盖。
 INV-25 `xray_primary_v1` 与 `xray_targeted_review_v1` 必须使用不同 release/experiment fingerprint 和评分分桶；候选 Profile 还必须冻结 Router 与 Targeted Prompt/模型配置。
 INV-26 工程/医学评分资格只能由 `ms_image_eval` 根据冻结在线事实和预注册 scorer 计算，不得作为在线 Task 可变状态或模型医学结论。
-INV-27 Shadow/Gray/回切 owner 只由 `vet-platform` 发布路由拥有；`ms_image` 以 `run_mode` 和 source Stage/Call 标识自身候选，禁止复制旧 V2 fallback 医学结果并混入 ms-image 指标。
+INV-27 Shadow/Gray/回切 owner 只由 `ms-image` `ControlPlane` 的冻结 release routing（发布路由）拥有；`ms_image` 以 `run_mode` 和 source Stage/Call 标识自身候选，禁止复制旧 V2 fallback 医学结果并混入 `ms-image` 指标。
 INV-28 `execution_status=completed` 的终端事实必须可追溯：诊断和 coverage 路由有 current Report；非医学任务按 `report_required` 有 current Report 或明确保持 `current_report_id=NULL`。
 INV-29 任一 OSS `object_key` 非空时必须带完整 ObjectRef，不保存 signed URL。
 INV-30 同一逻辑 Image 的当前版本由 Study revision manifest 决定，不能仅按最新 created_at 推断。
@@ -3425,10 +3420,10 @@ INV-71 unknown-call 对账 Outbox 必须以 `ai_call_record` 为 aggregate owner
 1. `ms-image` 目标目录的 Git 基线、依赖 lock、`import main` 可复现性，以及 `app.lib` 缺失导入阻断是否已关闭。
 2. API/admin/Worker 的真实启动命令、外部 root path、liveness/readiness 和 RabbitMQ/Celery 是否实际可用。
 3. 生产 service identity、JWT issuer/audience/algorithm/expiry 和控制面 scope。
-4. CT/MRI 上游能否稳定提供 Study/Series/SOP UID、预期 Instance 数和完成信号。
+4. CT/MRI 接入来源能否稳定提供 Study/Series/SOP UID、预期 Instance 数和完成信号。
 5. DICOM/PNG/JPG/视频/WSI 的首期支持范围、转换策略、bit depth/windowing/orientation 和派生图 hash 合同。
 6. 生产用户 subject、service identity、业务 scope 和资源 owner 的校验及服务间传播方式。
-7. 上游首期是否只轮询结果；未来若要求 callback，需另行冻结 delivery ID、业务 ack、重试和 SLA，当前不阻塞查询式闭环。
+7. 调用端首期是否只轮询结果；未来若要求 callback（回调），需另行冻结 delivery ID、业务 ack（确认）、重试和 SLA，当前不阻塞查询式闭环。
 8. 原始 Provider 响应的加密、保留期和删除策略。
 9. AI Config 是否只允许全局激活，还是允许受控实验级覆盖。
 10. GPT-5.6 Sol、Gemini 3.7 Flash 等候选模型的真实 API model ID、视觉输入、结构化 JSON、区域、保留、限额和逐图 receipt 能力；产品名或代理域名不能替代资格验证。

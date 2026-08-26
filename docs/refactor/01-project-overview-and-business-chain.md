@@ -1,6 +1,6 @@
 # MS-Image 项目概览与业务链路
 
-状态：`CURRENT_REFACTOR_VIEW / DESIGNED_NOT_IMPLEMENTED`（当前重构视图/已设计尚未实现）
+状态：`CURRENT_REFACTOR_VIEW / P1_CODE_IMPLEMENTED / P2_PLUS_DESIGNED`（当前重构视图/P1 代码已实现/P2 及后续已设计）
 精确设计依据：[设计母文](../ms-image-final-architecture-and-database-design.md)
 
 XRay（X 光）的上传、异步执行、医学分支、失败恢复、表和事务落点集中见
@@ -30,16 +30,16 @@ XRay（X 光）的上传、异步执行、医学分支、失败恢复、表和�
 `ms-image` 只保存 opaque ID（不透明标识），不复制：
 
 - 用户、宠物、病历正文、处方、订单、支付、额度和组织等公共业务表。
-- 上游 Shadow/Gray/Active（影子/灰度/正式）路由所有权。
+- 旧 `vet-platform` 的 Shadow/Gray/Active（影子/灰度/正式）路由状态和旧 V2 fallback（降级）结果；目标 Task 的 Active Profile（生效流程配置）与发布选择由 `ControlPlane`（控制面）拥有。
 - 旧 V2 fallback（降级）医学结果。
 
 ## 3. 目标在线完整主链
 
-下图定义重构完成后的目标链路，不代表当前 Service（业务服务）、Stage（阶段）或目标数据表已经实现并连通。
+下图定义完整目标链路。当前已实现到 P1 的 Session/Study/Series/Image、API、OSS 校验与 Image Outbox/Relay/Worker；Task、Stage、AI、Report 和评测节点尚未实现，目标数据表尚未迁移或做真实运行验证。
 
 ```mermaid
 flowchart TD
-    U["Upstream（上游业务系统）"]
+    U["Caller（调用方/接入端）"]
     S["SessionService（会话服务）"]
     ST["StudyService（影像检查服务）"]
     I["ImageService（影像服务）"]

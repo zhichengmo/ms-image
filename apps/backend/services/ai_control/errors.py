@@ -4,12 +4,21 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.backend.schemas.base import GenericResponse
+from apps.backend.services.ai_control.service.errors import (
+    AIControlNotFoundError,
+    AIControlStateConflictError,
+    AIControlValidationError,
+)
+
+# The v1 Config service is intentionally still importable during the v1/v2
+# compatibility window.  Its legacy exception classes remain mapped until the
+# service is replaced by the v2 compiler implementation.
 from apps.backend.services.ai_control.service.ai_config_service import (
     AIConfigNotFoundError,
     AIConfigStateConflictError,
     AIConfigValidationError,
 )
-from apps.backend.schemas.base import GenericResponse
 
 
 def _response(status_code: int, error_code: int, message: str) -> JSONResponse:
@@ -28,16 +37,16 @@ async def rollback_and_map_control_plane(
     db: AsyncSession,
     exc: Exception,
 ) -> JSONResponse:
-    """Rollback one AI Control request and return its stable public error."""
+    """Rollback the request transaction and map stable control-plane errors."""
     await db.rollback()
     if isinstance(exc, SQLAlchemyError):
         return _response(503, 5031, "服务依赖未就绪")
-    if isinstance(exc, AIConfigNotFoundError):
-        return _response(404, 4041, "AI Config 不存在")
-    if isinstance(exc, AIConfigValidationError):
-        return _response(422, 4221, "AI Config 合同无效")
-    if isinstance(exc, AIConfigStateConflictError):
-        return _response(409, 4091, "AI Config 状态冲突")
+    if isinstance(exc, (AIControlNotFoundError, AIConfigNotFoundError)):
+        return _response(404, 4041, "AI 控制面资源不存在")
+    if isinstance(exc, (AIControlValidationError, AIConfigValidationError)):
+        return _response(422, 4221, "AI 控制面合同无效")
+    if isinstance(exc, (AIControlStateConflictError, AIConfigStateConflictError)):
+        return _response(409, 4091, "AI 控制面状态冲突")
     raise exc
 
 

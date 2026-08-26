@@ -8,9 +8,14 @@
 
 | 目的 | 入口 | 权威性 |
 |---|---|---|
+| 用一份文档完整理解 XRay 总体架构、数据库、模块、链路、逐层责任和专项设计 | [XRay 完整核心架构与专项设计](refactor/14-xray-specialty-design.md) | 当前自包含交付入口；新开发优先阅读 |
 | 开启新重构会话、实施开发或向团队介绍项目 | [MS-Image 重构文档包](refactor/README.md) | 当前实施与讲解导航；不复制字段权威 |
+| 设计 QJ 接入、公共/专项模块收敛、入口/Worker/数据库连接调整 | [QJ 借鉴与模块收敛调整方案](refactor/16-qj-reference-and-modular-convergence-plan.md) | 当前架构调整建议；不授权迁移或真实环境操作 |
+| 只评审 QJ 借鉴是否适用、暂不修改代码 | [QJ 借鉴决策门新会话提示](refactor/18-qj-reference-decision-gate-session-prompt.md) | 当前只读评审入口；未经最小切片授权不得实施 |
+| 设计 Prompt、Config Release、AI Call 或 Provider-disabled 最小链 | [Prompt 运行合同与最小 Provider 链路调整方案](refactor/17-prompt-runtime-contract-and-minimal-provider-plan.md) | 当前 Prompt 运行合同；不授权真实 Provider 或迁移 |
 | 查看或开发 XRay（X 光）完整流程 | [XRay（X 光）详细链路与开发流程图](refactor/10-xray-detailed-flow.md) | Canonical XRay Chain（X 光权威主链）和集中开发视图；精确字段仍以设计母文为准 |
-| 向新开发讲解 XRay（X 光）核心链路 | [XRay（X 光）核心链路开发沟通文档](refactor/11-xray-core-chain-developer-briefing.md) | 当前沟通入口；展开细节时继续读取 10 |
+| 向新开发讲解 XRay（X 光）核心链路 | [XRay（X 光）核心链路开发沟通文档](refactor/11-xray-core-chain-developer-briefing.md) | 当前沟通入口；展开执行细节时继续读取 10 |
+| 设计 XRay 专项 | [XRay 完整核心架构与专项设计](refactor/14-xray-specialty-design.md) | 专项与完整系统架构的统一依据 |
 | 审查 XRay 每层目的、功能、输入输出和存在必要性 | [Canonical XRay Chain（X 光权威主链）逐层责任与接口合同](refactor/12-canonical-xray-layer-responsibility-contract.md) | 当前逐层责任和逻辑接口权威；精确数据库字段仍以设计母文为准 |
 | 判断基于 `9a45209a` 还是当前工作树重构 | [重构基线决策](refactor/13-refactor-base-decision.md) | 当前 Git 基线与 preserve/replace（保留/替换）决策；不代表已经建立 checkpoint |
 | 数据库、模块、API（应用程序接口）、AI（人工智能）、异步执行、数学评测和完整链路设计 | [MS-Image（影像） 最终架构、数据库与完整链路设计](ms-image-final-architecture-and-database-design.md) | 当前唯一设计依据 |
@@ -32,7 +37,12 @@ docs/
 │   ├── 10                     XRay 详细链路与开发流程图
 │   ├── 11                     XRay 核心链路开发沟通文档
 │   ├── 12                     XRay 权威主链逐层责任与接口合同
-│   └── 13                     当前工作树重构基线决策
+│   ├── 13                     当前工作树重构基线决策
+│   ├── 14                     XRay 专项完整设计
+│   ├── 15                     全链缺口与分阶段执行计划
+│   ├── 16                     QJ 借鉴与模块收敛调整方案
+│   ├── 17                     Prompt 运行合同与最小 Provider 链路调整方案
+│   └── 18                     QJ 借鉴决策门新会话提示
 ├── artifacts/
 │   ├── README.md
 │   └── 当前运行、资格验证、发布和数据库快照证据
@@ -70,7 +80,7 @@ docs/
 
 - 用户已授权内部代码可以完全重构；旧 `xray_accuracy` 目录、类和内部实现可以替换。当前仍推荐保留或受控迁移外部合同、唯一事实 owner 和已验证可靠性语义，不建立第二套并行事实源。
 - 当前可复核工程证据截止到 `2026-08-11T04:05:17Z`；之后的代码、配置或环境变化必须重新生成资格 Artifact（证据产物）。
-- 目标在线数据库 `ms_image` 的当前候选基线为 10 张核心表，状态为 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）；这不是数量上限，独立 owner（所有者）、生命周期/状态机、查询、事务/恢复或权限/保留证据可以触发新增、合并或拆表。
+- 目标在线数据库 `ms_image` 的当前候选基线为 10 张核心表。P1 的 Session/Study/Series/Image 与影像校验基础代码已实现，但尚未迁移或做真实运行验证；Task/Stage/AI/Report 等其余目标表仍为 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）。10 表不是数量上限，独立 owner（所有者）、生命周期/状态机、查询、事务/恢复或权限/保留证据可以触发新增、合并或拆表。
 - 目标隔离评测数据库 `ms_image_eval` 的当前候选基线为 4 张 `evaluation_*` 表，状态为 `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）；它们统一承载 Gold（可信金标准）、实验、统计、校准、拓扑/OOD（分布外检测）和可选 Harness（离线分析执行框架），形成标注工作台或法规逐行审计等独立合同时可以增表。
 - XRay（X 光）、CT（计算机断层成像）、MRI（磁共振成像）、超声、视频和 WSI（全切片影像）复用统一 Study（检查）/Series（序列）/Image（影像）/Task（任务）数据边界；各模态医学执行链分别资格化，首期只闭环 XRay。
 - 在线核心只有 8 个业务 Service（业务服务）：Session/Study/Image/Task/ImagingExecution/AIConfig/AIRequest/Report；Registry、Validator、Gateway、Relay 和 AuditSink 是组件，不人为扩成额外业务 Service。
@@ -80,12 +90,12 @@ docs/
 - OSS（对象存储）保存 bytes（文件字节）；`image_record`（影像记录表）保存影像域索引，其他产物使用完整 `ObjectRef`（对象引用），不建设公共文件资产表。实际存储位置见[OSS（对象存储）具体存储位置与环境拓扑](ms-image-final-architecture-and-database-design.md#521-oss对象存储具体存储位置与环境拓扑)，上传、校验、读取、对账、隔离、保留和删除见[OSS（对象存储）完整闭环](ms-image-final-architecture-and-database-design.md#53-oss对象存储完整闭环)。
 - Primary（主读）是默认医学结果 owner；只有 targeted Profile 命中且 TargetedReview（专项复核）成功时才由 Targeted 成为 owner。固定 FinalMedicalReader（二次终审）已因现有退化证据被拒绝，DecisionFinalization（决策定稿）不调用模型、不改判。
 - Task（任务）只保存 `execution_status`（工程状态）和 `ai_medical_status`（AI 医学状态）；首期没有 callback/ack（回调/确认）生命周期，因此不保存重复的 `delivery_status`。报告持久化、发布和作废由 `current_report_id -> report_record.status` 唯一表达。
-- `ms_image` 不保存 `result_owner=legacy_fallback` 这类上游发布事实；Shadow/Gray/回切 owner 由 `vet-platform` 路由唯一拥有，新服务报告只由自身 source Stage/Call 证明，旧 V2 结果不复制进新库。
+- `vet-platform` 是旧系统/迁移来源，不是目标在线上游；`ms_image` 不保存 `result_owner=legacy_fallback` 这类旧发布事实。目标 Shadow/Gray/回切由 `ControlPlane`（控制面）的冻结 release（发布）配置唯一拥有，新报告只由自身 source Stage/Call（来源阶段/调用）证明；旧 V2 结果仅作迁移追溯，不复制为新 Task/Report 医学事实。
 - Stage（阶段）小型输入/输出使用 `input_json/output_json`，大型载体使用完整 OSS ObjectRef（对象引用），两组分别严格二选一；迟到只记录为 AI Call（AI 调用）的 `late/ignored` 处置，不增加 Stage `late` 状态。
 - 基础 source lineage（来源链）属于在线审计内核；语义证据依赖图只在 `ms_image_eval` 离线实验中作为不可变 Artifact（产物）保存，不为每个 node（节点）/edge（边）增加在线明细表；同源证据不作为独立投票。
 - 人工复核当前为 `N/A`；`review_required` 表示 AI 无法确定，是可持久化、可发布终态，不创建人审表、队列或接口。
 - 当前发布状态仍为 `PARTIAL / NO-GO`，医学准确率仍为 `UNKNOWN`。
-- 当前隔离库中的 10 张 `xray_accuracy_*` 表只是 validation-only 快照，不是目标通用十表；目标在线十表和四张评测表均为 `DESIGNED / NOT IMPLEMENTED`。
+- 当前隔离库中的 10 张 `xray_accuracy_*` 表只是 validation-only 快照，不是目标通用十表；目标在线十表处于 `P1_CODE_IMPLEMENTED / NOT_MIGRATED`（P1 代码已实现/未迁移）与 P2+ `DESIGNED / NOT IMPLEMENTED`（已设计/尚未实现）的混合状态，四张评测表仍为 `DESIGNED / NOT IMPLEMENTED`。
 - 目标字段已经按 owner（所有者）、可推导性、查询合同和不可变证据完成最小化；删除项与保留理由见[字段最小化结论](ms-image-final-architecture-and-database-design.md#60-字段最小化结论)。
 - 当前稳定 Provider 资格合同的直接阻断是 `qualification_artifact_signing_key_missing`；历史 `provider_auth` 只表示一次旧真实尝试，不能混为同一状态。
 

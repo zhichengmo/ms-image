@@ -4,6 +4,12 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.backend.core.ai.config_contract import (
+    TASK_REQUEST_SNAPSHOT_V2,
+    activation_slot_sha256,
+    is_v2_config,
+    legacy_activation_slot,
+)
 from apps.backend.core.contexts import CallerContext
 from apps.backend.core.pipeline import (
     ZERO_MODEL_PROFILE,
@@ -88,58 +94,29 @@ class TaskService:
             or not study.resolved_manifest_sha256
         ):
             raise TaskStateConflictError("study_revision_not_ready")
-        activation_slot = (
-            f"{config_key}:global:global:{study.modality_type}:{payload.task_type}"
+        config = await self._get_active_config(
+            config_key=config_key,
+            modality_type=study.modality_type,
+            task_type=payload.task_type,
         )
-        config = await self.config_dal.get_active(activation_slot)
         if config is None:
             raise TaskStateConflictError("task_config_not_active")
-        if (
-            config.status != "active"
-            or config.capability_manifest_json.get("provider_disabled") is not True
-            or config.provider_plan_json.get("enabled") is not False
-        ):
-            raise TaskStateConflictError("task_config_invalid")
-        profile_key = config.compiled_pipeline_json.get("profile_key")
-        if profile_key not in allowed_profiles:
-            raise TaskStateConflictError("task_profile_not_allowed")
-        contract, profile_sha = compile_profile_contract(profile_key, self.registry)
-        if (
-            profile_sha != config.compiled_pipeline_sha256
-            or config.stage_registry_contract_version != self.registry.CONTRACT_VERSION
-        ):
-            raise TaskStateConflictError("config_profile_fingerprint_conflict")
-        if not contract.get("stages"):
-            raise TaskStateConflictError("compiled_profile_empty")
+        profile_key, contract, profile_sha = self._validate_assignable_config(
+            config=config,
+            allowed_profiles=allowed_profiles,
+        )
         first_definition = contract["stages"][0]
-        if first_definition.get("stage_key") != "study_preparation":
-            raise TaskStateConflictError("compiled_profile_entry_invalid")
 
         series = await self.series_dal.list_for_study(study.id)
         run_mode = "replay" if payload.task_type == "replay" else "validation_only"
         report_required = payload.task_type == "diagnose"
-        snapshot = {
-            "study_id": study.id,
-            "study_revision_id": study.revision_id,
-            "resolved_manifest_sha256": study.resolved_manifest_sha256,
-            "series": [
-                {
-                    "series_id": item.id,
-                    "manifest_sha256": item.manifest_sha256,
-                    "actual_image_count": item.actual_image_count,
-                }
-                for item in series
-            ],
-            "ai_config_id": config.id,
-            "config_key": config.config_key,
-            "config_version": config.version,
-            "config_sha256": config.config_sha256,
-            "release_fingerprint": config.release_fingerprint,
-            "prompt_bundle_sha256": config.prompt_bundle_json["bundle_sha256"],
-            "schema_bundle_sha256": config.schema_bundle_json["bundle_sha256"],
-            "profile_key": profile_key,
-            "compiled_profile": contract,
-        }
+        snapshot = self._build_request_snapshot(
+            study=study,
+            series=series,
+            config=config,
+            profile_key=profile_key,
+            compiled_profile=contract,
+        )
         request_sha = self._sha(snapshot)
         business_key = self._sha(
             {
@@ -200,7 +177,12 @@ class TaskService:
             "request_snapshot_json": snapshot,
             "request_sha256": request_sha,
             "budget_snapshot_json": config.budget_policy_json,
-            "budget_reserved_json": {},
+            "budget_reserved_json": {
+                "contract_version": "task-budget-reservation.v1",
+                "budget_policy_sha256": self._sha(config.budget_policy_json),
+                "reserved_call_units": 0,
+                "reserved_attempts": 0,
+            },
             "budget_consumed_json": {},
             "current_report_id": None,
             "attempt_no": 1,
@@ -266,6 +248,160 @@ class TaskService:
             raise TaskStateConflictError("first_stage_event_conflict")
         return self._response(task)
 
+    async def _get_active_config(
+        self,
+        *,
+        config_key: str,
+        modality_type: str,
+        task_type: str,
+    ):
+        """Resolve the v2 active slot first and retain v1 read compatibility."""
+        v2_slot = activation_slot_sha256(
+            config_key=config_key,
+            modality_type=modality_type,
+            task_type=task_type,
+            activation_scope="global",
+            scope_key="global",
+        )
+        config = await self.config_dal.get_active(v2_slot)
+        if config is not None:
+            return config
+        return await self.config_dal.get_active(
+            legacy_activation_slot(
+                config_key=config_key,
+                modality_type=modality_type,
+                task_type=task_type,
+                activation_scope="global",
+                scope_key="global",
+            )
+        )
+
+    def _validate_assignable_config(
+        self,
+        *,
+        config,
+        allowed_profiles: frozenset[str],
+    ) -> tuple[str, dict, str]:
+        """Validate only the active Config facts required before Task freezing."""
+        capability_manifest = config.capability_manifest_json
+        if (
+            config.status != "active"
+            or not isinstance(capability_manifest, dict)
+            or capability_manifest.get("provider_disabled") is not True
+        ):
+            raise TaskStateConflictError("task_config_invalid")
+
+        if is_v2_config(config):
+            profile_key = config.profile_key
+            required_snapshot_fields = (
+                config.config_sha256,
+                config.release_fingerprint,
+                config.prompt_content_sha256,
+                config.model_snapshot_sha256,
+                config.output_schema_sha256,
+                config.compiled_pipeline_sha256,
+                config.stage_registry_contract_version,
+            )
+            if (
+                not isinstance(profile_key, str)
+                or not profile_key
+                or any(
+                    not isinstance(value, str) or not value
+                    for value in required_snapshot_fields
+                )
+            ):
+                raise TaskStateConflictError("task_config_v2_snapshot_invalid")
+        else:
+            provider_plan = config.provider_plan_json
+            if (
+                not isinstance(provider_plan, dict)
+                or provider_plan.get("enabled") is not False
+            ):
+                raise TaskStateConflictError("task_config_invalid")
+            pipeline = config.compiled_pipeline_json
+            profile_key = pipeline.get("profile_key") if isinstance(pipeline, dict) else None
+
+        if profile_key not in allowed_profiles:
+            raise TaskStateConflictError("task_profile_not_allowed")
+        if (
+            not isinstance(config.compiled_pipeline_json, dict)
+            or config.compiled_pipeline_json.get("profile_key") != profile_key
+        ):
+            raise TaskStateConflictError("task_config_pipeline_invalid")
+        contract, profile_sha = compile_profile_contract(profile_key, self.registry)
+        if (
+            profile_sha != config.compiled_pipeline_sha256
+            or config.stage_registry_contract_version != self.registry.CONTRACT_VERSION
+        ):
+            raise TaskStateConflictError("config_profile_fingerprint_conflict")
+        if not contract.get("stages"):
+            raise TaskStateConflictError("compiled_profile_empty")
+        if contract["stages"][0].get("stage_key") != "study_preparation":
+            raise TaskStateConflictError("compiled_profile_entry_invalid")
+        return profile_key, contract, profile_sha
+
+    @staticmethod
+    def _build_request_snapshot(
+        *,
+        study,
+        series,
+        config,
+        profile_key: str,
+        compiled_profile: dict,
+    ) -> dict:
+        """Freeze the active Config identity once, without dereferencing sources later."""
+        snapshot = {
+            "study_id": study.id,
+            "study_revision_id": study.revision_id,
+            "resolved_manifest_sha256": study.resolved_manifest_sha256,
+            "series": [
+                {
+                    "series_id": item.id,
+                    "manifest_sha256": item.manifest_sha256,
+                    "actual_image_count": item.actual_image_count,
+                }
+                for item in series
+            ],
+            "ai_config_id": config.id,
+            "config_key": config.config_key,
+            "config_version": config.version,
+            "config_sha256": config.config_sha256,
+            "release_fingerprint": config.release_fingerprint,
+            "profile_key": profile_key,
+            "compiled_profile": compiled_profile,
+        }
+        if is_v2_config(config):
+            snapshot.update(
+                {
+                    "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V2,
+                    "config_contract_version": config.config_contract_version,
+                    "prompt_content_sha256": config.prompt_content_sha256,
+                    "model_snapshot_sha256": config.model_snapshot_sha256,
+                    "output_schema_sha256": config.output_schema_sha256,
+                    "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+                    "stage_registry_contract_version": (
+                        config.stage_registry_contract_version
+                    ),
+                }
+            )
+            return snapshot
+
+        prompt_bundle = config.prompt_bundle_json
+        schema_bundle = config.schema_bundle_json
+        if not isinstance(prompt_bundle, dict) or not isinstance(schema_bundle, dict):
+            raise TaskStateConflictError("task_config_v1_bundle_invalid")
+        prompt_bundle_sha = prompt_bundle.get("bundle_sha256")
+        schema_bundle_sha = schema_bundle.get("bundle_sha256")
+        if not isinstance(prompt_bundle_sha, str) or not isinstance(schema_bundle_sha, str):
+            raise TaskStateConflictError("task_config_v1_bundle_invalid")
+        snapshot.update(
+            {
+                "prompt_bundle_sha256": prompt_bundle_sha,
+                "schema_bundle_sha256": schema_bundle_sha,
+            }
+        )
+        return snapshot
+
     @staticmethod
     def _ensure_idempotent_task(
         *, task, study_id: str, study_revision_id: str, config_id: str, request_sha: str
@@ -294,7 +430,7 @@ class TaskService:
         reason: str | None,
         caller: CallerContext,
     ) -> TaskResponse:
-        task = await self.task_dal.get_by_id(task_id)
+        task = await self.task_dal.get_by_id_for_update(task_id)
         if task is None:
             raise TaskNotFoundError("task_not_found")
         if task.requester_id != caller.subject_id:

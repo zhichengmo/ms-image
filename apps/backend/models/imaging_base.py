@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import String, func
+from sqlalchemy import String, func, text
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,13 +26,13 @@ class ImagingRecordBase(BaseModel):
     created_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=6),
         nullable=False,
-        server_default=func.utc_timestamp(6),
+        server_default=text("CURRENT_TIMESTAMP(6)"),
         comment="DATETIME(6): 记录创建时间，UTC",
     )
     updated_at: Mapped[datetime] = mapped_column(
         DATETIME(fsp=6),
         nullable=False,
-        server_default=func.utc_timestamp(6),
+        server_default=text("CURRENT_TIMESTAMP(6)"),
         onupdate=func.utc_timestamp(6),
         comment="DATETIME(6): 记录最后更新时间，UTC",
     )

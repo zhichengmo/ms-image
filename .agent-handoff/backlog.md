@@ -1,43 +1,123 @@
-# 重构待办
+# 待办清单
 
-## 下一会话优先级
+## 已完成基础
 
-- [x] P0 首项：本地 `.env` 已退出版本控制候选；`.env.example` 已脱敏，Secret 扫描未发现其他常见凭据；资产 checkpoint 使用 `codex/ms-image-refactor`，禁止 `git add -A`、reset 或 clean。
-- [x] 有界核对 P0 工程阻断：无 P1A 硬阻断；事务内外部 I/O 由 P1C 替换，旧 tenant/Trace 保留到目标 owner/Audit 合同闭环。
-- [ ] 内部代码完全重构及开始实现已由新会话提示词明确授权；迁移脚本、新建测试脚本、真实数据库操作和生产发布仍分别确认。
-- [ ] 实现 P1A：Session/Study/Series/Image 的 Model（数据模型） -> Schema（接口结构） -> DAL（数据访问层） -> Service（业务服务层）。
-- [x] P1A Session：Model/Schema/SessionDal/SessionService 已实现并完成静态合同验证。
-- [x] P1A Study+Series：双 Model/Schema/DAL 与单一 StudyService 已实现；revision/manifest ready 等待 Image 事实闭环。
-- [x] P1A Image：Model/Schema/ImageDal/ImageService 已实现；上传完成和 ready 状态等待 P1C 可靠性链。
-- [ ] 实现 P1B：API、dependency injection（依赖注入）和 route registration（路由注册），资源 ID 只使用 query/body。
-- [x] P1B 非存储生命周期 API：Session/Study/Series/Image query/abort、resource auth、Service DI 和路由已注册；上传/replace/finalize 待 P1C。
-- [ ] 实现 P1C：在现有 OSS 实现上收敛 ObjectStorageGateway，并闭环 Image validate Outbox/Relay/Worker + reconcile/revision，不接医学 Provider。
-- [x] P1C ObjectStorageGateway：现有 OSS 实现已收敛唯一 Gateway，新 owner namespace 与 direct/multipart/完整校验合同完成。
-- [x] P1C Image 事务性 Outbox：`outbox_record/OutboxDal` 与 `ValidateImageMessage` 已实现；Image `uploading -> validating` 和 `validate_image` 事件使用同一 DB 事务，重复事件执行 owner/version/hash 自校验。
-- [x] P1C Relay：短事务 claim/confirm，事务外 Broker 发布，支持 retry/dead-letter、过期 relay lease reconcile 和 Broker 已接受但 DB confirm 冲突的至少一次恢复。
-- [x] Relay 远端 SHA 门禁：实时确认 `origin/codex/ms-image-refactor` 与本地均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`。
-- [x] P1C 基础：已增加显式事务 session、canonical Series/Study manifest、Image validation lease DAL 和 StudyService 重算入口；未注册 Worker task。
-- [x] P1C Image validation Worker：已复核 Outbox ID/aggregate/version/message/header；Image lease/heartbeat 后在事务外执行 Gateway 校验，单一短事务写 ready 与 Series/Study revision，确定性失败写 quarantined。
-- [x] P1C Image reconcile：已恢复 expired validating lease 和到期 validation event；过期 upload 有对象时补建 validating+Outbox、无对象时隔离；指定 ready Image 可执行完整漂移核查并原子失效 Study revision。
-- [x] P1B/P1C direct prepare API：已由服务端生成 Image ID/version/object key，短事务创建 uploading Image，事务外生成 direct PUT grant；相同 uploading 载荷幂等返回并刷新 expiry。
-- [x] P1B/P1C multipart/complete/abort API：已实现事务外 initiate/sign/complete/abort/HEAD，短事务绑定 upload session 或执行 uploading->validating+Outbox；part manifest SHA 防止重复 complete 漂移。
-- [x] P1B/P1C Image replace：已创建新 version/key 并绑定 supersedes；Worker 同事务完成新 ready、旧 superseded 和 Study revision CAS，失败保留旧 ready。
-- [x] P1B Study finalize：当前 revision 上验证 owner、identity、count/manifest 和进行中 Image 后 CAS completeness/status/ready_at，不创建新 revision 或 Task。
-- [x] P1C 代码完成并标记 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`；未提前通过 G4。
-- [ ] 每个 P0/P1 业务 owner 垂直切片完成后运行静态验证、提交并立即推送；推送失败时停止后续实现并报告。
-- [ ] P2 复用 P1C 的同一 Outbox/Relay，实现 Task + first Stage + Outbox 原子事务和零模型 replay。
+- [x] AI Prompt Control Plane（AI 提示词控制面）Phase A-C：Prompt、Connection、Model Pool、不可变 Config、Task 快照和审计链。
+- [x] Prompt Runtime / AI Gateway（提示词运行时/AI 网关）D1-D4：OpenAI-compatible（OpenAI 兼容）传输、Logical Call/Physical Attempt（逻辑调用/物理尝试）、严格 Schema（结构合同）和三段事务。
+- [x] D5 Primary-only Runtime Foundation（仅主读运行时基础）：Logical Call/Physical Attempt、OSS image signer、unknown Attempt reconcile 与三段事务代码基础；旧 Secret Resolver、Provider 原始响应加密存储和 Gateway adapter 已按用户决策删除。
+- [x] 21 号完整能力链路和新会话 Prompt（提示词）文档。
+- [x] 22 号完整 AI/Prompt（人工智能/提示词）架构参考：逐 Service（服务）、逐 Stage（阶段）合同、表链路、Prompt 生命周期、可靠调用和评测门禁。
+- [x] 23 号后续修正与分阶段实施指南：保留阶段依赖、合同修正与历史新会话 Prompt；当前实施入口已迁移至 24 号文档。
+- [x] 文档权威收口：17/19/20/21/23 号文档均已明确为早期合同、历史入口或目标能力范围；当前事实与新会话入口统一指向 24 号文档和 `AGENT_SESSION_PROMPTS.md` 顶部当前入口。
 
-## 后续阶段
+## P0 审查修正（进入后续能力前）
 
-- [ ] 实现 StageDefinition/Context/Result、StageRegistry 和固定 Profile Validator。
-- [ ] 实现不可变 AI Config、prepared AI Call、预算、receipt 和 unknown reconcile。
-- [ ] 实现 XRay Primary-only 医学链和不可变 Report/current pointer。
-- [ ] Primary 基线资格化后实现 `xray_targeted_review_v1`，冻结 FamilyRouting + 最多一次 TargetedReview，并进行同病例 paired A/B；通过门禁前只允许 validation-only/shadow。
-- [ ] 设计并经单独授权执行旧表语义迁移。
-- [ ] 实现 `ms_image_eval` 4 表和 paired A/B 评测控制面。
+- [x] 文档层拆分 current fact（当前实现事实）、approved target contract（批准目标合同）和 medical release evidence（医学发布证据）。
+- [x] 文档层统一 FamilyRouting 只输出 `primary_final/targeted_review`，不得产生或修改医学状态。
+- [x] 将五个 Family 标为 `v1 routing vocabulary（首版路由词汇）`；全身性、非特异性、多区域和无法唯一归族病例保持 Primary-only。
+- [x] 区分 StudyPreparation 的 technical coverage（技术覆盖）与模型判断的 medical assessability（医学可评估性）。
+- [x] 统一 Targeted 技术失败合同：当前实验 Profile 不静默回退；未来 Primary fallback 必须使用新 Profile 并独立评测。
+- [x] Prompt 合同改为 Shared Medical Core + Primary/Targeted Frozen Entry（共享医学核心加主读/专项冻结入口）。
+- [x] 将完成定义拆为核心诊断链、医学基线和 Targeted/Retry/Multi-Provider/Fallback/Race 逐项资格。
+- [x] 调整依赖顺序：Prompt/模型单变量实验提前；第二 Provider 先只支持 Model A/B（模型对比）。
+- [x] 文档层补充通知幂等、留存/删除、脱敏、成本配额、Task 取消、迟到 Attempt 和 unknown 有界终态合同。
+- [x] 核验现有 FamilyRouting 源码并扩展现有测试：当前只固定 `primary_final`，原样透传 Primary 完整结果，不产生医学状态；真正 `targeted_review` 路由仍属于 M2。
+- [x] 修复 v2 `build_targeted_ai_request_command()`：验证并向 `XRayPromptCommand`/safe context 写入 `family_key/focus_key`，保持单一冻结 Prompt 正文，并增加正反例合同测试。
+- [x] 同步 23 号权威与 `AGENT_SESSION_PROMPTS.md`：将 Targeted family/focus 断点标为 P0-A 已完成，下一会话不得重复修复。
+- [ ] 为 FamilyRouting 建立版本化输入/输出结构：唯一 Family、唯一 Focus、来源 Finding、coverage proof、reason codes、contract version、预算/deadline/资格门禁。
+- [ ] 为 `UnsupportedProviderAttemptLookup` 定义有界终止策略；不能永久 reschedule，也不能把 unknown 当普通失败盲目重发。
+- [x] 核验 StudyPreparation 并增加回归测试：当前只做技术准备，不产生 `non_diagnostic` 或其他医学状态。
+- [x] 最小修正 Task cancel、迟到 Winner、AI Stage 最终化和 Report finalize/publish 幂等代码合同；复用现有 Task/Call/Attempt/Stage/Report 表和 DAL。
+- [ ] 明确 Report Notification（报告通知）的真实 destination/consumer/event key 合同后再补通知幂等；当前无证据，不新增虚构 Outbox 事件。
 
-## 不得提前执行
+## Prompt（提示词）运行合同与医学优化
 
-- 人工复核、在线 Evidence Graph、RiskGate、Topology/OOD 或 Harness。
-- 任意 DAG、Stage 网络微服务化和 CT/MRI 医学执行链。
-- 未授权迁移脚本、测试脚本和真实数据库变更。
+- [ ] Q0 Prompt Inventory（提示词盘点）：只读确认目标 Nacos、数据库 Prompt/Connection/ModelPool/Config/Schema/消息合同、状态、哈希、引用和 active 事实，不输出 Secret。
+- [x] Q0 外部烟测子切片：向目标 Nacos 写入并发布非医疗 smoke Prompt，完成 runtime 读取、规范化、渲染和消息组装；同时核验 `ms-ai-fast` 现有 Nacos Prompt 到 Platform/Provider 的在线参考链。
+- [ ] Q0 剩余：盘点并选择合格的 XRay Primary 医学 Prompt/Config；smoke Prompt 不得替代医学候选。
+- [ ] Q1 Prompt Runtime Contract（提示词运行合同）：选择唯一 Primary 候选，验证安全变量、确定性渲染、developer/user/image/schema 分层、Config 冻结、Task 快照和重放一致性。
+- [x] Q1 子切片：Primary/Targeted `prompt_mode`、Targeted structured user context、`PRIMARY_RESULT_JSON` variables 声明和 frozen Config 重放语义校验。
+- [ ] Q2 Primary Baseline Freeze（主读基线冻结）：E1 后冻结 Prompt、模型、病例、Revision、影像哈希、Schema 和评分器，形成 M1。
+- [ ] Q3 Primary Prompt A/B（主读提示词配对实验）：在 M1 后按 Failure Bank 一次只改变一个 Prompt 主要变量。
+- [ ] Q4 Model A/B（模型配对实验）：第二 Provider 工程资格化后，在同 Prompt 和同病例条件下比较模型。
+- [ ] Q5 Targeted Prompt Qualification（专项提示词资格化）：只在 M2 残余失败证明需要后验证反锚定、完整 Study 重读和完整结果输出。
+- [ ] Q6 Release and Rollback（发布与回滚）：只通过新不可变 Prompt/Config 发布；回滚激活旧 Config，不原地覆盖历史模板。
+
+## 后续实施依赖顺序
+
+### E1 Primary Runtime（仅主读真实运行链）
+
+- [x] 脱敏确认 MySQL、Redis、RabbitMQ、OSS 基础配置，并验证 Redis PING、RabbitMQ 仅连接、主库 `SELECT 1`、OSS Bucket 信息读取；没有写外部依赖。
+- [x] AI/Prompt 链收敛到 `ms-ai-fast`：共享 `NACOS_*`、直接 `GatewayClient`、`AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`、单条 user message；删除旧 `AI_GATEWAY_*` selector、Secret Resolver、response store 和 adapter/composition。
+- [ ] 审阅现有两版未应用迁移对旧 AI 表和数据的兼容性，形成 backup（备份）、baseline/stamp（基线/标记）、write set（写集合）和 rollback（回滚）方案；未经授权不 upgrade。
+- [ ] 创建并迁移 `ms_image_eval（评测库）`；主库迁移后确认 `ai_config_record` 和当前 Connection/Pool/Prompt schema 与 ORM 一致。
+- [ ] 明确 Runtime/Admin JWT（运行时/管理端令牌）信任和密钥生命周期；完成保护 API 与 Control Plane 鉴权配置。
+- [ ] 保持数据库 Connection/Model Pool/Prompt/AI Config 的冻结与审计事实；`secret_ref` 仅作为遗留兼容元数据，不再配置 `MS_IMAGE_AI_SECRET_*` 或进入 Worker 鉴权链。字段级删除等待明确迁移授权。
+- [ ] 配置并接线资格化 Artifact（证据产物）签名键；确认签名键格式、轮换和调用入口，不能只在 `.env` 声明后就视为闭环。
+- [ ] 在真实 Worker 启动环境确认 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY` 被加载，并验证 OSS 影像短签名、MySQL、RabbitMQ/Celery、Provider、Attempt/Stage/Report 同一冻结任务全链。
+- [ ] 跑通 Outbox（事务发件箱）→ Worker（工作进程）→ OSS（对象存储）→ Provider（模型提供方）→ Attempt/Stage finalize（物理尝试/阶段终态化）→ DecisionFinalization（结果定稿）→ Report（报告）。
+- [ ] 验证重复消息、unknown Attempt、事务边界、冻结 Config（配置）和完整 Artifact（证据产物）。
+
+### M1 Primary Medical Baseline（主读医学基线）
+
+- [ ] 冻结病例、Gold（可信金标准）、图像、Prompt、模型、Schema、预算和评分器。
+- [ ] 产出正常/异常分层指标、Failure Bank（失败样本库）、置信区间和 Holdout（留出集）基线。
+
+### Primary Prompt A/B（主读提示词配对实验）
+
+- [ ] 使用 Shared Medical Core + Primary Frozen Entry（共享医学核心加主读冻结入口）建立不可变 Prompt 候选；一次只改变一个主要变量。
+- [ ] 在同病例、同图像、同 Gold、同模型、同 Schema 和同评分器下运行 Failure Bank、完整回归、Paired A/B 和隔离 Holdout。
+
+### Second Provider Minimal Qualification + Model A/B（第二模型最小资格化与模型对比）
+
+- [ ] 独立资格化第二个冻结 Connection/模型候选，只用于同病例 Model A/B；不同时启用 Fallback 或 Race。
+- [ ] 继续复用与 `ms-ai-fast` 同语义的 `GatewayClient`；只有真实不兼容协议出现后才评审额外客户端或 Registry（注册表）。
+- [ ] 同时记录 requested_model/actual_model（请求模型/实际模型），防止 Provider 重定向污染实验变量。
+
+### M2 FamilyRouting + TargetedReview（专项家族路由与专项复核）
+
+- [ ] 将固定 `primary_final（主读直接定稿）` 改为确定性、零模型调用的唯一 Family/Focus（专项家族/关注点）路由。
+- [ ] 只使用胸腔、腹腔、四肢骨关节、轴骨骼、头颈五个 Family（专项家族）。
+- [ ] 接入最多一次 TargetedReview（专项复核），读取同一完整 Study（检查），输出新的完整病例结果。
+- [ ] 与 Primary-only（仅主读）做同病例 Paired A/B（配对 A/B）和 Holdout（留出集）门禁。
+
+### Retry Qualification（多物理尝试重试资格化）
+
+- [ ] 版本化放宽现有 lane（通道）的 `max_attempts（最大尝试次数）`，接入冻结预算、deadline（截止时间）和可重试错误分类。
+- [ ] unknown 未按原幂等身份确认前继续禁止盲发；Winner（胜出结果）产生后禁止新 Attempt。
+
+### Fallback Qualification（自动降级资格化）
+
+- [ ] 评审并在确有必要时最小增加 Attempt 的 `lane_key（通道键）`；先报告 write set（写入文件集合）并等待迁移授权。
+- [ ] 让 `single（单并发执行）` 支持最多两个有序冻结候选，只在明确工程失败后进入后备候选。
+- [ ] 禁止医学结果触发降级，禁止新增 FallbackService（降级服务）。
+
+### Race Qualification（双通道竞速资格化）
+
+- [ ] 版本化启用 `race（并发竞速）`，最多两个通道并发。
+- [ ] 使用一个 Logical Call（逻辑调用）、多个 Physical Attempt（物理尝试）和 `winner_attempt_id CAS（胜出尝试标识比较交换）`。
+- [ ] Winner 只按 `first_technically_valid（首个技术合同完整结果）` 决定；禁止医学投票、拼接和 Python 改判。
+
+## 长期兼容清理
+
+- [ ] 仅在 v1 Config（旧配置）非终态 Task（任务）清零且用户明确授权后，删除 Catalog/Compiler/Bundle（目录/编译器/组合包）兼容链。
+
+## 当前不实施但不影响七项目标
+
+- [ ] 人工复核流程、Web 管理页面、独立 AI 数据库和无证据的新医学 Family（专项家族）不属于本轮完整目标。
+
+## 2026-08-25 — 已完成核心 AI 网络 E2E；待完整任务链资格化
+
+- [x] 写入 Nacos 非医疗 smoke Prompt，并完成 `NacosPromptSourceClient → PromptRenderer → PromptMessageAssembler → GatewayClient → ms-ai-platform → gemini-3.5-flash` 严格 Schema 网络烟测；旧 SecretResolver/GatewayAdapter 实现随后已删除。
+- [ ] 仅当用户要求完整 XRay 任务业务链时，按既有 E1 顺序完成数据库 baseline/migration、冻结 Control Plane、OSS image signer 与 Worker Platform 配置、
+
+## 旧表清理（等待精确范围确认）
+
+- [ ] 对 45 张旧库表按“当前必留 / 历史影像报告保留或迁移 / 旧 AI 治理候选归档删除 / 空表候选删除”形成逐表清单；当前不得删除 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool`。
+- [ ] 用户确认精确保留与删除集合后，先审阅备份/归档目标、调用面移除和迁移 rollback，再执行任何实际表删除。
+
+## 当前开发入口（2026-08-25）
+
+- [ ] 完成 P1 Worker Runtime Qualification（工作进程运行时资格化）：当前 AI/Prompt 代码已按 `ms-ai-fast` 收敛，隔离 OSS synthetic 已通过 PUT/HEAD/Worker GET/同机 signed GET/cleanup；仍需确认真实 Worker 加载 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`、Provider Attempt Lookup 与同一冻结任务的 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report 非敏感证据。
+- [ ] 在 P1（工作进程运行时安全资格化）通过后，完成 E1 Primary-only Runtime（仅主读真实运行链）：ready Revision（就绪修订）-> Outbox（事务发件箱）-> Broker/Worker（消息代理/工作进程）-> OSS（对象存储）-> Provider（模型提供方）-> Attempt/Stage（物理尝试/阶段）-> Finalization（结果定稿）-> Report（报告）。
+- [ ] 仅在 E1（仅主读真实运行链）真实通过后，进入 M1 Primary Medical Baseline（主读医学基线）与 Q3 Primary Prompt A/B（主读提示词配对实验）；之后再按 24 号文档打开 Q4、M2、R1、R2、R3。

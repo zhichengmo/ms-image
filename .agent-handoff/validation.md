@@ -1,129 +1,547 @@
 # 验证历史
 
-| 日期 | 检查 | 结果 | 说明 |
-|---|---|---|---|
-| 2026-08-18 | `docs/history` 全部 Markdown 分类审查 | `passed`（通过） | 14 份历史文档均有归档/取代状态和当前依据；索引覆盖全部文件 |
-| 2026-08-18 | 重构文档本地链接检查 | `passed` | `MISSING_LINKS 0` |
-| 2026-08-18 | 设计母文章节锚点检查 | `passed` | 数据库逐表和评测章节锚点全部可解析 |
-| 2026-08-18 | Markdown 代码围栏平衡 | `passed` | `UNBALANCED_FENCES 0` |
-| 2026-08-18 | Handoff（代理交接）容量和结构检查 | `passed` | `changed=0 warnings=0 unresolved=0` |
-| 2026-08-18 | `AGENTS.md` 交接协议标记 | `passed` | 仅一组 START/END 标记 |
-| 2026-08-18 | 表数量与完全重构授权一致性 | `passed` | 母文、重构文档和 handoff 均标明 10+4 非上限、内部代码可完全替换，且保留兼容/迁移/回滚边界 |
-| 2026-08-18 | XRay 详细流程文档静态检查 | `passed` | 新增 10 个 Mermaid 图块（7 个 flowchart、3 个 sequenceDiagram）；链接缺失 0、围栏不平衡 0、`git diff --check` 通过 |
-| 2026-08-18 | 新会话恢复合同审查 | `passed` | 启动提示、snapshot、backlog 和新会话交接一致：有界 P0 后进入 P1；代码重构已授权，迁移/新测试脚本/真实数据库/生产发布未授权 |
-| 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境未安装 `mmdc`；已检查围栏和人工关系，未做浏览器渲染 |
-| 2026-08-18 | 业务代码测试/数据库验证 | `not run` | 本轮只改文档和交接文件，没有修改业务代码或数据库 |
-| 2026-08-18 | 权威边界与 P1/P2/tenant/OSS 合同交叉检索 | `passed` | 母文、重构导航、计划、交接、详细流程和唯一 Prompt 已同步；历史文档保留原历史表述 |
-| 2026-08-18 | 本轮修改文档本地链接检查 | `passed` | `MISSING_LINKS 0`；只检查本轮当前文档，未把历史外链当本地文件 |
-| 2026-08-18 | 全仓 Markdown 围栏平衡 | `passed` | `UNBALANCED_FENCES 0` |
-| 2026-08-18 | `git diff --check` | `passed` | 无 whitespace error；未跟踪文档另由围栏/链接/内容检查覆盖 |
-| 2026-08-18 | Handoff maintenance `--compact-if-needed` | `passed` | `changed=0 warnings=0 unresolved=0` |
-| 2026-08-18 | XRay 新开发沟通文档本地链接 | `passed` | `MISSING_LINKS 0` |
-| 2026-08-18 | XRay 新开发沟通文档 Markdown 围栏 | `passed` | `UNBALANCED_FENCES 0` |
-| 2026-08-18 | XRay 新开发沟通文档 Mermaid 静态结构 | `passed` | 3 个非空 Mermaid flowchart 均有图类型声明 |
-| 2026-08-18 | XRay 新开发沟通文档 Mermaid 渲染 | `not run` | 环境仍未安装 `mmdc`，未执行渲染级检查 |
-| 2026-08-18 | 新沟通文档 `git diff --check` | `passed` | 无 whitespace error |
-| 2026-08-18 | 全仓 Markdown 目标一致性定向审计 | `findings`（发现问题） | 根 README/USAGE/CLAUDE 仍为 MS-Scaffold；当前 XRay 文档内部一致，但与用户最近的 FamilyRouting 必经图存在未冻结决策 |
-| 2026-08-18 | Skill 适配性检索 | `passed with no install`（通过/未安装） | 官方 Notion 类 Skill 不适配本地 Markdown 权威治理；公开 GitHub 候选采用度与可信证据不足，继续使用 evidence-driven architecture + agent-handoff |
-| 2026-08-18 | `git diff --check`（审计前） | `passed` | 当前工作树无 whitespace error；工作树已有大量用户修改，本轮未回退 |
-| 2026-08-18 | Mermaid（流程图）与本地链接完整复验 | `not run`（未运行） | 本轮聚焦语义一致性审计，沿用上一轮静态检查结果；主链确认并修改正文后必须重新执行 |
-| 2026-08-18 | Canonical Chain 当前文档交叉检索 | `passed`（通过） | Primary/Targeted 两个 Profile、FamilyRouting 仅实验、Targeted fail closed、Evaluation 候选证据 + 人工审批口径一致 |
-| 2026-08-18 | 当前文档本地链接检查 | `passed` | `MISSING_LINKS 0`；检查根入口、Prompt、设计母文、术语表、history 索引和 `docs/refactor/*.md` |
-| 2026-08-18 | 当前文档 Markdown 围栏检查 | `passed` | `UNBALANCED_FENCES 0` |
-| 2026-08-18 | Mermaid 静态结构检查 | `passed` | 26 个 Mermaid 块均有受支持的图类型声明；未做渲染级检查 |
-| 2026-08-18 | `git diff --check` | `passed` | 文档改动无 whitespace error |
-| 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改文档和 handoff，不修改业务实现或真实状态 |
-| 2026-08-18 | Handoff maintenance（交接维护） | `passed` | `changed=0 warnings=0 unresolved=0` |
-| 2026-08-18 | XRay 逐层责任与设计母文定向核验 | `passed` | Session 状态、Service/表边界、两个 Profile、Targeted fail closed、technical report 和 Evaluation/Control 边界一致 |
-| 2026-08-18 | 新逐层文档本地链接检查 | `passed` | `MISSING_LINKS 0`；导航入口均可解析 |
-| 2026-08-18 | 当前文档 Markdown 围栏检查 | `passed` | `UNBALANCED_FENCES 0` |
-| 2026-08-18 | 当前 Mermaid 静态结构检查 | `passed` | 26 个 Mermaid 块均有有效图类型声明 |
-| 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改文档和 handoff |
-| 2026-08-18 | Canonical Chain 跨文档独立审计 | `passed with 2 corrected findings`（通过，修正 2 项） | 默认/Targeted Profile、目标未实现、9a45209a 基线和 reset/clean 口径一致；修正 docs 首页目标库措辞和 01 概览状态 |
-| 2026-08-18 | 逐层接口合同完整性检查 | `passed` | 核心 Service/Stage 均包含调用方、接收、约束、成功/失败输出、消费者和落点；Image 按操作矩阵表达，终态按统一输出矩阵表达 |
-| 2026-08-18 | Git 基线核验 | `passed` | HEAD=`9a45209a`，`9a45209a..HEAD=0`；27 个已跟踪文件有改动，未跟踪实际文件数在审计时为 149，暂存区为空 |
-| 2026-08-18 | `.env` 安全状态检查 | `blocked`（受阻） | `.env` 未跟踪且未被 ignore；只统计 15 个赋值和 3 个敏感类别变量名，未读取值；checkpoint 前必须处理 |
-| 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮仅调整文档与交接状态，不修改业务实现或真实状态 |
-| 2026-08-18 | Handoff maintenance（交接维护） | `passed` | `changed=0 warnings=0 unresolved=0`；本轮基线与风险更新后复验 |
-| 2026-08-18 | 新会话 Prompt 恢复质量检查 | `passed` | 启动顺序、9a45209a 资产基线、.env/checkpoint、P1A/B/C、Canonical Chain、逐层 I/O 和关闭协议与 handoff/重构文档一致 |
-| 2026-08-18 | `AGENT_SESSION_PROMPTS.md` Markdown 围栏 | `passed` | 8 个围栏，配对完整 |
-| 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮仅修改 Prompt、文档和 handoff，不修改业务实现或真实状态 |
-| 2026-08-18 | XRay 开发沟通文档结构检查 | `passed` | 388 行；26 个 Markdown 围栏配对完整，Mermaid 块均有有效图类型 |
-| 2026-08-18 | XRay 沟通文档链接和源码路径检查 | `passed` | 本地 Markdown 链接与 Preserve/Replace 所列当前源码路径均存在 |
-| 2026-08-18 | XRay Canonical Chain 口径检查 | `passed` | 默认链 Primary-only；FamilyRouting/TargetedReview 仅实验；工程状态、医学状态和评测发布边界未混用 |
-| 2026-08-18 | P0 `.env` ignore | `passed` | `git check-ignore -v .env` 命中根 `.gitignore`；`.env` 不再出现在 `git status` 候选中 |
-| 2026-08-18 | P0 脱敏 Secret 扫描 | `passed with rotation follow-up` | 排除 `.env` 后未发现常见云密钥、Gemini key 或私钥；`.env.example` 敏感值已清空，历史本地凭据仍需持有人轮换 |
-| 2026-08-18 | P0 安全文件 `git diff --check` | `passed` | `.gitignore` 与 `.env.example` 无 whitespace error |
-| 2026-08-18 | 资产基线 `python -m compileall -q app workers` | `passed` | 当前应用与 Worker Python 源码语法编译通过 |
-| 2026-08-18 | 资产基线应用导入与路由装载 | `passed` | `from main import app` 成功，装载 26 条路由 |
-| 2026-08-18 | 资产基线全工作树 `git diff --check` | `passed` | 已跟踪差异无 whitespace error |
-| 2026-08-18 | P0 Handoff maintenance | `passed` | `changed=0 warnings=0 unresolved=0` |
-| 2026-08-18 | 资产 checkpoint 暂存区复核 | `passed` | 175 个资产文件；`git diff --cached --check` 通过，`.env` 未暂存，常见云密钥/私钥扫描零命中 |
-| 2026-08-18 | P0 事务边界核对 | `deferred to P1C` | 旧 ingest/technical worker 存在事务期间外部 I/O；不阻止纯数据库 P1A，但禁止直接作为目标 Image Worker |
-| 2026-08-18 | P0 身份与授权核对 | `passed for P1` | JWT subject/scope 强校验可复用；目标资源 owner 校验放在 Service，旧 tenant dependency 暂不删除 |
-| 2026-08-18 | P0 Broker/Trace/启动核对 | `passed for code implementation` | Broker/readiness/Celery 和 API/Admin 启动入口可装载；TraceEvent 在 AuditSink 资格化前保留，未做真实 Broker 运行验证 |
-| 2026-08-18 | P1A Session Python 编译与应用导入 | `passed` | `compileall app workers`、`from main import app`、`SessionService` 导入均成功；应用仍装载 26 条路由 |
-| 2026-08-18 | P1A Session ORM/MySQL DDL 合同 | `passed` | `session_record` 17 列；单列 `VARCHAR(64)` 主键、0 FK、0 Enum、0 tenant；唯一约束和双索引符合母文 |
-| 2026-08-18 | P1A Session Schema UTC 归一 | `passed` | 带时区 `started_at` 可解析并归一为 UTC naive DATETIME；额外字段拒绝 |
-| 2026-08-18 | P1A Session 分层边界 | `passed` | Service 无 SQLAlchemy select/update/delete；数据库访问集中在 `SessionDal(DalBase)` |
-| 2026-08-18 | P1A Study+Series Python 编译与应用导入 | `passed` | `compileall app workers`、应用和 `StudyService` 导入成功；路由数量保持 26 |
-| 2026-08-18 | P1A Study+Series ORM/MySQL DDL 合同 | `passed` | 两表均为单列 opaque 主键、0 FK、0 Enum、0 tenant；唯一约束和索引按母文定义 |
-| 2026-08-18 | P1A Study 稳定 source ID | `passed` | 未提供上游 ID 时完整规范创建载荷生成稳定 ID；载荷变化会改变 ID，长度不超过 128 |
-| 2026-08-18 | P1A Study+Series 分层边界 | `passed` | 只有 `StudyService`；Service 无直接 SQL，Study/Series 分别使用对应 `DalBase` DAL |
-| 2026-08-18 | P1A Image Python 编译与应用导入 | `passed` | `compileall app workers`、应用和 `ImageService` 导入成功；路由数量保持 26 |
-| 2026-08-18 | P1A Image ORM/MySQL DDL 合同 | `passed` | `image_record` 43 列；单列 opaque 主键、0 FK、0 Enum、0 tenant；6 组目标索引与双唯一约束已定义 |
-| 2026-08-18 | P1A Image Schema 合同 | `passed` | direct/multipart 互斥字段、UTC expiry、original 无 source manifest、derived 必须有 lineage 均 fail closed |
-| 2026-08-18 | P1A Image 分层边界 | `passed` | Service 无直接 SQL；版本查询、创建与 CAS 均由 `ImageDal(DalBase)` 完成，未接 OSS/Broker |
-| 2026-08-18 | P1B API Python 编译与 OpenAPI | `passed` | 应用导入成功；OpenAPI 共 27 个 path，其中 8 个为目标 Session/Study/Series/Image 非存储路径 |
-| 2026-08-18 | P1B ID 路由合同 | `passed` | 新目标 API 无路径参数；资源 ID 仅使用 `?id=` query 或 request body |
-| 2026-08-18 | P1B 认证与 DI | `passed` | 新 resource context 依赖已验证 JWT subject/scope，不要求目标表 tenant；API 仅注入 Service，旧 tenant XRay 路由保持不变 |
-| 2026-08-18 | P1B 不可用接口门禁 | `passed` | Gateway/Outbox 未到位前未注册 Image prepare/complete/replace 或 Study finalize，避免假闭环 |
-| 2026-08-18 | P1C Gateway 编译与兼容导入 | `passed` | `compileall app workers`、应用、`ObjectStorageGateway` 和旧 `OSSObjectStore` 导入成功；旧调用符号保留 |
-| 2026-08-18 | P1C Gateway namespace/安全合同 | `passed` | 新 key 为 `image/{image_id}/{generation}/source.{format}`；拒绝 URL/绝对/遍历 key，上传 URL 和 multipart session 不进入 repr |
-| 2026-08-18 | P1C Gateway 内存行为验证 | `passed` | fake OSS 下 direct PUT、HEAD、流式 SHA256/size、PNG 格式、version 和二次 HEAD 变化检测通过；未访问真实 OSS |
-| 2026-08-18 | P1C Gateway ETag 边界 | `passed` | ETag 仅用于 multipart manifest 和对象变化检测；完整 ObjectRef SHA256 来自服务端流式 bytes |
-| 2026-08-18 | P1C Image Outbox Python 编译与应用导入 | `passed` | `compileall app workers`、应用、`ImageService` 和 `OutboxDal` 导入成功；应用装载 36 条路由 |
-| 2026-08-18 | P1C Outbox ORM/MySQL DDL 合同 | `passed` | `outbox_record` 22 列；单列 opaque 主键、0 FK、0 Enum、0 tenant；唯一事件键和三组目标索引符合母文 |
-| 2026-08-18 | P1C Outbox 消息合同 | `passed` | canonical JSON hash 对字段顺序稳定；已有事件的 event key/owner/version/message version/trace/hash 会完整自校验，篡改 event key 被拒绝 |
-| 2026-08-18 | P1C Image complete 事务边界 | `passed by static contract` | `ImageService` 只经 `ImageDal/OutboxDal` flush，request `AsyncSession.begin()` 负责同事务提交；Service 无直接 SQL，未在 API 内发布 Broker |
-| 2026-08-18 | P1C Image Outbox 真实 DB/Broker | `not run` | 未获授权创建迁移或连接真实 MySQL/Broker；当前仅为代码与内存合同验证 |
-| 2026-08-18 | P1C Relay Python 编译与兼容导入 | `passed` | `compileall app workers`、应用、旧 `TransactionalOutboxRelay` 和目标 `OutboxRelay` 导入成功；应用仍装载 36 条路由 |
-| 2026-08-18 | P1C Relay 事务边界与状态行为 | `passed in memory` | fake session/DAL 覆盖 published、retry_wait、attempt exhausted dead-letter、Broker accepted/DB confirm conflict、invalid message dead-letter；publisher 调用时无活动 DB TX |
-| 2026-08-18 | P1C Relay Celery 白名单投递 | `passed in memory` | task ID 使用 Outbox ID；queue/routing/exchange 为 imaging 独立 topology；body 仅含 image ID/version/trace，header 仅含 message version/trace |
-| 2026-08-18 | P1C Relay 旧 XRay 兼容 | `passed by import` | 旧 `workers.xray_accuracy_worker.outbox_relay` 继续构造 `TransactionalOutboxRelay`；未修改旧 tenant DAL 合同 |
-| 2026-08-18 | P1C Relay 真实 Broker/MySQL | `not run` | 未授权真实数据库或 RabbitMQ 演练；Broker confirm、lease 时钟和多进程竞争仍未运行验证 |
-| 2026-08-18 | P1C Relay 远端 SHA 实时确认 | `blocked` | 本地 HEAD 与 remote-tracking ref 均为 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`；SSH 22 端口不可访问，HTTPS 无法解析 `github.com`，故 `git ls-remote` 未能实时确认远端并停止下一切片 |
-| 2026-08-18 | P1C Relay 远端 SHA 重试 | `passed` | 网络恢复后 `git ls-remote --heads origin codex/ms-image-refactor` 返回 `c4fe4c7415f70302d3be1f7c851a67280d1095fb`，与本地 HEAD 完全一致，门禁解除 |
-| 2026-08-18 | P1C 基础 Python 编译与应用导入 | `passed` | `compileall app workers`、manifest/显式 session/ImageDal/StudyService 导入成功；应用仍装载 36 条路由 |
-| 2026-08-18 | P1C canonical manifest | `passed in memory` | 输入顺序变化保持相同 SHA；Series/Study 稳定排序、空 Series 摘要和重复 ready logical key conflict 均验证通过 |
-| 2026-08-18 | P1C Image validation lease 基础 | `passed in memory` | fake DAL 验证 claim 强制刷新 readback、lease owner/generation 条件和 terminal state_version 推进；未连接真实 MySQL |
-| 2026-08-18 | P1C Study revision 重算基础 | `passed in memory` | fake DAL 下 2 个 ready Image 确定性重算 Series count/manifest，并将 Study revision 1->2、completeness=complete、status=validating |
-| 2026-08-18 | P1C Worker task 注册门禁 | `passed` | `workers/imaging_worker` 中仍无 Celery task decorator，基础切片不会消费已发布消息 |
-| 2026-08-18 | P1C Image Worker Python/任务注册 | `passed` | `compileall app workers` 和应用导入成功；`imaging.validate_image` 已注册到 imaging Celery app，应用路由仍为 36 条 |
-| 2026-08-18 | P1C Image Worker Outbox 合同 | `passed in memory` | event ID/event key、aggregate/version、message hash/version、header trace 均复核；篡改 message version 被拒，终态重复消息返回 already_applied |
-| 2026-08-18 | P1C Image Worker 事务边界 | `passed in memory` | fake session/Gateway 断言对象校验时活动 DB TX 为 0；claim 和 terminal 分属短事务，Study conflict 后释放原 lease 重试 |
-| 2026-08-18 | P1C Image Worker 失败分类 | `passed in memory` | ready、确定性 hash mismatch -> quarantined、下载失败 -> retry、重复消息、Study revision conflict -> retry 均覆盖 |
-| 2026-08-18 | P1C Image Worker 静态检查 | `passed` | Ruff、diff check、Service/Worker 导入均通过；Worker/消息未包含 signed URL、access key 或 Secret 字段 |
-| 2026-08-18 | P1C Image reconcile Python/Ruff | `passed` | reconcile、Gateway error normalization、ImageDal/Service 编译和 Ruff 通过；应用仍装载 36 条路由 |
-| 2026-08-18 | P1C Image reconcile 状态行为 | `passed in memory` | fake session 覆盖 expired lease recovery、published event 重放、过期 upload accepted/missing 和指定 ready drift invalidated |
-| 2026-08-18 | P1C Image reconcile 事务边界 | `passed in memory` | fake Gateway 断言 upload HEAD 与 ready 完整校验时活动 DB TX 均为 0；状态更新使用新短事务 |
-| 2026-08-18 | P1C OSS missing 分类 | `passed in memory` | fake OSS `NoSuchKey` 被归一为稳定 `object_not_found`，未暴露 SDK 详情 |
-| 2026-08-18 | P1B direct prepare Python/OpenAPI | `passed` | compile/import 成功；新增 `POST /api/v1/images/prepare-upload`，应用路由从 36 增至 37，响应为 `GenericResponse[ImageUploadTicket]` |
-| 2026-08-18 | P1B direct prepare 事务边界 | `passed in memory` | fake DB/Gateway 断言 Service 创建行时 TX 活跃、生成 signed PUT grant 时 TX 为 0 |
-| 2026-08-18 | P1B direct prepare 幂等/owner | `passed in memory` | 服务端生成 `image/{image_id}/{version}/source.png`；同 uploading 载荷返回同 ID/key，载荷变化冲突，ready logical key 要求 replace |
-| 2026-08-18 | P1B direct prepare 安全门禁 | `passed in memory` | signed URL 从 repr 隐藏且无持久化字段；MP4 和超过 64 MiB 请求在 Schema 层 fail closed |
-| 2026-08-19 | P1B multipart/complete/abort | `passed in memory` | fake DB/Gateway 覆盖 initiate、part signing、complete、abort、bind 失败补偿；全部 OSS I/O 在 TX 外，part/session URL 从 repr 隐藏 |
-| 2026-08-19 | P1B multipart 幂等合同 | `passed in memory` | 规范 part-manifest SHA 写入技术元数据；重复 complete 的 manifest 漂移被拒；NoSuchUpload abort 幂等成功 |
-| 2026-08-19 | P1B Image replace | `passed in memory` | 新 version/key 继承旧 logical slot；prepare/失败期间旧 ready 不变；终态顺序为新 ready、旧 superseded、Study revision，外层 TX 可整体回滚 |
-| 2026-08-19 | P1B Study finalize | `passed in memory` | 成功与重复 finalize、revision 不变、identity 未确认 fail closed 均通过；新增 body-ID 路由后应用共 42 条路由 |
-| 2026-08-19 | P1 最终编译/Ruff/OpenAPI | `passed` | `compileall app workers`、目标文件 Ruff、应用导入成功；42 条路由，7 个目标上传/替换/finalize 路由均无 path ID，imaging task 已注册 |
-| 2026-08-19 | P1 最终分层/Secret/范围 | `passed` | API/Service/Worker 无直接 SQL；`.env` ignored 且未跟踪；新增行 Secret 扫描为 0；未新增迁移或测试脚本 |
-| 2026-08-19 | P1 真实 MySQL/OSS/RabbitMQ | `not run` | 未获授权；并发 CAS、真实 lease/heartbeat、publisher confirm、multipart、对象漂移和迁移后 DDL 均未运行验证 |
-| 2026-08-18 | Mermaid（流程图）渲染 | `not run`（未运行） | 环境没有使用 Mermaid CLI；本轮只做围栏和静态图类型检查 |
-| 2026-08-18 | 业务测试/数据库/迁移验证 | `not run`（未运行） | 本轮只修改沟通文档和 handoff，不修改业务实现或真实状态 |
+## 历史验证归档
+
+- 2026-08-19 至 2026-08-20 的早期验证明细已归档；保留文件：`archive/validation-legacy-pre-record-rules-20260825T074216762236Z.md`。当前验证记录从下方“记录规则”开始。
 
 ## 记录规则
 
 - 记录已运行、失败和有意未运行的验证。
 - 失败只写简明原因和下一动作，不粘贴长日志。
 - 文档结构通过不代表目标代码、数据库或医学准确率已经通过。
+
+| 2026-08-20 | QJ/MS-Image 静态架构审计 | `passed` | 只读覆盖 QJ 的 backend/compose/Kong 与 MS-Image 的 API、Service、CRUD、Model、Schema、Core、Worker、main/Compose；输出记录在 16 号文档，未读取 `.env` 或连接外部系统。 |
+| 2026-08-20 | 调整文档导航与格式 | `passed` | 新增 `docs/refactor/16-qj-reference-and-modular-convergence-plan.md`（805 行）并接入 docs/refactor 导航；`git diff --check` 通过，内部 Markdown 链接目标存在。 |
+| 2026-08-20 | 运行测试/真实基础设施 | `not run` | 本轮仅修改文档与 handoff；未运行 Python 测试、未生成测试脚本、未迁移、未连接真实 MySQL/OSS/RabbitMQ/Kong/Nacos/Provider。 |
+| 2026-08-20 | 新会话交接与启动提示 | `passed` | 08 号交接已改为当前基线和 16 号 Phase 判定；`AGENT_SESSION_PROMPTS.md` 新增可复制的 QJ 模块收敛启动提示；`git diff --check` 通过。 |
+| 2026-08-20 | QJ 收敛文档反向审计 | `passed` | 独立复核当前 HEAD、17 号 Prompt 合同、08/16/导航/启动提示、公共 Stage/AIRequest/HD source 约束；修正历史基线、必读链、默认 Phase 条件与 HD 按需连接边界。 |
+| 2026-08-20 | 文档链接、空白与 handoff 检查 | `passed` | 08/16/17/重构导航/文档中心的本地 Markdown 链接目标通过；`git diff --check` 通过；handoff maintenance 无 warning/unresolved。 |
+| 2026-08-20 | QJ 借鉴决策门 Prompt 文档 | `passed` | 新增 18 号只读评审提示，并将 08/文档导航切换为“仅评审默认不实施、具体最小切片另行授权”的入口；`git diff --check` 通过。 |
+
+| 2026-08-21 | Runtime 扁平化提交与远端同步 | `passed` | `f92d9e6` 已提交并推送；随后 CI 门禁提交 `4c9ca1a` 也已推送；远端分支与本地 HEAD 一致。 |
+| 2026-08-21 | 扁平化后静态回归检查 | `passed` | `ruff check apps/runtime evaluation/replay`、`python -m compileall -q apps/runtime evaluation/replay`、应用/Worker import、Runtime 边界断言、旧活动路径扫描、两种 Compose config 和 `git diff --check` 均通过。 |
+| 2026-08-21 | Runtime Docker 镜像构建 | `blocked` | `docker build -f apps/runtime/Dockerfile -t ms-image-runtime:monorepo-foundation .` 因本机 Docker daemon 未启动失败；CI 已加入同一镜像构建步骤。 |
+
+| 2026-08-20 | Monorepo 新会话 Prompt 文档 | `passed` | 新增 20 号详细 Prompt；Markdown 围栏、尾随空白与所引本地文档路径检查通过，handoff tracked diff check 通过。仅生成会话交接文档，未修改 Runtime/Worker/Compose/DB，未运行真实基础设施。 |
+
+| 2026-08-20 | Three-Service Readiness Audit | `passed` | 只读核对 `pwd`、branch、HEAD、log、status、diff、入口/Compose/Worker/DB/readiness/import 拓扑；`git diff --check` 通过。未运行 compile/import、`docker compose config`、测试、迁移或真实基础设施命令，以避免本阶段产生 pyc、展开环境值或触碰外部依赖。 |
+| 2026-08-20 | 旧 AI 链路最终数据库设计审计 | `passed` | 只读核对旧模型、DAL、ConfigService、PromptService、PoolOverride 和当前 `AIConfigRecord`/Task 冻结字段；六张核心表加只追加审计表的目标设计未实施，未修改源码、ORM、迁移或真实数据库。 |
+| 2026-08-20 | MR-1 diff、语法与唯一源码 | `passed` | `git diff --check`、`python -m compileall -q services/runtime` 通过；根 `app/`、`workers/` 和四个旧入口不存在，Runtime 目标目录齐全。 |
+| 2026-08-20 | MR-1 Compose 静态配置 | `passed` | `docker compose -f docker-compose.yml config --quiet` 通过；root context、Runtime Dockerfile、user/admin、broker profile 的 Worker/Relay 配置可解析。 |
+| 2026-08-20 | MR-1 Runtime/Prompt/模型移动核验 | `passed` | 静态 module discovery 找到 main/app/workers；Prompt 路径只解析至根 `prompts/xray`；`services/runtime/app/models/evaluation.py` 与移动前 AST 一致。 |
+| 2026-08-20 | MR-1 Runtime import、镜像 build 与真实基础设施 | `not run` | import 可能读取本地 `.env`，为遵守 Secret 约束未执行；未构建 Docker 镜像，未连接 MySQL/Redis/RabbitMQ/OSS/Provider。 |
+| 2026-08-20 | Phase 2A compile/ruff/Compose | `passed` | `python -m compileall -q services/runtime`、目标文件 `ruff check`、`git diff --check` 和 `docker compose config --quiet` 通过。 |
+| 2026-08-20 | Phase 2A OperationalAlert Schema 与 Runbook | `passed` | Pydantic extra-forbid/字段合同通过；Runbook 覆盖 23 个稳定告警 code，并明确 `oldest_message_age_seconds` unsupported。 |
+| 2026-08-20 | Phase 2A 既有测试/真实依赖 | `not run` | 仓库没有可安全运行的既有测试目录；未生成测试脚本，未导入可能读取 `.env` 的 Runtime，未连接 MySQL/Redis/RabbitMQ/OSS/Provider。 |
+## 2026-08-20 — Monorepo Foundation 只读审计
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| 活跃代码 legacy 引用审计 | WARNING | `evaluation/replay/__init__.py` 仍引用已删除的 `workers.xray_accuracy_worker`；未修改 |
+| Compose/Docker/Alembic/Prompt 边界审计 | WARNING | root Compose、root Alembic 和 root Prompt 资产仍有效，尚未形成下一切片的收敛决策 |
+| 真实 Runtime import/entrypoint/Docker build | NOT RUN | 避免自动读取本地 `.env`、连接真实基础设施或泄露 Secret |
+| Runtime 内部导入图 | WARNING | `services/runtime` 内部 `app`/`workers` 引用可静态解析；`evaluation/replay/__init__.py:3` 唯一指向已不存在的 `workers.xray_accuracy_worker.replay` |
+| Root-only `app` module lookup | WARNING | 仅仓库根路径时找不到 `app`；Runtime 启动脚本通过 `RUNTIME_ROOT` 注入路径，当前未冻结 root 模块启动合同 |
+| Monorepo tooling inventory | WARNING | 未发现 tracked tests、`pyproject.toml`、root task runner、`deploy/` 或 CI 配置 |
+
+| 2026-08-20 | MR-1F 第一轮 Runtime Foundation 只读审计 | `passed with warnings` | 确认 `services/runtime` 唯一源码、脚本 `sys.path` 注入、Docker `/app/app` 复制关系、root Compose/Alembic/Prompt 保留、无活动 `evaluation/replay` 消费者、Imaging Reconcile 仅一次性 CLI、Worker/Relay 无独立 healthcheck；`env -u PYTHONPATH` 下 root-only `app` lookup 为 `None`，`PYTHONPATH=services/runtime` 可发现；未修改代码、未导入 Runtime、未构建镜像、未连接真实依赖。 |
+
+| 2026-08-20 | Prompt 端到端文档链路 | `passed` | `git diff --check` 通过；14 号文档新增配置发布/Primary/Targeted/评测五段 Prompt 链；14/17 号 Markdown 围栏分别为 18/114（均为偶数）；17 号 `language` 示例和固定决策均为 `zh-CN`；未运行业务测试、迁移或真实 Provider。 |
+
+| 2026-08-20 | MR-1F 第二轮源码缺口复核 | `passed with warnings` | 复核入口、Compose/Docker、Alembic/Prompt 根资产、双 DB/Worker/Relay/Reconcile、MS-HD import 初始化和 legacy replay；确认唯一失效活动导入、root-only `app` 不可发现、Relay/Worker 生命周期缺口及无 Secret Runtime import/build 未执行。未修改源码或运行配置。 |
+
+| 2026-08-21 | MS-HD opt-in 生命周期 | `passed` | `MYSQL_HD_ENABLED` 默认关闭时导入不创建 `async_engine_hd`/`session_factory_hd`；未显式启用时调用初始化返回 `ms_hd_database_disabled`；显式启用只创建 engine/session factory，随后 dispose；未连接真实数据库。 |
+| 2026-08-21 | Runtime Foundation 代码静态检查 | `passed` | `ruff check services/runtime/app/core/async_db.py services/runtime/app/core/config.py`、`python -m compileall -q services/runtime/app/core/async_db.py services/runtime/app/core/config.py`、`git diff --check` 通过。 |
+| 2026-08-21 | Compose 静态配置回归 | `passed` | `docker compose --env-file /dev/null config --quiet` 与 `docker compose --env-file /dev/null --profile broker config --quiet` 通过；未启动容器。 |
+| 2026-08-21 | Docker 镜像构建 | `not run` | 本机 Docker daemon 未启动：`Cannot connect to the Docker daemon at unix:///Users/mozhicheng/.docker/run/docker.sock`。 |
+| 2026-08-21 | 真实 Runtime/DB/OSS/Broker/Provider | `not run` | 未读取 Secret、未连接真实基础设施；真实 Runtime readiness、Provider qualification 和医学准确率仍未知。 |
+| 2026-08-21 | Root-qualified Runtime/Worker import | `passed` | 在仓库根路径且不设置 `PYTHONPATH` 时，`services.runtime.main`、`services.runtime.workers.imaging_worker.celery_app` 和 Evaluation Celery app 均可导入；容器式顶层 `main`/`workers` 导入仍通过。 |
+| 2026-08-21 | Replay legacy reference audit | `passed with boundary` | `evaluation/replay/__init__.py` 仅保留空兼容 namespace，源码不再导入 `workers.xray_accuracy_worker`；未恢复旧执行链，外部消费者未知。 |
+| 2026-08-21 | Worker/Relay Compose dependency boundary | `passed` | Compose config 与 YAML assertion 均确认 Imaging=`mysql+rabbitmq`、Evaluation=`mysql-evaluation+rabbitmq`；未启动容器或真实依赖。 |
+
+| 2026-08-21 | apps/runtime 路径迁移静态验证 | `passed` | `ruff check apps/runtime evaluation/replay`、`python -m compileall -q apps/runtime evaluation/replay`、两种 `docker compose --env-file /dev/null ... config --quiet`、`git diff --check`、`git diff --cached --check` 均通过；旧 `services/runtime` 目录不存在。 |
+| 2026-08-21 | apps/runtime 无 Secret 导入验证 | `passed` | 在 `/tmp` 工作目录和显式 import root 下，`apps.runtime.main`、两类 Worker Celery app 以及容器式 `main`/`workers.*` 导入通过；未读取仓库 `.env`。 |
+| 2026-08-21 | apps/runtime Docker build | `blocked` | 尚未执行镜像构建；本机 Docker daemon 仍未资格化，继续保持 `NOT_RUNTIME_VALIDATED`。 |
+
+| 2026-08-21 | Runtime 服务根扁平化 | `passed` | 活动源码已从 `apps/runtime/backend/*` 扁平为 `apps/runtime/*`；`apps.runtime.backend`/`apps/runtime/backend` 扫描无命中，旧目录不存在；`ruff check`、`compileall`、两种 Compose config、`git diff --check` 和无 Secret import 通过。 |
+| 2026-08-21 | Runtime Docker build | `blocked` | `docker build -f apps/runtime/Dockerfile -t ms-image-runtime:monorepo-foundation .` 未能连接 `unix:///Users/mozhicheng/.docker/run/docker.sock`，Docker daemon 未启动。 |
+| 2026-08-21 | QJ Backend Monorepo 静态复核 | `passed` | `ruff check apps evaluation/replay`、`python -m compileall -q apps evaluation/replay`、`apps.backend.services.{runtime,ai_control,evaluation_control}.main` 与两个 Worker 导入、两种 Compose config，以及 retired import/服务私有共享层扫描均通过。 |
+| 2026-08-21 | Backend Monorepo Git 收口 | `blocked` | 当前会话不能创建 `.git/index.lock`；本轮 `apps/backend` 重组未能暂存、提交或推送。未尝试 `git add -A`，以免混入用户 docs/handoff 改动或遗留 index 状态。 |
+| 2026-08-21 | Backend Monorepo Git 收口 | `passed` | 明确暂存应用重组联动文件后提交并推送 `3c005d8 refactor: align backend monorepo service layout`；用户 docs/handoff 改动未进入提交。 |
+| 2026-08-21 | Backend 镜像构建与隔离入口验证 | `passed` | Docker Desktop 启动后，`docker build -f apps/backend/Dockerfile -t ms-image-applications:monorepo .` 成功；`--network none` 下导入三个 ASGI/两个 Worker，三个 Uvicorn 均完成 lifespan startup，两个 Celery Worker CLI 均解析成功。未连接真实依赖。 |
+| 2026-08-21 | Worker delivery/upgrade 合同 | `passed` | `ruff check`、`compileall`、默认/broker Compose config 通过；两 Worker 的 `worker_concurrency=1`、`worker_prefetch_multiplier=1` 断言在本地与无网络镜像内均通过；Compose 渲染为 `2m10s` worker stop grace。提交并推送 `a0d903b`。 |
+| 2026-08-21 | Runtime Stage handler 收敛 | `passed` | `ruff check apps evaluation/replay`、`python -m compileall -q apps evaluation/replay`、`git diff --check` 通过；`ImagingExecutionService.execute_stage`、Worker 与 registry handler import 合同通过。未运行真实 DB/Broker/Provider。 |
+| 2026-08-21 | Image 上传 API → Service workflow 收敛 | `passed` | 同一组 Ruff/compile/diff 检查通过；Image 路由集合与 `ImageService` 的八个 workflow facade 导入核验通过。未创建测试脚本，未运行真实 MySQL/OSS/multipart 请求。 |
+| 2026-08-21 | Image Reconciler → ImageService 收敛 | `passed` | `ruff check apps evaluation/replay`、`python -m compileall -q apps evaluation/replay`、`git diff --check` 与模块合同通过；Imaging Worker 已无 `ImageDal`/`ObjectReconcileCursorDal` 构造。外部 Cron/Kubernetes 调度合同仍 UNKNOWN。 |
+| 2026-08-21 | Outbox Relay → Service 持久化边界 | `passed` | `ruff check apps evaluation/replay`、`python -m compileall -q apps evaluation/replay`、`git diff --check` 通过；inline fake behavioral contract 验证 shared relay 的 claim/publish/confirm/reconcile 端口调用，两个 Worker 无 CRUD import/DAL 构造，且两个真实 Service facade 的 module-boundary contract 通过。未运行真实 Broker/DB。 |
+
+| 2026-08-21 | 19 号 AI/Prompt 开发文档 whitespace 检查 | `passed` | `git diff --check -- docs/refactor/19-ai-prompt-control-plane-web-and-runtime-architecture.md` 无 whitespace error。 |
+| 2026-08-21 | 19 号文档禁用模式与目标合同扫描 | `passed` | 无 `/{id}`、`tenant_id`、明文 API Key 字段、目标 role/family/focus/strategy 表或首期独立控制面数据库；遗留名仅出现在删除/兼容说明中。 |
+| 2026-08-21 | 19 号文档 Markdown 结构 | `passed` | 围栏数量为偶数，文档内相对链接目标存在，7 张目标表、分层落点和 provider-disabled-first 合同均存在。 |
+| 2026-08-21 | AI/Prompt 业务实现、迁移与真实基础设施 | `not run` | 本轮仅修改开发文档；未运行 Python 业务测试，未生成迁移或测试脚本，未连接真实 MySQL、OSS、RabbitMQ 或 Provider。 |
+| 2026-08-21 | 19 号文档 7 表字段/索引结构化核验 | `passed` | 7 表字段数 17/19/18/41/15/34/38，总计 182；每表首字段为 `id`，均有 `PRIMARY KEY (id)`，无重复字段，所有索引/唯一约束引用字段存在。 |
+| 2026-08-21 | 19 号文档字段注释与禁用模式核验 | `passed` | 所有字段 comment 均含类型候选和中文解释；无 `/{id}`、`tenant_id`、数据库外键或数据库 ENUM；Markdown 围栏平衡。 |
+| 2026-08-21 | 19 号文档运行链合同核验 | `passed` | 目标链、Prompt 四类写命令 `request_id`、Audit 幂等唯一约束、activation slot SHA、prepared→sending CAS、Task 预算/Call reservation、Winner CAS、Provider-disabled 边界和 Call/Attempt disposition 分离均存在。 |
+| 2026-08-21 | 19 号文档及 handoff whitespace 检查 | `passed` | `git diff --check -- docs/refactor/19-ai-prompt-control-plane-web-and-runtime-architecture.md .agent-handoff AGENT_HANDOFF.md` 通过。 |
+| 2026-08-21 | AI/Prompt 业务实现、迁移、测试与真实基础设施复核 | `not run` | 当前只完成设计合同核验；未生成迁移/测试脚本，未运行真实 MySQL、OSS、RabbitMQ、Secret Manager、Provider 或医学评测。 |
+
+| 2026-08-21 | 本地 Conda 环境与 Runtime 启动 | `passed` | 新建 `/opt/homebrew/anaconda3/envs/ms-image`（Python 3.11.15）；`python -m pip install -r apps/backend/requirements.txt`、`python -m pip check` 通过；Runtime/AI Control/Evaluation Control ASGI 导入通过；项目 Redis probe 成功；Runtime PID 34314 在 `127.0.0.1:8000`，`GET /` 与 `GET /api/v1/health` 均为 HTTP 200。 |
+| 2026-08-21 | 本地 Compose Redis 备选启动 | `not run` | `docker compose up -d redis` 因本机既有 Redis 已占用 `127.0.0.1:6379` 失败；已执行 `docker compose down --volumes --remove-orphans` 清理本次创建的空资源，改用既有本地 Redis 并完成项目连接探针。 |
+| 2026-08-21 | MySQL/RabbitMQ/OSS/Provider/Worker 真实运行 | `not run` | 本轮仅满足本地 Runtime 启动请求；未启动或连接上述依赖，未运行迁移或业务测试。 |
+| 2026-08-21 | Python 3.13 本地 Runtime 验证 | `passed` | `conda install -n ms-image python=3.13` 成功，环境为 Python 3.13.15；重新安装 `apps/backend/requirements.txt` 后 `pip check` 通过；Runtime、AI Control、Evaluation Control ASGI 导入和 Redis probe 通过；Runtime PID 39542 在 `127.0.0.1:8000`，`GET /`、`GET /api/v1/health`、`GET /docs` 均为 HTTP 200。 |
+| 2026-08-21 | Python 3.13 Docker/真实依赖兼容性 | `not run` | `apps/backend/Dockerfile` 仍为 Python 3.11；本轮未构建或运行 3.13 镜像，未连接 MySQL、RabbitMQ、OSS、Provider 或 Worker，未运行迁移。 |
+
+## 2026-08-23 — AI Prompt 控制面 Phase A-C 静态验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python -m ruff check apps/backend/core/ai ... apps/backend/services/runtime/stages/xray/prompt_commands.py` | PASS | 覆盖本轮 Phase A-C 的 core、models、schemas、CRUD、AI Control、Runtime 改动，输出 `All checks passed!`。 |
+| `python -m compileall -q apps/backend` | PASS | 所有后端 Python 文件可编译。 |
+| `git diff --check -- apps/backend` | PASS | 无空白错误。 |
+| 控制面 API 路由检索 | PASS | 未检出 `/{id}` 或含路径参数的资源路由。 |
+| v2 Runtime 依赖检索 | PASS | `AIRequestService` 的 v2 路径未引用 Prompt/Pool/Connection DAL、网络客户端或 Secret 解析；旧 `PromptCatalog/PromptCompiler` 引用仅保留在 v1 分支。 |
+| Alembic migration / MySQL / Secret Manager / Provider / Broker / OSS | NOT RUN | 用户未授权；本轮不得生成迁移、执行真实基础设施或网络验证。 |
+| 测试改动与业务测试 | NOT RUN | 用户未单独授权测试改动；未创建独立测试脚本。 |
+
+
+## 2026-08-24 — AI Prompt 控制面 Phase A-C 最终离线验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `ruff check apps` | `passed` | 全部应用代码通过静态检查。 |
+| `ruff check alembic_migrations/versions` | `passed` | 本轮 revision 通过静态检查；未 lint 既有 `alembic_migrations/env.py` 的基线 E402。 |
+| `/opt/homebrew/anaconda3/envs/ms-image/bin/python -m compileall -q apps alembic_migrations` | `passed` | Python 3.13.15 下应用和 migration 均可编译。 |
+| `/opt/homebrew/anaconda3/envs/ms-image/bin/python -m pytest apps/backend/tests` | `passed` | 收集 24 项，`24 passed, 1 warning`；warning 为仓库既有 Pydantic class-based config deprecation。测试不连接 DB/网络、不解析 Secret、不启用 Provider。 |
+| `/opt/homebrew/anaconda3/envs/ms-image/bin/python -m alembic heads` | `passed` | 输出 `20260824_01 (head)`。 |
+| `alembic upgrade head --sql` 与 `alembic downgrade head:base --sql` | `passed` | 仅生成离线 MySQL SQL；upgrade 含四张控制面表和 Audit 幂等唯一约束，扫描确认不含 FK、ENUM、`ai_call_attempt_record` 或凭证模式。`downgrade head:base --sql` 是 Alembic 接受的完整离线降级范围。 |
+| CI pytest 依赖核验 | `passed` | `apps/backend/requirements.txt` 已固定 `pytest==7.4.3`、`pytest-asyncio==0.21.1`，workflow 在安装 requirements 后运行后端 tests。 |
+| `git diff --check` | `passed` | 当前未提交工作树无空白错误。 |
+| 真实 MySQL migration、Secret Manager、Provider、RabbitMQ、OSS、Web | `not run` | 明确保持在当前离线/provider-disabled 范围外；非生产 MySQL 演练需后续数据库/数据 owner 条件。 |
+| 精确 CI Python 3.11 pytest 复现 | `not run` | workflow 目标为 Python 3.11；本机未安装 `python3.11`，当前 `ms-image` 环境为 Python 3.13.15。依赖已由 requirements 固定，仍应以 CI 或独立 3.11 环境确认。 |
+
+
+## 2026-08-24 — AI Prompt 控制面隔离 MySQL 9.3.0 演练
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 临时 DB `stamp head → downgrade base` | `passed` | 控制面四表删除、Config/Call v2 专属列删除、v1 Bundle JSON 恢复 NOT NULL、`uq_ai_config_record_release_fingerprint` 恢复、Alembic marker 为空。 |
+| 临时 DB `upgrade head` | `passed` | 四张控制面表、Config/Call v2 扩展、Audit 幂等唯一约束及 marker `20260824_01` 均写入成功。 |
+| MySQL 信息架构核验 | `passed` | 目标六表中 FK=0、ENUM=0、`ai_call_attempt_record`=0；四表、14 个 Config v2 核心列、3 个 Call v2 列和规定索引/唯一约束存在。 |
+| v2 downgrade guard | `passed` | 临时 v1 兼容行标记为 `ai-config.v2` 后，`alembic downgrade base` 必定报 `ai_prompt_control_plane_downgrade_blocked_by_v2_config_rows`；失败未修改 head schema 或 marker。 |
+| Alembic URL 与时间戳兼容修复 | `passed` | `render_as_string(hide_password=False)` 允许特殊字符密码的在线连接；MySQL 9.3.0 拒绝 `UTC_TIMESTAMP(6)` default，迁移/模型改用 `CURRENT_TIMESTAMP(6)`；应用连接与 Alembic 用 `init_command` 固定 `+00:00` session。 |
+| 应用 async engine 时间戳 probe | `passed` | 插入/删除临时 Prompt，确认 `@@session.time_zone=+00:00`，`created_at`/`updated_at` 与 `UTC_TIMESTAMP(6)` 相符；无残留 probe 行/表。 |
+| 隔离资源清理 | `passed` | 临时 schema、临时 MySQL 用户和三份 `/tmp/ms_image_aicp_phaseac_*` 凭据文件均已删除。 |
+| `ruff check apps`、`ruff check alembic_migrations/versions` | `passed` | 使用 PATH 中 Ruff 0.8.4；conda Python 环境本身未安装 `ruff` module，因此不使用 `python -m ruff`。 |
+| `compileall -q apps alembic_migrations` | `passed` | Python 3.13.15。 |
+| `pytest apps/backend/tests` | `passed` | `24 passed, 1 warning`；warning 为既有 Pydantic class-based config deprecation。 |
+| `alembic heads`、离线 upgrade/downgrade SQL 合同扫描、`git diff --check` | `passed` | head 为 `20260824_01`；离线 SQL 包含四表/`CURRENT_TIMESTAMP(6)`，不含 FK/ENUM/Attempt 表；无 whitespace error。 |
+
+## 2026-08-24 — ms-ai-fast 接入分支建立
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `git switch -c codex/ms-ai-fast-integration` | `passed` | 从当前 HEAD `492a249c98175bf818ce092451585db766d73e76` 创建并切换新分支。 |
+| `git status --short` | `passed` | 分支切换后立即统计为 73 项既有未提交工作树条目；未发生 reset、clean 或文件覆盖。 |
+| 业务测试、Provider、Secret、网络 | `not run` | 本次仅创建分支和更新既有 handoff 状态；未改业务代码。 |
+
+## 2026-08-24 — 分支范围更名
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `git branch -m codex/prompt-runtime-ai-gateway` | `passed` | 当前分支名称从过宽的 `codex/ms-ai-fast-integration` 更正为聚焦 Prompt Runtime 与 AI Gateway 的名称。 |
+| `git status --short` | `passed` | 重命名后仍为 73 项既有未提交工作树条目；未修改业务源码、配置、迁移或测试。 |
+
+## 2026-08-24 — AI Gateway 与 Prompt Runtime D1/D2/D4 离线验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `compileall -q apps/backend alembic_migrations` | `passed` | 本机 Python 3.12 环境。 |
+| `ruff check apps evaluation/replay` | `passed` | CI 同款命令。 |
+| `pytest apps/backend/tests` | `passed` | `45 passed, 1 warning`；warning 为既有 Pydantic class-based config deprecation。 |
+| `alembic heads` | `passed` | head 为 `20260824_02`。 |
+| `alembic upgrade 20260824_01:20260824_02 --sql` | `passed` | 生成三表增量列与 `CREATE TABLE ai_call_attempt_record`。 |
+| `alembic downgrade 20260824_02:20260824_01 --sql` | `passed` | 先 DROP attempt 表，再 DROP 各新增列。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+
+## 2026-08-24 — D5 开发文档校验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `wc -l docs/refactor/20-monorepo-refactor-new-session-prompt.md` | `passed` | 文档共 1186 行。 |
+| Markdown fence（围栏）计数 | `passed` | 共有 52 个三反引号围栏行，数量为偶数。 |
+| 旧口径与关键术语检索 | `passed` | `MR-1F` 和 `file_asset` 只出现在替代/禁止语境；SecretResolver、Signer、Store、FamilyRouting、TargetedReview、Call/Attempt 和三项发布口径均存在。 |
+| `git diff --check -- docs/refactor/20-monorepo-refactor-new-session-prompt.md docs/refactor/README.md` | `passed` | 两份交付文档无 whitespace error。 |
+| 文档链接存在性 | `passed` | 19 号架构文档和 `AGENT_HANDOFF.md` 均存在。 |
+| 业务代码测试 | `not run by design` | 本轮只整理文档，没有修改业务代码；沿用此前 54 项 pytest、Ruff、compileall 与分段在线验证事实。 |
+| 共享基础设施/医学准确率 | `not run` | 完整 Worker Runtime、共享 MySQL/OSS/Broker 和 Gold/Holdout 评测仍未资格化。 |
+| 19 号文档与源码交叉核验 | `passed` | 已将 `DOCUMENT_ONLY / NOT_IMPLEMENTED` 和“v2 仍要求 active Config”的过期描述改为当前实现状态，并保留 v1 active-only 兼容例外。 |
+| 真实 MySQL DDL / Nacos / Secret Manager / Provider / Worker 编排 | `not run` | 等待共享非生产资格、授权与真实基础设施。 |
+
+## 2026-08-24 — 按代码审查修复后复验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `compileall -q apps/backend` | `passed` | Python 3.12。 |
+| `pytest apps/backend/tests` | `passed` | `48 passed, 1 warning`；新增 message contract 变量校验与 Nacos 畸形 200 fail-closed 用例。 |
+| `ruff check apps evaluation/replay` | `passed` | 无新增 lint 问题。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+
+## 2026-08-24 — 链路烟测与渲染器回归
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `/tmp/ms_image_gateway_smoke.py` | `passed` | 冻结 Config → 多消息渲染 → Gateway JSON/SSE → 严格 Schema → accepted 结构化结果；模型偷换与 Schema 拒绝均 fail closed。 |
+| `pytest apps/backend/tests` | `passed` | `49 passed, 1 warning`；新增嵌套 JSON 上下文的渲染器回归用例。 |
+| `ruff check apps evaluation/replay`、`git diff --check` | `passed` | 无新增问题。 |
+| 真实 MySQL 迁移 / Nacos / Provider 网络 | `not run` | 本机 MySQL 已启动，但迁移需先 baseline/stamp；无真实 Provider/Nacos 资格。 |
+
+## 2026-08-24 — `$var` 占位符验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `pytest apps/backend/tests` | `passed` | `51 passed, 1 warning`；新增 `$SAFE_*` 等价占位符、`$base_info` 拒绝、`$UNDECLARED` 拒绝、import 接受 `$SAFE_*` 等用例。 |
+| `ruff check apps evaluation/replay`、`git diff --check` | `passed` | 无新增问题。 |
+| 进程内 `$SAFE_*` 链路（render → message contract → Gateway JSON → accepted） | `passed` | 模拟 Provider 返回 `{'result': 'abnormal'}`，模型与 Schema fail-closed 保持。 |
+
+## 2026-08-24 — 业务 `$var` 别名与 JSON 示例验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `pytest apps/backend/tests` | `passed` | `52 passed, 1 warning`；新增 `$base_info` 归一化、`$previous_answer` 映射、模板 `}}` 字面量用例。 |
+| `ruff check apps evaluation/replay`、`git diff --check` | `passed` | 无新增问题。 |
+| 「$base_info + 内嵌 JSON 示例」链路 | `passed` | 导入归一化为 `{{ SAFE_STUDY_CONTEXT_JSON }}`，渲染 + message contract + Gateway JSON 后 accepted。 |
+
+## 2026-08-24 — Prompt Runtime / AI Gateway D3 最终验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `PYTHONPATH=. pytest -q apps/backend/tests` | `passed` | `52 passed, 1 warning in 1.04s`；warning 为既有 Pydantic V2 class-based config deprecation。 |
+| `ruff check apps evaluation/replay` | `passed` | `All checks passed!` |
+| `python -m compileall apps/backend` | `passed` | 关键 Prompt/Gateway/Runtime/Stage/Worker 文件均可编译。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| `ms-ai-fast` 对照检查 | `passed` | 确认复用 Attempt/幂等/commit-before-network/追踪原则；其 Jinja、直接 URL、环境 API Key、raw response 模式不满足当前 D3 安全合同。 |
+| 真实 MySQL / OSS / Secret Manager / Nacos / Provider | `not run` | 仍需明确授权和共享非生产资格；当前默认 fail closed。 |
+
+
+## 2026-08-24 — Prompt / AI 离线组合链路复验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 首次进程内 heredoc 烟测 | `harness failed` | Fake Store 参数别名误写为类型注解，解释阶段 `NameError`；未进入项目代码，不属于链路失败。 |
+| 修正后的进程内 Prompt → Gateway → Primary 烟测 | `passed` | 外部 Prompt 归一化、structured 消息、Fake signer/Secret/store、Mock Provider、严格 Schema、响应 SHA、图片回执及 Primary `completed/produced` 全部通过；默认 signer 返回 `ai_gateway_image_signer_disabled`。 |
+| `PYTHONPATH=. pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_contracts.py` | `passed` | `46 passed, 1 warning in 0.81s`。 |
+| `PYTHONPATH=. pytest -q apps/backend/tests` | `passed` | `52 passed, 1 warning in 0.67s`；warning 为既有 Pydantic V2 class-based config deprecation。 |
+| `ruff check apps evaluation/replay` | `passed` | `All checks passed!` |
+| `python -m compileall -q apps/backend` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| 真实 MySQL / OSS / Secret Manager / Nacos / Provider | `not run` | 当前默认 Provider disabled；本轮仅证明离线依赖注入链路可运行。 |
+| `maintain_handoff.py --compact-if-needed` | `passed` | `changed=3 warnings=2 unresolved=0`；按容量规则轮转 1 个旧 work-log section 和 11 个旧 validation row。 |
+| 维护后的 `git diff --check` | `passed` | 交接压缩后仍无 whitespace error。 |
+
+## 2026-08-24 — Nacos Prompt 与真实 Provider 在线验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `ms-ai-fast` Nacos Prompt 元数据读取 heredoc | `passed` | `diagnosis.breed`、`flow.question`、`ai-doc/flow.answer` 均从真实 Nacos 读取；未输出正文或 Secret。 |
+| `ms-ai-fast` `AiRuntimeService.invoke_prompt()` 在线烟测 | `passed` | Nacos `flow.answer` v1.0.0 → Platform → Provider；真实 request ID，requested `gemini-3.5-flash`，actual `gpt-5-mini`，usage 总计 2807 tokens。 |
+| 修复前 `ms-image` `NacosPromptSourceClient.fetch()` | `failed as expected` | 对已知存在 Prompt 返回 `prompt_source_nacos_http_403`，确认 username/password 未被使用。 |
+| 修复后 `ms-image` Nacos Source 真实读取 | `passed` | 同一 Prompt version/MD5/template SHA 与 `ms-ai-fast` 一致；目标 namespace 请求正常但 Prompt 不存在。 |
+| Nacos Prompt Admin inventory | `passed` | `ms-ai-fast` namespace `total=207`；目标 namespace `total=0`。 |
+| 参考 Prompt 导入兼容性检查 | `rejected as designed` | `flow.answer` 含未映射变量，返回 `prompt_source_placeholder_unmappable`；不能盲目复用通用 Prompt。 |
+| `ms-image` Gateway Adapter 在线 strict-schema 烟测 | `passed` | 真实 Platform/Provider 请求成功；actual `gpt-5-mini`、usage 160 tokens、响应 Schema 和 SHA 校验通过。生产 HTTPS 限制未放宽。 |
+| `PYTHONPATH=. python -m pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_contracts.py` | `passed` | `46 passed, 1 warning in 1.38s`。 |
+| `PYTHONPATH=. python -m pytest -q apps/backend/tests` | `passed` | `52 passed, 1 warning in 1.14s`。 |
+| `python -m ruff check apps/backend` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps/backend` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| 完整 XRay Worker + MySQL + OSS + Secret Manager + encrypted store 在线链 | `not run` | 仍缺目标 Prompt、共享非生产实体数据及真实 signer/resolver/store；Provider gate 保持 fail closed。 |
+
+## 2026-08-24 — Nacos 配置兼容与在线复验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| Pydantic `AliasChoices` 最小验证 | `passed` | 已确认 AI 专用环境变量优先于共享变量，共享变量可在专用变量缺失时生效。 |
+| `ms-image` `PromptImportService._fetch_nacos()` + `ms-ai-fast` `NACOS_*` 配置合同 | `passed` | 真实读取已知 Prompt v1.0.0；未输出 Prompt 正文、用户名、密码或 token。 |
+| 参考 Prompt 安全导入检查 | `rejected as designed` | `flow.answer` 仍返回 `prompt_source_placeholder_unmappable`，证明配置复用没有放宽 XRay 变量安全合同。 |
+| `ms-ai-fast` `AiRuntimeService.invoke_prompt()` 在线复验 | `passed` | Nacos → Platform → Provider 成功；真实 request ID，requested `gemini-3.5-flash`，actual `gpt-5-mini`，usage 3032 tokens。 |
+| `PYTHONPATH=. python -m pytest -q apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | `48 passed, 1 warning in 1.30s`。 |
+| `PYTHONPATH=. python -m pytest -q apps/backend/tests` | `passed` | `54 passed, 1 warning in 1.02s`；warning 为既有 Pydantic V2 class-based Config 弃用提示。 |
+| `python -m ruff check apps/backend` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps/backend` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+
+
+## 2026-08-24 — Phase D5 Runtime Foundation 验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python -m pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | `27 passed`；覆盖 Gateway、Secret、OSS signer/store、Stage Worker 依赖装配及 unknown reconcile 合同。 |
+| `python -m pytest -q apps/backend/tests` | `passed` | `67 passed, 15 warnings in 1.19s`；1 个既有 Pydantic v2 config 弃用警告，14 个新覆盖触发的 `datetime.utcnow()` Python 3.12 弃用警告。 |
+| `python -m ruff check apps/backend/core/ai/gateway apps/backend/core/imaging/object_store.py apps/backend/core/config.py apps/backend/crud/ai_call_attempt.py apps/backend/services/runtime/service/ai_request_service.py apps/backend/services/runtime/service/ai_attempt_reconcile_service.py apps/backend/services/runtime/service/imaging_execution_service.py apps/backend/workers/imaging_worker apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps/backend` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| Stage Worker 统一依赖模拟组合测试 | `passed (limited mock integration)` | Fake session/Signer/Resolver/Provider/Store 下验证 `sign → secret → provider → store → attempt finalize → stage finalize`；不含真实 Broker、MySQL、OSS 或 Celery 进程。 |
+| unknown Attempt reconcile 模拟组合测试 | `passed (limited mock integration)` | 覆盖 due filter、CAS claim conflict、unknown/unsupported 重排、succeeded/failed 终结、Stage pending/restore 和重复成功幂等；不含真实 Provider lookup API 或数据库并发。 |
+| 共享非生产 MySQL/OSS/RabbitMQ/Celery/Secret/Provider 整链 | `not run` | 缺授权、凭据、目标 Prompt/数据和 Provider 原请求查询合同；证据等级仍未达到 `SHARED_NON_PROD_INFRA_PASSED` 或 `REAL_PROVIDER_RUNTIME_PASSED`。 |
+| 医学 Gold/Failure Bank/Paired A/B/Holdout | `not run` | 工程整链尚未资格化；`MEDICAL_ACCURACY_UNKNOWN`、`MEDICAL_RELEASE_NO_GO`。 |
+
+## 2026-08-24 — Phase D5 交接收口
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python /Users/mozhicheng/.codex/skills/agent-handoff/scripts/maintain_handoff.py --repo /Users/mozhicheng/workspace/code/cy-code/ms-image --compact-if-needed` | `passed` | `changed=3 warnings=2 unresolved=0`；按容量规则轮转 1 个旧 work-log section 和 14 个旧 validation row，无未解决错误。 |
+| 维护后的 `git diff --check` | `passed` | Agent Handoff 压缩后仍无 whitespace error。 |
+
+## 2026-08-25 — XRay 完整能力文档核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 21 号文档逐段人工复核 | `passed` | 核对当前源码状态、七项目标、阶段顺序、Family/Targeted 合同、Attempt/Provider/fallback/lane/Prompt 边界及新会话 Prompt 一致性。 |
+| `rg` 检查 fallback execution mode、lane_key 阶段、Prompt 单正文/双模式和 README 入口 | `passed` | 未引入独立 fallback 模式；lane_key 决策位于 E4 前；Prompt 保持单正文双模式；README 已有 21 号入口。 |
+| Markdown fence（代码围栏）计数 | `passed` | 21 号文档围栏成对；最终维护后需再次复验。 |
+| 业务 pytest/Ruff/compileall | `not run` | 本轮只修改 Markdown 和 handoff 状态，不修改业务代码。 |
+| 共享非生产真实整链 | `not run` | 当前仍为 `FULL_RUNTIME_NOT_QUALIFIED`。 |
+| 医学 Gold/Paired A/B/Holdout（黄金集/配对 A/B/留出集） | `not run` | 当前仍为 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。 |
+| `maintain_handoff.py --compact-if-needed` | `passed` | `changed=3 warnings=2 unresolved=0`；按容量规则轮转 1 个旧 work-log section 和 6 个旧 validation row，无未解决项。 |
+| 维护后的 `git diff --check` | `passed` | 文档和 handoff 维护后无 whitespace error。 |
+
+## 2026-08-25 — OSS 配置存在性核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 对 `.env` 四项 `ALIYUN_OSS_*` 仅做键存在和非空检查 | `passed` | 四项均为 `present_nonempty`；检查逻辑未输出 Secret（密钥）值。 |
+| `rg` 核对 OSS 配置映射和运行时消费位置 | `passed` | `apps/backend/core/config.py` 映射四项别名；`apps/backend/core/imaging/object_store.py` 消费映射后的凭据、Bucket（存储桶）和 Endpoint（端点）。 |
+| `.env` E1 配置域存在性与最终 `Settings（运行配置）` 非敏感状态检查 | `passed` | OSS 四项可解析；Broker/AI Gateway（消息队列/AI 网关）开关均为 false，AI Secret Resolver/Response Encryption（AI 密钥解析/响应加密）均为 disabled；未输出密码、密钥、完整 Endpoint 或 Bucket。 |
+| 真实 OSS 网络访问、Bucket 权限、上传/读取/签名/加密 | `not run` | 本次只确认本地配置存在，不能据此声明 `RUNTIME_QUALIFIED（运行时已资格化）`。 |
+
+## 2026-08-25 — 当前配置与旧 `.env` 脱敏审计
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 当前/旧 `.env` 键名和同名值脱敏比较 | `passed` | MySQL、Redis、RabbitMQ、OSS 同名基础连接一致；未输出任何 Secret、完整 Endpoint 或 Bucket；旧文件不含当前 Runtime/Admin JWT、Nacos 或 AI Gateway 安全配置。 |
+| `Settings（运行配置）` 非敏感解析 | `passed` | `ENV=dev`、`PROJECT_ENV=development`、`MYSQL_DB=ms_image`；Broker/Gateway 均 false，Secret Resolver/Response Encryption 均 disabled；OSS 四项完整。 |
+| Redis `PING` | `passed` | 真实只读连通成功。 |
+| RabbitMQ `Connection.connect()` | `passed` | 仅连接成功；未声明队列、未发送消息。 |
+| 主 MySQL `SELECT 1` + `information_schema` | `passed with schema blocker` | 主库可连接；无 `alembic_version`；`ai_api_connection`/`ai_model_pool`/`ai_prompt_template` 存在，`ai_config_record` 不存在。 |
+| AI 控制面表字段只读核验 | `blocked` | 旧表约 96/19/375 行，但分别缺当前 ORM 所需 key/name/status/provider/secret_ref 等关键字段，不能用当前 DAL 正常工作。 |
+| Evaluation MySQL `SELECT 1` | `failed as expected` | `ms_image_eval` 当前不存在或不可连接；只报告异常类型，不输出连接串。 |
+| OSS `get_bucket_info()` | `passed` | 真实 Bucket 信息只读成功；未上传、覆盖或删除对象，尚未验证签名 URL 和加密写入。 |
+| Alembic upgrade / 数据库写入 | `not run` | 现有库含旧结构和数据，须先审阅迁移兼容、baseline/stamp、备份和回滚边界。 |
+| 业务 pytest / Ruff | `not run` | 本轮只修改被忽略的本地 `.env` 和 handoff Markdown，没有修改业务代码。 |
+| `maintain_handoff.py --compact-if-needed` | `passed` | `changed=3 warnings=2 unresolved=0`；按容量规则轮转 1 个旧 work-log section 和 8 个旧 validation row。 |
+| 维护后的 `git diff --check` | `passed` | 无 whitespace error；`.env` 由 `.gitignore` 明确忽略，敏感值不会进入普通 Git diff。 |
+| 旧/current Settings 同名缺失键复核 | `passed` | 迁入 `APPLICATION_HOST`、`AUTH_DOMAIN`、`LOG_PATH`、`GUNICORN_ERROR_LOG_PATH` 后，支持且仍缺失的旧键数量为 0。 |
+| 迁移后 Settings 解析 | `passed` | 四项均成功解析；Broker/Gateway 继续关闭，Runtime/Admin JWT 仍明确未配置。 |
+| 日志路径存在性 | `passed with adaptation` | `LOG_PATH` 目录存在；旧 `/www` Gunicorn 路径不存在，已适配到同一本地日志目录下的 `gunicorn_error.log`。 |
+
+## 2026-08-25 — 完整 XRay AI 与 Prompt 开发文档核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 当前 Stage、FamilyRouting、AIConfigCompiler、Prompt Renderer 和模型/Service 名称抽查 | `passed` | 证实五个 Stage 已注册；FamilyRouting 固定 primary_final；Config 仍限制 single/单 lane/max_attempts=1；文档没有把目标字段误写成当前已实现。 |
+| 22 号文档与 `AGENT_SESSION_PROMPTS.md` Markdown fence（代码围栏）计数 | `passed` | 分别为 24 和 12，均为偶数，代码块闭合。 |
+| `rg` 核对 22 号入口、E1→M3 顺序、当前关键缺口、file_asset/旧 Prompt 家族边界 | `passed` | README、handoff 和 Prompt 入口一致；完整顺序存在；旧 Prompt 家族示例未写入 22 号文档；公共 file_asset 明确不建设。 |
+| `git diff --check`（本轮文档与 handoff 文件） | `passed` | 无 whitespace error。 |
+| 业务 pytest/Ruff/compileall | `not run` | 本轮只修改 Markdown 文档和交接状态，没有修改业务代码。 |
+| 数据库迁移、真实 Provider 调用、医学 Gold/Paired A/B/Holdout | `not run` | 本轮没有授权或执行数据库变更、真实 AI 调用或医学验证；状态保持 FULL_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO。 |
+| 直接执行 `maintain_handoff.py` | `failed then recovered` | 脚本文件无可执行权限，直接调用返回 permission denied；未造成文件变更，随后改用 `python3` 执行。 |
+| `python3 maintain_handoff.py --compact-if-needed` | `passed` | `changed=3 warnings=2 unresolved=0`；轮转 1 个旧 work-log section 和 7 个旧 validation row，无未解决项。 |
+
+## 2026-08-25 — 完整链路辩证审查
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 22 号文档权威、Stage、完成定义和实施顺序定点核验 | `passed with findings` | 确认源码/目标/医学权威混为线性排序；FamilyRouting 医学边界冲突；全部可选能力绑为同一完成定义；Prompt 优化排序过晚。 |
+| 14 号专项设计 Family/Targeted/失败回退/缺陷矩阵定点核验 | `passed` | 确认 Router 不应修改医学结论、当前实验 Profile 不静默回退、五个 Family 尚无足够医学分母、Targeted 存在锚定风险。 |
+| 当前 `study_preparation.py`、`family_routing.py`、`prompt_commands.py`、`attempt_lookup.py` 核验 | `passed with 2 code gaps` | StudyPreparation 仅基础 revision/hash 校验；FamilyRouting 固定直达；v2 Targeted 未传 family/focus；Provider Attempt lookup 默认 unsupported。 |
+| Gateway runtime dependency 和 `.env` 键存在性脱敏核验 | `passed` | 真实 Secret/OSS/Response Store 实现已可由安全门禁装配，但当前本地 Gateway 保持 disabled；OSS 别名映射存在；未输出 Secret 值。 |
+| 业务 pytest/Ruff/compileall、真实 Provider、数据库迁移、医学评测 | `not run` | 本轮是只读架构审查，没有修改业务实现，也没有授权外部写入或医学验证。 |
+
+## 2026-08-25 — 后续实施文档与新会话 Prompt 收尾核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 23 号文档第 1、7、8、9、11、12、13、14、16 节复读 | `passed` | 当前事实、批准目标、医学发布权威分离；逐 Service/Stage 输入输出、Prompt 双入口、可靠执行合同、阶段 Gate 和新会话 Prompt 完整。 |
+| 旧权威/旧顺序/Router 医学状态关键字 `rg` 检查 | `passed` | 当前入口文件中不再存在 `CURRENT_IMPLEMENTATION_AUTHORITY`、旧 `E1 -> M1 -> M2 -> E2 -> E3 -> E4 -> E5 -> M3` 顺序或 22 号仍为当前权威的表述。 |
+| 当前权威、Prompt 和三层完成定义 `rg` 检查 | `passed` | 22/23、README、handoff 和新会话入口一致指向三类权威、Shared Medical Core + 双冻结入口以及三层完成状态。 |
+| Markdown fence（代码围栏）偶数检查 | `passed` | 22 号为 26、23 号为 18、`AGENT_SESSION_PROMPTS.md` 为 14，均闭合。 |
+| `git diff --check` | `passed` | 本轮文档与 handoff 局部修改无 whitespace error。 |
+| 业务 pytest/Ruff/compileall | `not run` | 本轮没有修改业务代码，因此未运行代码级验证。 |
+| 数据库迁移、真实 Provider、完整基础设施链和医学评测 | `not run` | 本轮未获授权且未修改数据库或运行配置；状态保持 FULL_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO。 |
+
+## 2026-08-25 — XRay P0-A Targeted Prompt 合同验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python -m pytest apps/backend/tests/test_ai_prompt_control_plane_contracts.py -k 'targeted_v2_command'` | `passed` | `2 passed, 34 deselected`；覆盖 v2 Targeted Family/Focus/Strategy/Primary 完整结果传递与缺选择 fail closed。 |
+| `python -m pytest apps/backend/tests/test_ai_gateway_attempt_contracts.py -k 'xray_family_routing or study_preparation'` | `passed` | `2 passed, 27 deselected`；覆盖 FamilyRouting 固定 `primary_final`/原样透传与 StudyPreparation 非医学边界。 |
+| `python -m pytest apps/backend/tests` | `passed` | `71 passed, 15 warnings`；warning 为既有 Pydantic Config 与 `datetime.utcnow()` 弃用提示。 |
+| `ruff check apps evaluation/replay` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps evaluation/replay` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| 真实 MySQL/OSS/RabbitMQ/Celery/Provider 整链 | `not run` | 本轮仅 P0-A 纯合同修正，运行门禁保持 fail closed。 |
+| 医学 Gold/Failure Bank/Paired A/B/Holdout | `not run` | 本轮无医学变量变更，仍为 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。 |
+
+## 2026-08-25 — Prompt 完善文档与新会话 Prompt 最终核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 23 号文档与当前会话入口关键字 `rg` 核验 | `passed` | 已包含 `CURRENT_NEXT_PHASE_AUTHORITY`、Prompt Runtime Contract、Medical Prompt Optimization、Q0/Q1、Primary Prompt A/B、Targeted Prompt Qualification 和 `MEDICAL_ACCURACY_UNKNOWN`。 |
+| 过时 Targeted family/focus 待修复指令核验 | `passed` | 23 号当前实施章节和 `AGENT_SESSION_PROMPTS.md` 当前入口已改为 P0-A 已完成；下一入口为 P0-B + Q0 + Q1。历史 work-log 仅保留当时事实。 |
+| 23 号文档 Markdown fence 检查 | `passed` | 22 个代码围栏，数量为偶数并闭合。 |
+| `AGENT_SESSION_PROMPTS.md` Markdown fence 检查 | `passed` | 14 个代码围栏，数量为偶数并闭合。 |
+| `git diff --check` | `passed` | 文档和 handoff 修改无 whitespace error。 |
+| 业务 pytest/Ruff/compileall | `not run` | 本轮只调整文档和交接状态，没有修改业务代码；此前 71 passed/Ruff/compileall 结果属于 P0-A 轮次，不重复冒充本轮验证。 |
+| 真实 MySQL/OSS/RabbitMQ/Celery/Provider 全链 | `not run` | 当前仍为 `FULL_RUNTIME_NOT_QUALIFIED`，本轮未启用外部依赖或执行真实链。 |
+| 医学 Gold/Failure Bank/Paired A/B/Holdout | `not run` | 当前仍为 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`，Prompt 文档完善不代表准确率提高。 |
+
+## 2026-08-25 — P0-B 可靠执行与 Prompt 冻结合同验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python -m pytest -q apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | `74 passed, 19 warnings`；覆盖本轮 Prompt、取消、迟到结果、Stage 和 Report 合同。 |
+| `python -m pytest apps/backend/tests` | `passed` | `80 passed, 19 warnings`；warning 为既有 Pydantic class Config 与 `datetime.utcnow()` 弃用提示。 |
+| `ruff check apps evaluation/replay` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps evaluation/replay` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| Task/Call/Attempt/Stage/Report 关键锁与幂等代码复核 | `passed` | 取消行锁、Winner 非覆盖、Attempt 审计先保存、Stage 消费前取消检查、Report 同源事实幂等均存在。 |
+| 真实 MySQL 并发锁/CAS/事务验证 | `not run` | 缺少本轮共享非生产数据库执行证据；离线 Fake/Mock 合同测试不能替代。 |
+| 真实 OSS/RabbitMQ/Celery/Provider 全链 | `not run` | 当前未启用 E1 运行门禁，未执行外部 I/O。 |
+| Gold/Failure Bank/Paired A/B/Holdout | `not run` | 医学 Prompt 正文、模型、Schema 和样本均未改变；状态保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。 |
+
+
+## 2026-08-25 — ms-ai-fast 参考 AI 链在线验证
+
+| 检查 | 结果 | 备注 |
+|---|---|---|
+| `lsof -nP -iTCP:8062 -sTCP:LISTEN`（启动前） | 通过定位 | 无监听；解释了 `ConnectError` |
+| `GatewayClient.chat_completions()`（Platform 未启动） | 预期失败 | `httpx.ConnectError: All connection attempts failed`；未取得 request ID |
+| MySQL 3306 / Redis 6379 TCP probe | 通过 | 两个依赖均在本机监听 |
+| `python -m uvicorn main:app --host 127.0.0.1 --port 8062` | 通过 | 会话内临时 Platform 用户 API，非长期进程管理 |
+| `GET http://127.0.0.1:8062/api/v1/health` | 通过 | HTTP 200，healthy |
+| `ms-ai-fast GatewayClient -> Platform -> Provider` | 通过 | requested `gemini-3.5-flash`；actual `gpt-5-mini`；total tokens 160；request ID/content present |
+| `PromptRuntimeClient.has_exact_prompt(flow.answer/default)` | 通过 | Nacos runtime 可读；另验证 `diagnosis.breed/default`、`tooth.summary/default` 存在 |
+| `AiRuntimeService.invoke_prompt(flow.answer)` | 通过 | Nacos dog variant 无 fallback；Platform/Provider 成功；actual `gpt-5-mini`；total tokens 3159 |
+| Platform provider pool | 部分降级 | qwen 端点 403 IP restriction；gpt-5-mini 端点成功并成为 winner |
+| `ms-image` 完整 E1 业务链 | 未运行 | 未覆盖 Outbox/Worker/OSS/Encrypted Store/MySQL/Report |
+
+## 2026-08-25 — 远程 ms-ai-platform `8060` 在线复测
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `GET http://8.149.245.40:8060/api/v1/health` | `passed` | HTTP 200；`status=healthy`。 |
+| `ms-ai-fast GatewayClient.chat_completions()`（最小真实请求） | `passed` | 使用当前 `.env` 中的远程 Base URL 与既有 Platform 凭证；requested/actual model 均为 `gemini-3.5-flash`；Platform request ID 与非空响应存在。 |
+| 远程 usage 字段 | `not returned` | 响应未带 `usage`；请求已 HTTP 成功、模型与正文均有效，不能据此判为失败。 |
+| 完整 `Nacos -> PromptRuntimeClient -> AiRuntimeService -> GatewayClient` 远程复测 | `not run in this check` | 本次只核验用户指定端口的 health 与 Gateway 实际出站；此前完整参考链已验证。 |
+
+## 2026-08-25 — 用户要求重新执行 ms-image 离线验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `PYTHONPATH=. python -m pytest -q apps/backend/tests` | `passed` | `80 passed, 19 warnings in 0.83s`；覆盖现有 Prompt Control Plane 与 Gateway/Attempt/Worker 模拟合同。warning 为既有 Pydantic class Config 和 `datetime.utcnow()` 弃用提示。 |
+| `python -m ruff check apps/backend` | `passed` | `All checks passed!`。 |
+| `python -m compileall -q apps/backend` | `passed` | 无编译错误。 |
+| `git diff --check` | `passed` | 无 whitespace error。 |
+| 真实 `ms-image` E1 全链（MySQL/Outbox/RabbitMQ/Celery/OSS/Nacos Runtime/Platform/Provider/Report） | `not run` | 当前测试没有启用外部依赖；离线测试通过不构成真实整链资格化。 |
+
+## 2026-08-25 — `ms-image` 自身 AI 链实测
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `build_gateway_runtime_dependencies()`（当前 `ms-image` Settings） | `fail closed` | `ai_gateway_secret_resolver_not_qualified`；当前 Resolver mode 为 `disabled`，未发生网络请求。 |
+| `ms-image NacosPromptSourceClient.fetch()` | `passed` | 使用参考部署凭证仅作一次性读取；既有非医疗 smoke Prompt `ms-image.xray.chain-smoke.default.zh-CN@1.0.0` 存在且模板非空。 |
+| `normalize_imported_prompt()` + `PromptRenderer.render()` | `passed` | 使用 `ms-image` 自己的安全变量与渲染代码；不输出 Prompt 正文。 |
+| `EnvironmentReferenceSecretResolver`（进程内临时 Secret 映射） | `passed` | 验证 `env-secret://MS_IMAGE_AI_SECRET_*` 解析合同；未写入 `.env`、数据库或日志。 |
+| `OpenAICompatibleGatewayAdapter.execute()` 指向 `http://8.149.245.40:8060/api/v1` | `blocked before egress` | `canonicalize_connection_base_url()` 强制 HTTPS，返回 `ai_connection_base_url_invalid`；未向 Provider 发送请求。 |
+| `GET https://8.149.245.40:8060/api/v1/health` | `failed` | TLS handshake 的 protocol-version alert；不能把 HTTP-only `8060` 直接作为 `ms-image` 受控 Connection。 |
+| `ms-image` Task/Outbox/Worker/OSS/加密响应存储/Report 真实整链 | `not run` | 受上述 HTTPS 和运行资格门禁阻断；不得把本轮 Prompt/Nacos 读取成功表述为完整 AI 业务链成功。 |
+
+## 2026-08-25 — `ms-image` 自身 Nacos → Platform 核心 AI 链 E2E
+
+| 检查 | 命令/方式 | 结果 |
+|---|---|---|
+| Nacos Prompt 写入与发布 | Nacos 3.x `POST /v3/admin/ai/prompt`，使用本地 qj-nacos SDK；写入 `ms-image.xray.ai-gateway-e2e.default.zh-CN@1.0.0` | 通过：新建并发布；非医疗 smoke Prompt |
+| Nacos Runtime 读取与 Prompt 链 | `NacosPromptSourceClient.fetch` → `parse_nacos_prompt_payload` → `normalize_imported_prompt` → `PromptRenderer` → `PromptMessageAssembler` | 通过：Prompt 可读取、规范化、渲染、组装 |
+| 真实 Gateway 请求 | `EnvironmentReferenceSecretResolver`（进程内临时映射）→ `OpenAICompatibleGatewayAdapter.execute()` → `http://8.149.245.40:8060/api/v1/chat/completions` | 通过：requested/actual 均 `gemini-3.5-flash`，Provider request ID 存在，JSON transport；Schema 接受，marker 严格回传一致 |
+| 离线回归 | `PYTHONPATH=. python -m pytest -q apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `75 passed, 19 warnings`；warnings 为既有 Pydantic/datetime deprecation |
+| 静态基本检查 | `python -m compileall -q apps/backend && git diff --check` | 通过 |
+
+边界：未调用完整 MySQL 控制面、Outbox、Broker/Worker、OSS、响应加密持久化或 Report；本记录证明核心 AI 网络调用链，不证明完整 XRay 业务/医学发布链。
+
+## 2026-08-25 — 当前项目完成度只读审计
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 截图框选历史任务会话只读回溯 | `passed` | 已核验其结论：保留 `ms-image` 的冻结配置、Task/Attempt/审计状态机；只借鉴 `ms-ai-fast` 的 Nacos Prompt、OpenAI-compatible 网关与多消息链，不整体迁移参考项目。 |
+| 主库表存在性查询 | `passed` | 只读连接 `ms_image`，共 45 表；`alembic_version`、`ai_config_record`、`ai_call_record`、`ai_call_attempt_record`、`study_record`、`study_revision_record`、`stage_checkpoint_record`、`outbox_event_record`、`report_record` 均缺失。未读取业务行数据或输出凭证。 |
+| 当前运行门禁读取 | `passed` | `.env` 的 `BROKER_ENABLED=true`、`AI_GATEWAY_ENABLED=true`；但 Secret Resolver 与 Response Encryption 均为 `disabled`，所以正式完整 Worker Gateway 依赖仍 fail closed。 |
+| 本次测试/外部全链 | `not run` | 本次仅补充只读审计；沿用本文件已记录的离线测试和非医疗核心 AI 网络 E2E，不将其冒充为整链或医学资格化。 |
+
+## 2026-08-25 — 旧数据库表清理前只读核验
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `information_schema.tables` 表清单 | `passed` | `ms_image` 当前共 45 表，逐表读取名称、表注释与近似行数；未读取业务记录正文。 |
+| 约束与触发器检查 | `passed` | `foreign_key_constraints=0`、`triggers=0`；不能把无约束误解为可安全删除，应用层仍可能依赖。 |
+| 当前 ORM 物理表映射 | `passed` | 现代码映射 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool` 及尚不存在的 v2 目标表；前三张 AI 表与 Session 表不得一刀切删除。 |
+| 删除/迁移 | `not run` | 用户要求先评估无意义表；未生成迁移、未备份、未执行 `DROP TABLE`。 |
+
+## 2026-08-25 — 当前运行时审计与新会话交接文档核验
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| 当前 `.env（环境配置文件）` 关键门禁脱敏读取 | `passed` | `BROKER_ENABLED=true（消息代理已开启）`、`AI_GATEWAY_ENABLED=true（AI 网关已开启）`；Secret Resolver（密钥解析器）与 Response Encryption（响应加密）仍为 `disabled（禁用）`；OSS 配置项存在。未输出凭证或端点原文。 |
+| Gateway（网关）/Stage（阶段）源码锚点复核 | `passed` | 已核对 `runtime_dependencies.py` 的 fail-closed（失败关闭）条件、StudyPreparation（检查准备）的当前最小校验、FamilyRouting（专项家族路由）的 `primary_final（主读直接定稿）` 固定输出、Targeted/Finalization（专项复核/结果定稿）入口和五个 Stage 注册。 |
+| 文档冲突与阅读入口核验 | `passed` | 24 号文档明确 21/22/23 的目标/架构/历史定位；README、AGENT_HANDOFF 和新会话 Prompt（提示词）均已指向 24 号当前事实入口。 |
+| 真实 Worker/OSS/Broker/Provider（工作进程/对象存储/消息代理/模型提供方）整链 | `not run` | 本轮仅文档与交接整理；未将核心 AI 网络实测升级为 E1（仅主读真实运行链）或医学资格化。 |
+
+## 2026-08-25 — 文档权威边界二次核验
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| 17/19/20/21/23 文档顶部或历史 Prompt 边界 | `passed` | 17、19、20、21 已标明当前事实或目标合同边界；23 第 16 节已标为“历史新会话 Prompt，已废止”，并指向 24 号文档与根目录当前 Prompt。 |
+| README 任务阅读顺序 | `passed` | XRay 开发与 QJ 收敛任务均先读取 24 号当前事实，再进入源码、设计或早期合同参考。 |
+| `git diff --check` | `passed` | 文档与交接编辑未产生空白错误。 |
+| 业务测试、数据库、OSS、Broker/Worker、Provider 全链 | `not run` | 本轮仅文档与交接收口；没有执行业务测试或真实外部 I/O。 |
+| 交接维护脚本 | `passed with rotation` | `maintain_handoff.py --compact-if-needed` 自动归档并轮转两段历史工作日志；`unresolved=0`。 |
+
+## 2026-08-26 — P1 OSS 下载权限隔离合成探针
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| 隔离 synthetic object：AES256 加密 PUT → 标准 HEAD → Worker 凭据 GET → 60 秒 signed GET → 删除后 HEAD | `passed` | 使用非病例固定 JSON、随机对象键；未输出密钥、endpoint、bucket、对象键或 signed URL。Worker 直读与持有 signed URL 的同机 GET 均返回原始 SHA 一致的 bytes，删除后确认对象不存在。未写 MySQL、未发 Broker、未调 Provider。该结果不能证明 Provider 外部网络可访问 signed URL，也不能证明完整 Worker Runtime。 |
+
+## 2026-08-26 — ms-ai-fast 配置字段对齐与本地覆盖清理
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `rg --hidden --no-ignore` 核验 `ms-ai-fast` 全目录的两个精确字段名 | `passed` | 未发现 `AI_GATEWAY_SECRET_RESOLVER_MODE` 或 `AI_GATEWAY_RESPONSE_ENCRYPTION` 的引用；搜索不输出 `.env` 值。 |
+| 按用户指示清理 ms-image `.env` 的两个显式覆盖项 | `passed` | 仅删除两行键名，不改业务源码、数据库、迁移或其他 `.env` 项。`Settings()` 随后确认两项因本项目代码默认值仍有效解析为 `disabled`。 |
+| `.env` 定点 diff whitespace 检查 | `passed` | 无输出；`.env` 受忽略规则保护，未展示其余配置。 |
+
+## 2026-08-26 — Gateway selector 移除与固定安全路径
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `rg --hidden --no-ignore` 精确字段扫描（ms-image 与 ms-ai-fast） | `passed` | `AI_GATEWAY_SECRET_RESOLVER_MODE`、`AI_GATEWAY_RESPONSE_ENCRYPTION`、`AI_GATEWAY_RESPONSE_KMS_KEY_ID` 已无 ms-image 生产代码/配置引用；ms-ai-fast 无前两个字段引用。仅发现待修正的历史/交接文字，已同步更新；不输出 `.env` 值。 |
+| Gateway dependency composition（依赖组成）脱敏探针 | `passed` | 当前配置成功组成 `EnvironmentReferenceSecretResolver`、`OSSEncryptedResponseStore(AES256)`、`OSSAttemptImageSigner` 和 `UnsupportedProviderAttemptLookup`；未写 DB、未发 Broker、未调 Provider、未解析实际 Secret（密钥）值。 |
+| 当前进程 allowlisted Secret（允许前缀密钥）存在性计数 | `passed` | `AI_GATEWAY_SECRET_ENV_PREFIX` 已配置，但匹配前缀的非空环境变量数量为 `0`；真实 `secret_ref` 解析预期 fail-closed，不能标记 P1 或 E1 已通过。 |
+| `PYTHONPATH="$PWD" pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | `40 passed`；仅既有 Pydantic class-based config 与 `datetime.utcnow()` deprecation warnings。 |
+| `python -m compileall -q apps/backend/core/config.py apps/backend/core/ai/gateway/runtime_dependencies.py apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | 目标 Python 文件可编译。 |
+| `ruff check apps/backend/core/config.py apps/backend/core/ai/gateway/runtime_dependencies.py apps/backend/tests/test_ai_gateway_attempt_contracts.py` | `passed` | 无 lint 违规。 |
+| 同一冻结任务 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report | `not run` | 本切片未执行真实完整任务链。 |
+| Provider 原请求查询、Provider 外部 signed URL 可达性、医学验证 | `unknown` | 当前仍使用 `UnsupportedProviderAttemptLookup`；未调用 Provider；未运行医学 Gold/Paired A/B/Holdout。 |
+| `maintain_handoff.py --compact-if-needed` | `passed with rotation` | `unresolved=0`；维护脚本轮转 1 段旧 work-log（工作日志）到 archive（归档），不改变当前事实。 |
+
+
+## 2026-08-26 — ms-ai-fast AI/Prompt 链收敛验证
+
+| 命令/检查 | 结果 | 说明 |
+|---|---|---|
+| `python -m pytest apps/backend/tests/test_ai_prompt_control_plane_contracts.py apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_models.py -q` | `passed` | `81 passed, 19 warnings in 0.64s`；warning 为既有 Pydantic class-based Config 与 `datetime.utcnow()` 弃用提示。 |
+| `python -m compileall -q apps/backend/core/ai apps/backend/schemas/ai_control.py apps/backend/services/ai_control/service apps/backend/services/runtime/service apps/backend/workers/imaging_worker` | `passed` | 输出 `COMPILE_OK`。 |
+| 旧 Gateway/Secret/response-store 生产引用扫描 | `passed` | `OpenAICompatibleGatewayAdapter`、`EnvironmentReferenceSecretResolver`、`OSSEncryptedResponseStore`、`GatewayRuntimeDependencies`、`AI_GATEWAY_*`、`AI_PROMPT_NACOS_*`、`MS_IMAGE_AI_SECRET_*`、`env-secret://`、`SAFE_PROMPT_VARIABLES` 均无生产代码结果。 |
+| Provider 原始响应存储路径扫描 | `passed` | runtime/worker/core AI 中 `response_object_ref_json`、`raw_response`、`response_store`、`secret_resolver` 无结果。 |
+| `git diff --check` | `passed` | 输出 `DIFF_CHECK_OK`。 |
+| 真实 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report | `not run` | 本轮没有执行外部业务链；不得标记 `RUNTIME_QUALIFIED`。 |
+| 医学 Gold/Failure Bank/Paired A/B/Holdout | `not run` | 医学准确率仍为 `UNKNOWN`，发布仍为 `NO_GO`。 |

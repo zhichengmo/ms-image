@@ -1,3 +1,7 @@
+"""DAL for the sole immutable AI runtime Config table."""
+
+from __future__ import annotations
+
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -24,14 +28,64 @@ class AIConfigRecordDal(DalBase):
     async def get_by_id(self, config_id: str) -> AIConfigRecord | None:
         return await self.get_data(data_id=config_id, v_return_none=True)
 
-    async def get_active(self, activation_slot: str) -> AIConfigRecord | None:
-        return await self.get_data(activation_slot=activation_slot, status="active", v_return_none=True)
+    async def get_by_key_version(
+        self, *, config_key: str, version: str
+    ) -> AIConfigRecord | None:
+        return await self.get_data(
+            config_key=config_key,
+            version=version,
+            v_return_none=True,
+        )
 
-    async def cas_update(self, *, config_id: str, expected_version: int, values: dict[str, Any]) -> AIConfigRecord | None:
-        allowed = {"activation_slot", "status", "error_code"}
+    async def get_active(self, activation_slot: str) -> AIConfigRecord | None:
+        return await self.get_data(
+            activation_slot=activation_slot,
+            status="active",
+            v_return_none=True,
+        )
+
+    async def page(
+        self,
+        *,
+        page: int,
+        limit: int,
+        config_key: str | None,
+        status: str | None,
+    ) -> tuple[list[AIConfigRecord], int]:
+        return await self.get_datas(
+            page=page,
+            limit=limit,
+            config_key=config_key,
+            status=status,
+            v_order="desc",
+            v_order_field="created_at",
+            v_return_objs=True,
+            v_return_count=True,
+        )
+
+    async def cas_update(
+        self,
+        *,
+        config_id: str,
+        expected_version: int,
+        values: dict[str, Any],
+    ) -> AIConfigRecord | None:
+        allowed = {
+            "activation_slot",
+            "status",
+            "error_code",
+            "validated_at",
+            "activated_at",
+            "retired_at",
+            "updated_by_id",
+        }
         if not values or not set(values).issubset(allowed):
             raise ValueError("ai_config_update_fields_invalid")
-        return await self.cas_put_data(data_id=config_id, expected_version=expected_version, data=values)
+        return await self.cas_put_data(
+            data_id=config_id,
+            expected_version=expected_version,
+            data=values,
+        )
 
 
 __all__ = ["AIConfigRecordDal"]

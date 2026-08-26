@@ -27,6 +27,15 @@ EVALUATION_DATABASE_URL = (f"mysql+aiomysql://"
                            f"{_evaluation_user}:{_evaluation_password}@{_evaluation_host}:{_evaluation_port}"
                            f"/{_evaluation_database}")
 
+def _mysql_connect_args(unix_socket: str) -> dict[str, str]:
+    """Make every application MySQL session use UTC timestamps."""
+
+    connect_args = {"init_command": "SET time_zone = '+00:00'"}
+    if unix_socket.strip():
+        connect_args["unix_socket"] = unix_socket
+    return connect_args
+
+
 # Create database engines
 async_engine = create_async_engine(
     DATABASE_URL,
@@ -36,11 +45,7 @@ async_engine = create_async_engine(
     pool_recycle=3600,
     pool_size=5,
     max_overflow=5,
-    connect_args=(
-        {"unix_socket": settings.MYSQL_UNIX_SOCKET}
-        if settings.MYSQL_UNIX_SOCKET.strip()
-        else {}
-    )
+    connect_args=_mysql_connect_args(settings.MYSQL_UNIX_SOCKET)
 )
 
 evaluation_async_engine = create_async_engine(
@@ -51,11 +56,7 @@ evaluation_async_engine = create_async_engine(
     pool_recycle=3600,
     pool_size=5,
     max_overflow=5,
-    connect_args=(
-        {"unix_socket": _evaluation_unix_socket}
-        if _evaluation_unix_socket
-        else {}
-    )
+    connect_args=_mysql_connect_args(_evaluation_unix_socket)
 )
 
 async_engine_hd = None
@@ -84,11 +85,7 @@ def _initialize_hd_database() -> None:
         pool_recycle=3600,
         pool_size=5,
         max_overflow=5,
-        connect_args=(
-            {"unix_socket": settings.MYSQL_HD_UNIX_SOCKET}
-            if settings.MYSQL_HD_UNIX_SOCKET.strip()
-            else {}
-        ),
+        connect_args=_mysql_connect_args(settings.MYSQL_HD_UNIX_SOCKET),
     )
     session_factory_hd = async_sessionmaker(
         autocommit=False,

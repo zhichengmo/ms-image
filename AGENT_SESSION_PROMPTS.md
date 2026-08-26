@@ -1,8 +1,142 @@
 # MS-Image 新会话提示词
 
-> **当前有效恢复入口**：始终先按 `AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md` 和用户本轮授权恢复。涉及 QJ 借鉴与模块收敛时，只使用本文“开启 QJ 借鉴与模块收敛调整会话”章节以及 `docs/refactor/08`、`15`、`16`、`17`。
+> **当前有效恢复入口**：始终先按 `AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md` 和用户本轮授权恢复。XRay（X 光）后续开发使用本文“开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）”以及 `docs/refactor/24-current-runtime-audit-and-next-development-guide.md`。
 >
 > 下方“历史 P1/P2 提示”仅保留用于解释旧会话条件，**禁止**作为当前启动入口；其中的旧 SHA、已实现范围和兼容处理不得覆盖当前 worktree/handoff 事实。
+
+## 开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）
+
+> 当前代码、配置、数据库和真实 AI 网络链的审计结论以 `docs/refactor/24-current-runtime-audit-and-next-development-guide.md（当前运行时审计、完整 XRay 开发路径与新会话交接）` 为准。`21（完整能力合同）`、`22（逐层架构参考）`、`23（旧实施指南）` 仅分别保留目标范围、架构说明和历史阶段目标，不能覆盖 24 号文档中的当前运行事实。
+
+```text
+当前任务：基于当前 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 工作树，继续完成 XRay（X 光）完整链路的下一最小可验证切片。目标不是只补基础框架，也不是一次性打开 TargetedReview（专项复核）、Retry（重试）、Fallback（自动降级）和 Race（双通道竞速）；必须按证据和依赖顺序实施。
+
+开始前必须亲自完整阅读：
+1. `AGENTS.md`；
+2. `AGENT_HANDOFF.md`；
+3. `.agent-handoff/snapshot.md`；
+4. `.agent-handoff/risks.md`；
+5. `.agent-handoff/backlog.md`；
+6. `docs/refactor/24-current-runtime-audit-and-next-development-guide.md`；
+7. 本切片直接相关的源码、已有测试、模型与迁移文件。
+
+当前唯一可开绿灯的事实：
+`MS_IMAGE_CORE_AI_NETWORK_CHAIN_PASSED（MS-Image 核心 AI 网络链路已通过）`。
+它只证明非医疗链 `Nacos Prompt（Nacos 提示词）读取 -> Prompt 渲染/消息组装 -> 环境引用密钥解析 -> OpenAI-compatible Gateway（OpenAI 兼容网关）-> 外部平台/模型 -> 严格 JSON Schema（JSON 结构合同）` 已真实通过。
+
+当前不得误报：
+`FULL_WORKER_RUNTIME_NOT_QUALIFIED（完整 Worker 运行时未资格化）`；
+`MEDICAL_ACCURACY_UNKNOWN（医学准确率未知）`；
+`MEDICAL_RELEASE_NO_GO（医学发布不可放行）`。
+
+关键运行事实：
+- `BROKER_ENABLED（消息代理开关）=true（开启）`，但这不等于 RabbitMQ/Celery（消息队列/异步任务）已真实资格化；
+- `AI_GATEWAY_ENABLED（AI 网关开关）=true（开启）`；
+- 启用 Gateway 时固定使用 `EnvironmentReferenceSecretResolver（环境引用密钥解析器）` 与 OSS `AES256（AES-256 加密）` response store（响应存储）；不再存在可切换这两项的环境配置字段；
+- 当前进程环境没有匹配 `AI_GATEWAY_SECRET_ENV_PREFIX（AI 网关密钥环境前缀）` 的非空 Secret（密钥）变量，因此真实 `secret_ref（密钥引用）` 仍会 fail-closed（失败关闭）；
+- `ALIYUN_OSS_*（阿里云 OSS 配置）` 已完成隔离 synthetic（合成）AES256 PUT/HEAD、Worker GET、同机 signed GET 和 cleanup；Provider（模型提供方）外部可达性与完整任务链仍未资格化；
+- 当前 `.env（环境配置文件）` 未见常态化 `NACOS_*（Nacos 配置）` 或 `AI_PROMPT_NACOS_*（AI 提示词 Nacos 配置）`；
+- 禁止为了跑通而关闭响应加密、把 Secret（密钥）写入数据库/Nacos/日志，或把 Secret 输出到终端。
+
+数据库事实：
+- 旧 MySQL（关系数据库）`ms_image（影像库）` 有 45 张 Legacy（遗留）表；
+- 旧 `session_record（会话记录）`、`ai_prompt_template（AI 提示词模板）`、`ai_api_connection（AI 接口连接）`、`ai_model_pool（AI 模型池）` 与目标 Runtime（运行时）ORM 同名不同义；
+- 未经用户明确确认，禁止建库、迁移、改表、删表、重命名或执行 `DROP TABLE（删除表）`；
+- 推荐目标是保留 `ms_image（旧影像库）` 为 Legacy/Archive（遗留/归档），后续新建 `ms_image_runtime（在线运行时库）` 与 `ms_image_eval（离线评测库）`；
+- 不恢复 `file_asset（公共文件资产）` 表，OSS（对象存储）保存对象，领域表保存对象引用及完整性事实。
+
+固定架构合同：
+- `API（接口） -> Service（服务） -> DalBase CRUD（数据访问） -> Model/DB（模型/数据库）`；
+- 不新建 Repository（仓储）、第二 CRUDBase（数据访问基类）、DatabaseService（数据库服务）、平行 service 包或新微服务；新业务 Service（服务）只进入已有 `apps/backend/services/`；
+- 新 MySQL（关系数据库）表不用 Foreign Key（外键）、Enum（枚举）、tenant_id（租户标识）或联合主键；每表使用独立 `VARCHAR(64)` 不透明 `id（主键）`；接口 ID 放 query（查询参数）或 request body（请求体），不使用 `/{id}`；
+- 事务内禁止 OSS/Broker/Provider（对象存储/消息代理/模型提供方）网络 I/O（输入输出）；
+- Worker（工作进程）只能使用 Task Snapshot（任务冻结快照），不得读取 Nacos latest（Nacos 最新值）或自动发布 Prompt（提示词）；
+- 禁止用 Python（程序规则）改写 `normal（正常）/abnormal（异常）/review_required（需复核）/non_diagnostic（影像不可诊断）`；
+- 不删除 v1（旧版）兼容链，不生成独立测试脚本或迁移脚本；除非另有明确授权。
+
+严格实施顺序：
+`P0 Database Baseline（数据库基线） -> P1 Worker Runtime Security Qualification（工作进程运行时安全资格化） -> E1 Primary-only Runtime（仅主读真实运行链） -> M1 Primary Medical Baseline（主读医学基线） -> Q3 Primary Prompt A/B（主读提示词配对实验） -> Q4 Second Provider Qualification + Model A/B（第二模型资格化与模型对比） -> M2 FamilyRouting + TargetedReview（专项家族路由与专项复核） -> R1 Retry（重试） -> R2 Fallback（自动降级） -> R3 Race（双通道竞速）`。
+
+本轮先从 handoff（代理交接）和源码判断当前所处阶段。默认优先 P1：以最小范围审计并补齐正式 Worker（工作进程）使用的 Secret Resolver（密钥解析器）、Encrypted Response Store（加密响应存储）、OSS Signer（OSS 签名器）和 Provider Attempt Lookup（模型尝试查询）合同，然后才进入 E1。若用户明确要求本轮实现 Prompt（提示词）生命周期，则只实现最小 `PromptPublicationService（提示词发布服务）`：审核完成的版本化 Prompt Package（提示词包）-> Nacos Publish（Nacos 发布）-> Read-after-write（写后回读）-> 现有 PromptImportService（提示词导入服务）-> AIConfig（AI 配置）编译与审计；不新建发布表，复用 `ai_control_audit_record（AI 控制面审计记录）`，绝不允许 Worker 自动发布。
+
+每个切片开始前，第一条回复必须给出：
+1. 当前代码事实和 `file:line（文件:行号）` 证据；
+2. 目的、为什么现在做、相对上一阶段的唯一主要变量；
+3. 输入、处理、输出、下游消费者、状态机和失败语义；
+4. 幂等、事务边界、unknown（未知尝试）、取消、迟到结果、重试与恢复策略；
+5. 精确 `write set（写入文件集合）`；
+6. 是否需要表、字段、迁移、外部配置或新 Service（服务）；没有则写“不需要”；
+7. 工程 Gate（工程门禁）、医学 Gate（医学门禁）、Stop（停止）条件和 Rollback（回滚）单位；
+8. 哪些真实环境验证尚未运行或未获授权。
+
+完成后：
+- 运行改动相关的既有 pytest、Ruff、compileall 和 `git diff --check`；
+- 真实 DB/OSS/Broker/Provider（数据库/对象存储/消息代理/模型提供方）或医学验证未运行时明确写 `NOT RUN（未运行）`，不能用 Mock（模拟）代替真实资格；
+- 分别报告 `CODE_IMPLEMENTED（代码已实现）`、`RUNTIME_QUALIFIED（运行时已资格化）`、`MEDICALLY_VALIDATED（医学效果已验证）`；
+- 更新 `AGENT_HANDOFF.md`、snapshot、work-log、validation、decisions、backlog、risks，并运行 handoff maintenance（交接维护）。
+```
+
+## 开启 XRay 后续修正与实施会话（历史入口，不再作为当前入口）
+
+> 完整可复制版本位于 `docs/refactor/23-xray-next-phase-correction-and-implementation-guide.md（X 光后续修正与分阶段实施指南）` 第 16 节。P0-A Targeted Prompt command（专项提示词命令）的 family/focus（家族/关注点）传递已经完成，不得重复修改。新会话从 P0-B Reliable Execution Contracts（可靠执行合同）、Q0 Prompt Inventory（提示词盘点）和 Q1 Prompt Runtime Contract（提示词运行合同）开始，再按证据进入 E1 Primary Runtime（真实单 Provider 主读工程链）。
+
+```text
+请继续开发 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 的 XRay（X 光）AI（人工智能）与 Prompt（提示词）完整链路。先完整阅读 `AGENTS.md`、`AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md`、`.agent-handoff/risks.md`、`.agent-handoff/backlog.md` 和 `docs/refactor/23-xray-next-phase-correction-and-implementation-guide.md`，再阅读当前阶段即将修改的源码和现有测试。
+
+当前状态必须保持为：`D5_CODE_FOUNDATION_COMPLETE / ENGINEERING_SEGMENTS_PASSED / FULL_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。v2 Targeted Prompt command 的 family_key/focus_key/primary_complete_result 传递已完成并有合同测试，不要重复修改。
+
+本会话先完成三个可分别验收的前置：P0-B 核验并最小补齐 StudyPreparation 调用前资格、unknown Attempt、Task cancel、迟到 Winner、requested_model/actual_model 和报告通知幂等；Q0 只读盘点 Nacos、数据库 Prompt/Connection/ModelPool/Config/Schema/消息合同及引用关系；Q1 选择唯一 Primary 候选，验证安全变量、developer/user/image/schema 分层、不可变 Config、Task 快照与重放一致性。无需迁移或额外外部授权时，直接进入 E1，从 ready revision 经 Outbox、Broker/Worker、OSS、Provider、Attempt/Stage、DecisionFinalization 到不可变 Report 的真实单 Provider Primary 最小切片。
+
+Prompt 必须遵循 `Shared Medical Core（共享医学核心） + Primary Frozen Entry（主读冻结入口） + Targeted Frozen Entry（专项冻结入口）`，只允许安全变量，模型身份由 Connection/ModelPool/Config 冻结，不恢复旧器官 Prompt，不让 Python 投票、拼接或改判医学结果。业务链保持 `API -> Service -> DalBase CRUD -> Model/DB`；不新增无证据表、Service、Family、Repository、CRUDBase、第二套 Runtime 或公共 file_asset。未经授权不新增/执行迁移、不生成独立测试脚本、不删除 v1 兼容链。
+
+开始修改前输出当前事实与 file:line、阶段、精确 write set、输入/处理/输出/失败语义、幂等/事务/恢复策略、工程与医学 Gate、停止条件和回滚单位；然后直接实现当前最小可验证切片。结束时分别报告 `CODE_IMPLEMENTED（代码已实现）`、`RUNTIME_QUALIFIED（运行时已资格化）`、`MEDICALLY_VALIDATED（医学效果已验证）`，并更新 handoff。完整实施顺序和详细合同以 23 号文档第 16 节为准。
+```
+
+## 开启完整 XRay AI 与 Prompt 链路开发会话（历史入口，不再作为当前入口）
+
+> 完整版本位于 `docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md（X 光完整 AI 与提示词链路开发指南）` 第 17 节；以下内容可直接复制。
+
+```text
+请继续开发 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 的完整 XRay（X 光）AI（人工智能）与 Prompt（提示词）链路。目标不是只完成基础框架，而是按依赖顺序最终完成真实 Primary（主读）运行、Primary 医学基线、FamilyRouting（家族路由）、TargetedReview（专项复核）、Multi-Attempt Retry（多物理尝试重试）、Multi-Provider（多模型提供方）、Automatic Fallback（自动降级）、Dual-Lane Race（双通道竞速）、Prompt 优化、Evaluation（评测）和发布门禁。
+
+启动时：
+
+1. 只操作 `/Users/mozhicheng/workspace/code/cy-code/ms-image`。
+2. 完整阅读 `AGENTS.md`、`AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md`、`.agent-handoff/risks.md`、`.agent-handoff/backlog.md`、`docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md` 和 `docs/refactor/21-xray-complete-capability-chain-and-session-prompt.md`，再读当前阶段相关源码和测试。
+3. 运行 `git status --short`、`git diff --name-status`、`git diff --stat`；保护其他用户/会话的未提交改动，禁止 reset、clean、checkout、restore、stash、整文件覆盖和 `git add -A`。
+4. 当前统一状态是 `D5_CODE_FOUNDATION_COMPLETE（D5 代码基础完成） / ENGINEERING_SEGMENTS_PASSED（工程分段检查通过） / FULL_RUNTIME_NOT_QUALIFIED（完整运行时未资格化） / MEDICAL_ACCURACY_UNKNOWN（医学准确率未知） / MEDICAL_RELEASE_NO_GO（医学发布禁止放行）`。不得把代码存在、Fake/Mock（模拟运行）或分段检查写成完整真实链或医学验证通过。
+
+固定合同：
+
+- 所有业务链保持 `API（接口） -> Service（服务） -> DalBase CRUD（数据访问层） -> Model/DB（模型/数据库）`；Worker 也经 Service/DAL。
+- 不新增第二套 Runtime、Repository、CRUDBase、DatabaseService 或平行 service 包。
+- 公共 Service 保持 SessionService、StudyService、ImageService、TaskService、ImagingExecutionService、AIConfigService、AIRequestService、ReportService；医学能力放在现有 Stage handler。
+- Stage 保持 StudyPreparation（检查准备）、JointPrimaryReader（联合主读）、FamilyRouting（家族路由）、TargetedReview（专项复核）、DecisionFinalization（结果定稿）。
+- 固定五个顶层 Family：thoracic（胸腔）、abdominal（腹腔）、appendicular_orthopedic（四肢骨关节）、axial_orthopedic（轴骨骼）、head_neck（头颈）。Family 只用于评测分层、失败归因和确定性专项路由，不按 Family 新建表、Service 或 Prompt，也不默认分别调用模型。
+- Prompt v2 保持一份冻结完整 XRay Prompt 正文：没有 PRIMARY_RESULT_JSON（主读结果）时运行 Primary mode（主读模式）；存在主读结果和唯一 Family/Focus（家族/关注点）路由证据时运行 Targeted mode（专项复核模式）。
+- TargetedReview 最多一次视觉调用，读取同一完整 Study，输出新的完整病例结果；禁止输出 patch（补丁）后由 Python 拼接。
+- 一个医学 Stage 对应一个 Logical Call（逻辑调用）；Retry、Fallback、Race 只增加 Physical Attempt（物理尝试）。Winner 只能由 winner_attempt_id CAS（胜出尝试标识比较交换）和 first_technically_valid（首个技术合同有效结果）决定，禁止医学投票、拼接、选更异常结果或程序改判。
+- Retry 只处理同候选的明确临时工程失败；unknown（未知）必须按原模型提供方幂等身份对账，禁止盲发。
+- Fallback 只处理明确工程失败，不根据 normal/abnormal（正常/异常）触发；不新增 FallbackService。
+- Race 最多两个通道；未证明单通道、候选资格、成本和 Winner 合同前不得启用。
+- 不建设公共 file_asset（文件资产）表；OSS 存对象，image_record（影像记录表）存对象键、哈希、大小、状态和版本。
+- MySQL 不使用 foreign key（外键）或 enum（枚举）；每表独立 opaque VARCHAR(64) id（不透明字符串主键）；接口 ID 只放 query（查询参数）或 request body（请求体），不使用 `/{id}`。
+- 未经明确授权，不新增或执行迁移脚本，不生成独立测试脚本，不删除 v1 兼容链，不处理 Web 管理页面和人工病例复核。
+
+严格按以下累计顺序推进，最终不得漏掉任何一项：
+
+`E1 Primary Runtime（主读真实运行链） -> M1 Primary Medical Baseline（主读医学基线） -> M2 FamilyRouting + TargetedReview（家族路由与专项复核） -> E2 Multi-Attempt Retry（多物理尝试重试） -> E3 Multi-Provider（多模型提供方） -> E4 Automatic Fallback（自动降级） -> E5 Dual-Lane Race（双通道竞速） -> M3 Medical Prompt Optimization（医学提示词优化）`。
+
+先用源码、handoff 和真实运行证据判断当前阶段。若 E1 没有共享非生产真实 `Outbox -> Broker/Worker -> OSS Signed URL -> Provider -> Encrypted Response -> Attempt/Stage Finalize -> DecisionFinalization -> Report` 证据，当前第一任务仍是 E1；不得跳级，也不得把后续能力永久排除。
+
+每阶段修改前先给出：当前代码事实与 file:line 证据；阶段目的；输入、处理、输出和失败语义；幂等、事务边界、retry、unknown、取消、迟到结果和恢复策略；精确 write set；是否需要新字段/表/Service；工程与医学 Gate、停止条件、回滚单位；相对上一阶段唯一主要变量。
+
+实现当前最小可验证切片，优先扩展现有测试。运行相关现有 pytest、Ruff、compileall 和 git diff --check；真实基础设施或医学验证不能运行时明确写 NOT RUN（未运行），不得用 Fake/Mock 替代。
+
+准确率优化必须先做 label audit（标签审计），冻结 Gold、病例版本和图像哈希，建立 ABN->normal、NOR->abnormal、review_required、non_diagnostic、parse/schema、timeout/rate-limit 和 image coverage Failure Bank。每次 Prompt/模型实验只改变一个主要变量，使用同病例、同图像、同 Gold、同 Schema 和同评分器做 Paired A/B；固定 Failure Bank 与完整回归通过后才能进入 Holdout。禁止改标签、跳过失败病例、用模型输出推断标签或用 Python 修改医学结论。
+
+每阶段结束分别报告 CODE_IMPLEMENTED（代码已实现）、RUNTIME_QUALIFIED（运行时已资格化）、MEDICALLY_VALIDATED（医学效果已验证），并按 AGENT_HANDOFF_PROTOCOL 更新 handoff 文件、运行 maintenance。不要为了显得完整而添加没有证据的新表、新服务、新家族或医学规则。
+```
 
 ## 开启新的重构会话（历史 P1/P2 提示，禁止作为当前启动入口）
 

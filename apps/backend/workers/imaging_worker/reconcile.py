@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from apps.backend.core.ai.gateway.attempt_lookup import ProviderAttemptLookup
 from apps.backend.core.async_db import async_engine, session_factory
 from apps.backend.core.config import settings
 from apps.backend.core.imaging.object_store import (
@@ -24,6 +25,7 @@ from apps.backend.services.runtime.service.image_service import (
 )
 from apps.backend.services.runtime.service.imaging_execution_service import ImagingExecutionService
 
+from .ai_attempt_reconcile import AIAttemptReconcileWorker
 from .image_validation import ImageValidationWorker
 
 
@@ -34,9 +36,11 @@ class ImageReconciler:
         *,
         session_factory_: async_sessionmaker[AsyncSession],
         gateway_factory: Callable[[], ObjectStorageGateway] = OSSObjectStore,
+        attempt_lookup: ProviderAttemptLookup | None = None,
     ):
         self.session_factory = session_factory_
         self.gateway_factory = gateway_factory
+        self.attempt_lookup = attempt_lookup
 
     async def run_once(
         self,
@@ -48,6 +52,14 @@ class ImageReconciler:
     ) -> dict[str, Any]:
         if limit < 1:
             raise ValueError("image_reconcile_limit_invalid")
+        ai_attempt_reconcile = await AIAttemptReconcileWorker(
+            session_factory_=self.session_factory,
+            attempt_lookup=self.attempt_lookup,
+        ).run_once(
+            limit=limit,
+            lease_seconds=settings.AI_ATTEMPT_RECONCILE_LEASE_SECONDS,
+            retry_seconds=settings.AI_ATTEMPT_RECONCILE_RETRY_SECONDS,
+        )
         now = datetime.utcnow()
         async with self.session_factory() as session:
             async with session.begin():
@@ -145,6 +157,7 @@ class ImageReconciler:
         for key, value in cursor_ready.items():
             ready_outcomes[key] = ready_outcomes.get(key, 0) + value
         return {
+            "ai_attempts": ai_attempt_reconcile,
             "stages": stage_reconcile,
             "expired_leases": expired,
             "validation": validation_outcomes,
@@ -306,9 +319,7 @@ class ImageReconciler:
 async def _main(limit: int, ready_image_ids: Sequence[str]) -> None:
     runtime = runtime_config(source=settings, prefix="IMAGING")
     try:
-        result = await ImageReconciler(
-            session_factory_=session_factory,
-        ).run_once(
+        result = await ImageReconciler(session_factory_=session_factory).run_once(
             limit=limit,
             lease_seconds=runtime.worker_lease_seconds,
             max_attempts=runtime.max_attempts,

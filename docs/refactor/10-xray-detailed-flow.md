@@ -1,13 +1,12 @@
 # MS-Image XRay（X 光）详细链路与开发流程图
 
-状态：`CURRENT_REFACTOR_VIEW / DESIGNED_NOT_IMPLEMENTED`（当前重构视图/已设计尚未实现）
+状态：`CURRENT_REFACTOR_VIEW / P1_CODE_IMPLEMENTED / P2_PLUS_DESIGNED`（当前重构视图/P1 代码已实现/P2 及后续已设计）
 更新日期：2026-08-18
 适用范围：XRay（X 光）首期重构、代码评审、联调、故障定位和团队讲解。
 精确字段、状态候选值和不变量以[设计母文第 6、8、15、16 章](../ms-image-final-architecture-and-database-design.md)为准。
 
 本文把分散在设计母文中的 XRay（X 光）链路集中成开发视图，不建立第二套字段权威。图中的目标
-Service（业务服务）、Stage Service（阶段服务）和目标表当前尚未完整实现；不能把 `PROPOSED`（候选设计）
-写成线上运行事实。
+P1 的 Session/Study/Series/Image、API、OSS 校验和 Image Outbox/Relay/Worker 已完成代码实现；Task、Stage Service（阶段服务）、AI、Report（报告）和目标表完整迁移尚未实现。本文中 P2+ 的目标行为均为 `PROPOSED`（候选设计），不能写成线上运行事实。
 
 ## 1. 先给结论
 
@@ -96,7 +95,7 @@ flowchart TD
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as vet-platform（上游）
+    participant U as Caller（调用方/接入端）
     participant API as MS-Image API（接口层）
     participant S as Session/StudyService（会话/检查服务）
     participant I as ImageService（影像服务）
@@ -154,7 +153,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as vet-platform（上游）
+    participant U as Caller（调用方/接入端）
     participant API as Task API（任务接口）
     participant T as TaskService（任务服务）
     participant DB as MySQL ms_image（在线数据库）
@@ -251,11 +250,13 @@ flowchart TD
 这条候选链必须同时遵守：
 
 1. Family（家族）是报告结构、失败归因和评测 strata（分层），不是一张表或默认一次模型调用。
-2. `FamilyRouting`（家族路由）只能输出白名单 `primary_final/targeted_review`，不能修改 normal/abnormal。
+2. `FamilyRouting`（家族路由）只能输出白名单 `primary_final/targeted_review`，不能修改 normal/abnormal；进入 `targeted_review` 必须同时具备唯一 `family_key + focus_key`（专项键加关注键）、来源 Finding（影像发现）、充分覆盖、预注册失败假设和预留预算/deadline（截止时间）。
 3. 每个病例最多选择一个家族进行一次 TargetedReview（专项复核），不能按器官并行多次投票。
 4. TargetedReview 必须输出完整病例结果，不能把 Primary 与 Targeted 的有利片段拼接成 Final。
 5. 已进入 TargetedReview 后若发生技术失败，必须以 `not_produced` 关闭；不能静默回退 Primary，避免选择性报告。
 6. Router 规则、Targeted Prompt、模型、预算和 Schema 都是候选变量的一部分，评测前必须冻结。
+
+专项目录、Focus/Strategy、Primary/Targeted Prompt 和 Router 门禁见[XRay 专项完整设计](14-xray-specialty-design.md)。
 
 ## 7. 一次 XRay Provider 调用
 
@@ -430,10 +431,7 @@ flowchart LR
     P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
 ```
 
-默认第一个代码阶段按 P1A -> P1B -> P1C 实现公共影像事实、API 和 OSS 异步校验合同，不同时接入
-医学 Provider。`Image uploading -> validating + Outbox(validate_image)` 属于 P1C；P2 复用同一
-Outbox/Relay 扩展任务执行。每个 Phase（阶段）通过自己的工程门禁后再进入下一阶段。没有迁移、
-真实数据库和真实对象演练时，P1 只能标记
+P1 已按 P1A -> P1B -> P1C 完成公共影像事实、API 和 OSS 异步校验代码，不同时接入医学 Provider。`Image uploading -> validating + Outbox(validate_image)` 属于 P1C；P2 将复用同一 Outbox/Relay 扩展任务执行。每个 Phase（阶段）通过自己的工程门禁后再进入下一阶段。没有迁移、真实数据库和真实对象演练时，P1 只能标记
 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`；业务测试、迁移脚本和真实数据库操作仍需分别授权。
 
 ## 13. 开发验收清单

@@ -1,5 +1,6 @@
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,14 +25,41 @@ class TaskDal(DalBase):
     async def get_by_id(self, task_id: str) -> Task | None:
         return await self.get_data(data_id=task_id, v_return_none=True)
 
+    async def get_by_id_for_update(self, task_id: str) -> Task | None:
+        """Read the current Task row under a row lock for budget reservation."""
+        return await self.get_data(
+            data_id=task_id,
+            v_start_sql=select(self.model).with_for_update(),
+            v_return_none=True,
+            v_expire_all=True,
+        )
+
     async def get_by_business_key(self, business_key: str) -> Task | None:
         return await self.get_data(business_key=business_key, v_return_none=True)
 
-    async def cas_update(self, *, task_id: str, expected_version: int, values: dict[str, Any]) -> Task | None:
-        allowed = {"execution_status", "ai_medical_status", "budget_consumed_json", "current_report_id", "next_retry_at", "error_code", "error_message", "cancel_requested_by_id", "cancel_reason", "cancel_requested_at", "started_at", "finished_at"}
+    async def cas_update(
+        self, *, task_id: str, expected_version: int, values: dict[str, Any]
+    ) -> Task | None:
+        allowed = {
+            "execution_status",
+            "ai_medical_status",
+            "budget_reserved_json",
+            "budget_consumed_json",
+            "current_report_id",
+            "next_retry_at",
+            "error_code",
+            "error_message",
+            "cancel_requested_by_id",
+            "cancel_reason",
+            "cancel_requested_at",
+            "started_at",
+            "finished_at",
+        }
         if not values or not set(values).issubset(allowed):
             raise ValueError("task_update_fields_invalid")
-        return await self.cas_put_data(data_id=task_id, expected_version=expected_version, data=values)
+        return await self.cas_put_data(
+            data_id=task_id, expected_version=expected_version, data=values
+        )
 
 
 __all__ = ["TaskDal"]

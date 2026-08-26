@@ -33,16 +33,14 @@ config = context.config
 # with SQLAlchemy URL encoding so special characters remain valid.
 config.set_main_option(
     "sqlalchemy.url",
-    str(
-        URL.create(
-            "mysql+pymysql",
-            username=settings.MYSQL_USER,
-            password=settings.MYSQL_PW,
-            host=settings.MYSQL_HOST,
-            port=int(settings.MYSQL_PORT),
-            database=settings.MYSQL_DB,
-        )
-    ),
+    URL.create(
+        "mysql+pymysql",
+        username=settings.MYSQL_USER,
+        password=settings.MYSQL_PW,
+        host=settings.MYSQL_HOST,
+        port=int(settings.MYSQL_PORT),
+        database=settings.MYSQL_DB,
+    ).render_as_string(hide_password=False),
 )
 
 # Interpret the config file for Python logging.
@@ -95,6 +93,7 @@ def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"init_command": "SET time_zone = '+00:00'"},
     )
 
     with connectable.connect() as connection:

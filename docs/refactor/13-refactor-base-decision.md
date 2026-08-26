@@ -1,8 +1,8 @@
 # MS-Image（影像服务）重构基线决策
 
-状态：`CURRENT DECISION / IMPLEMENTATION NOT STARTED`（当前决策/目标实现尚未开始）
+状态：`CURRENT DECISION / P1_CODE_IMPLEMENTED / P2_PLUS_NOT_STARTED`（当前决策/P1 代码已实现/P2 及后续尚未开始）
 
-更新日期：2026-08-18
+更新日期：2026-08-19
 
 决策对象：比较“回到 `9a45209a` 后重写”“直接在当前工作树继续修补”和“以当前工作树为资产基线做保留入口的内部模块化替换”。
 
@@ -14,6 +14,8 @@
 以当前工作树作为资产基线，先建立不含 Secret（密钥）的可恢复 checkpoint（检查点），
 再执行 existing-entry internal modular refactor（保留入口的内部模块化重构）。
 ```
+
+实施进度更新（2026-08-19）：该决策已指导完成 P1（Session/Study/Series/Image、API、`ObjectStorageGateway`、Image Outbox/Relay/Worker、校验、替换与 finalize）代码，并在 `6dfd8d1`（`chore: close P1 imaging implementation`）收口。P1 仍是 `NOT_MIGRATED / NOT_RUNTIME_VALIDATED`（未迁移/未做真实运行验证）；P2+ 尚未开始，不能把本决策的“实现尚未开始”历史状态继续当作当前事实。
 
 这不是“保留当前 `xray_accuracy` 设计继续修”，也不是“把所有文件推倒重写”。准确含义是：
 
@@ -27,29 +29,28 @@
 
 ## 2. 先消除“两个版本”的误解
 
-2026-08-18 本地只读核对结果：
+2026-08-18 初始重构基线核对结果（历史快照）：
 
 | 事实 | 结果 | 结论 |
 |---|---|---|
-| 当前 `HEAD` | `9a45209ac9fce07ca5c7c209728d186ad411ae14` | 当前提交点就是用户指定节点 |
+| 初始 `HEAD` | `9a45209ac9fce07ca5c7c209728d186ad411ae14` | 当时提交点就是用户指定节点 |
 | 作者 | `zhichengmo <13410092+zhichengmo@user.noreply.gitee.com>` | 与用户给出的作者一致 |
 | 提交时间 | `2026-08-08T12:04:08+08:00` | 与用户给出的时间一致 |
 | 提交说明 | `Initial commit`（初始提交） | 该节点是仓库提交基线 |
-| `9a45209a..HEAD` 提交数 | `0` | 指定节点与当前 HEAD 之间没有后续 commit（提交） |
+| `9a45209a..HEAD` 提交数 | `0` | 仅在初始快照时成立；不能用于描述当前分支 |
 | 已跟踪修改 | 27 个文件，约 `+1448/-1477` | 当前能力主要存在于未提交工作树；数字会随本轮文档校准继续变化 |
 | 未跟踪文件 | 149 个实际文件 | 包含源码、文档、Worker、评测与 handoff（交接）等；数字会随新增文档变化 |
 | 暂存区 | 空 | 当前没有可直接视为已审核 checkpoint 的 staged change（暂存修改） |
-| 本地 `.env` | 未跟踪且当前未被 Git ignore（忽略）规则命中；含 15 个赋值，其中 3 个变量名属于 Secret/key/token（密钥/令牌）类别，未读取或记录其值 | 建立 checkpoint 前必须先阻止其进入版本控制，并完成不暴露值的 Secret 扫描 |
+| 本地 `.env`（初始快照） | 当时未跟踪且未被 Git ignore（忽略）规则命中；含 15 个赋值，其中 3 个变量名属于 Secret/key/token（密钥/令牌）类别，未读取或记录其值 | 当时建立 checkpoint 前必须先阻止其进入版本控制；当前状态以 handoff 快照为准 |
 
-因此实际比较不是“旧 commit 对新 commit”，而是：
+初始决策时实际比较不是“旧 commit 对新 commit”，而是：
 
 ```text
 A = 9a45209a 初始提交
 B/C 的输入 = 9a45209a + 当前未提交工作树
 ```
 
-执行 `git reset --hard 9a45209a` 不会切到另一个较干净的新版本，只会删除 27 个已跟踪文件中的未提交修改；
-再配合 `git clean` 还会删除当前未跟踪资产。本文禁止把这类破坏性操作当作重构起点；未跟踪 `.env` 也禁止进入 checkpoint。
+当前分支已包含 P1 的提交；执行 `git reset --hard 9a45209a` 会同时丢失 P1 代码和当时未提交资产。本文禁止把这类破坏性操作当作重构起点；未跟踪 `.env` 也禁止进入 checkpoint。
 
 ## 3. 当前工作树中应该保留的资产
 
@@ -133,19 +134,18 @@ flowchart LR
     P3 --> PX["Targeted Profile\n仅在配对证据后候选启用"]
 ```
 
-### 7.1 P0：开始改代码前
+### 7.1 P0/P1：已完成的代码阶段与剩余门禁
 
-1. 审核当前已跟踪修改和未跟踪资产的归属，确保 `.env` 和任何真实 Secret 不进入 checkpoint；数量只作审计时快照，不作为长期合同。
-2. 由用户确认 checkpoint 方式后建立可恢复基线；在此之前不得 reset/clean，也不得批量覆盖当前文件。
-3. 核对阻止 P1 的 Secret、事务外 I/O、身份、Broker、Trace/Audit 和启动合同；只修 P1 必要阻断。
-4. 把当前工作树标成 `ASSET BASELINE`（资产基线），不能标成目标 schema 已实现。
+1. 初始 checkpoint、Secret、事务外 I/O、身份、Broker、Trace/Audit 和启动合同核对已支撑 P1 实施；继续保护 `.env` 和任何真实 Secret，不得 reset/clean 或批量覆盖当前文件。
+2. P1 已完成代码提交，但不能标成目标 schema 已实现或真实环境通过。
+3. 真实 MySQL/OSS/RabbitMQ 演练、迁移设计与执行仍需单独授权；它们是 P1 运行门禁而不是代码重写理由。
 
 ### 7.2 P1/P2：先闭环通用影像和零模型执行
 
-- P1A：Session/Study/Series/Image 的 Model -> Schema -> DAL(DalBase) -> Service。
-- P1B：API、dependency injection（依赖注入）、route registration（路由注册）；ID 只用 query/body。
-- P1C：唯一 ObjectStorageGateway + Image `validating`/Outbox/Relay/Worker/reconcile/revision。
-- P2：复用同一 Outbox/Relay，实现 Task + first Stage 原子创建、Lease/CAS 和 zero-model replay（零模型重放）。
+- P1A（已完成代码）：Session/Study/Series/Image 的 Model -> Schema -> DAL(DalBase) -> Service。
+- P1B（已完成代码）：API、dependency injection（依赖注入）、route registration（路由注册）；ID 只用 query/body。
+- P1C（已完成代码）：唯一 ObjectStorageGateway + Image `validating`/Outbox/Relay/Worker/reconcile/revision。
+- P2（尚未开始）：复用同一 Outbox/Relay，实现 Task + first Stage 原子创建、Lease/CAS 和 zero-model replay（零模型重放）。
 - P1/P2 不接医学 Provider，不生成未授权迁移或测试脚本，不操作真实数据库。
 
 ### 7.3 P3 以后：医学链按实验变量推进
@@ -188,14 +188,14 @@ flowchart LR
 - 候选 Provider 的真实 model ID、图像/Schema/receipt 能力及保留政策。
 - 冻结 Gold、病例级 split、Failure Bank 和 isolated Holdout 的规模与质量。
 
-这些 UNKNOWN（未知项）不会阻止先完成通用影像 P1，但会分别阻止生产迁移、真实 Provider、医学发布和旧链退出。
+这些 UNKNOWN（未知项）不改变 P1 已完成代码的事实，但会分别阻止 P1 真实迁移/运行验证、真实 Provider、医学发布和旧链退出。
 
 ## 11. 对新会话的最终指令
 
 ```text
-不要 reset/clean 到 9a45209a，因为当前 HEAD 本来就是该提交。
-先把当前工作树当作待审核资产建立可恢复 checkpoint，排除 .env/Secret。
+不要 reset/clean 到 9a45209a；当前分支已包含 P1 提交。
+先读取当前 `HEAD`、P1 已提交源码与 handoff，保护 .env/Secret 和所有未提交资产。
 保留 auth/readiness/OSS validation/provider qualification/outbox-worker 的有效语义，
-按 P1A -> P1B -> P1C -> P2 内部模块化替换 xray_accuracy/tenant/validation-only 专项领域。
+不要重写 P1；后续仅按当前授权进入真实 P1 演练或 P2 内部模块化替换 xray_accuracy/tenant/validation-only 专项领域。
 同类事实只允许一个 owner；未通过零模型可靠执行前不接医学 Provider。
 ```

@@ -1,20 +1,19 @@
 # MS-Image XRay（X 光）核心链路开发沟通文档
 
-状态：`CURRENT_BRIEFING / DESIGNED_NOT_IMPLEMENTED`（当前沟通稿/已设计尚未实现）
-更新日期：2026-08-18
+状态：`CURRENT_BRIEFING / P1_CODE_IMPLEMENTED / P2_PLUS_DESIGNED`（当前沟通稿/P1 代码已实现/P2 及后续已设计）
+更新日期：2026-08-19
 建议沟通时长：20-30 分钟
-适用对象：首次参与 `ms-image` 的后端、AI、测试、数据评测、运维和上游开发
+适用对象：首次参与 `ms-image` 的后端、AI、测试、数据评测、运维和接入端开发
 精确字段依据：[设计母文](../ms-image-final-architecture-and-database-design.md)
 完整开发流程：[XRay 详细链路与开发流程图](10-xray-detailed-flow.md)
 
+专项详细设计：[XRay 专项完整设计](14-xray-specialty-design.md)
+
 逐层责任：[Canonical XRay Chain 逐层目的与责任合同](12-canonical-xray-layer-responsibility-contract.md)
 
-本文用于让新开发快速建立同一幅系统图，不建立第二套数据库字段或状态权威。当前代码仍是
-XRay validation-only（X 光仅验证）工程骨架；本文描述的是目标链路，不能据此宣称目标表、Stage、
-真实 Provider（AI 服务提供方）或医学准确率已经完成。
+本文用于让新开发快速建立同一幅系统图，不建立第二套数据库字段或状态权威。P1 已完成通用影像接入底座代码；本文描述的 Task、Stage、真实 Provider（AI 服务提供方）、Report 和医学评测仍是目标链路，不能据此宣称目标表已迁移、真实 Provider 已接通或医学准确率已经完成。
 
-建议讲解顺序：先用第 1-3 节统一系统图和当前状态，再用第 4-6 节说明在线链与实验链，最后按第 8-11 节
-分配代码、数据库和联调责任。若时间只有 5 分钟，只讲第 1、3、5、12 节。
+建议讲解顺序：先用第 1-3 节统一系统图和当前状态，再用第 4-6 节说明在线链与实验链，接着必须讲第 13 节的专项设计，最后按第 8-11 节分配代码、数据库和联调责任。若时间只有 5 分钟，只讲第 1、3、6、13 节。
 
 ## 1. 先记住三个结论
 
@@ -35,8 +34,8 @@ StudyPreparation（检查准备）
 
 | 范围 | 当前可确认状态 | 目标状态 |
 |---|---|---|
-| 代码 | 旧 `xray_accuracy` validation-only 骨架 | 通用影像分层和 XRay 最短主链 |
-| 数据库 | 隔离环境中的旧 XRay 临时表 | `ms_image` 在线候选 10 表；数量按事实必要性调整 |
+| 代码 | P1 影像接入底座代码已完成 | 继续实现 Task/Stage/AI/Report 和 XRay 最短主链 |
+| 数据库 | 目标表尚未迁移或完成真实运行验证 | `ms_image` 在线候选 10 表；数量按事实必要性调整 |
 | Stage | 当前执行器主要支持技术 `request_gate` | 5 个版本化 Stage Service，默认链只运行其中 3 个 |
 | Provider | 资格和真实影像能力仍有阻断 | 冻结 Config、完整原图、receipt、Schema 和 unknown reconcile 闭环 |
 | 医学准确率 | `UNKNOWN`（未知） | trusted Gold + paired A/B + isolated Holdout 通过后才能判断 |
@@ -49,7 +48,7 @@ StudyPreparation（检查准备）
 
 ```mermaid
 flowchart TD
-    UP["vet-platform（上游业务系统）"]
+    UP["Caller（调用方/接入端）"]
     CP["ControlPlane（控制面）<br/>冻结 AI Config、Prompt、模型资格和 Profile"]
     SS["SessionService（会话服务）<br/>开始/关闭一次影像诊疗会话"]
     ST["StudyService（检查服务）<br/>Study/Series/revision/完整性"]
@@ -123,7 +122,7 @@ SessionService（会话服务）
 
 - `SessionService` 记录一次业务会话何时开始、关闭或取消。
 - `StudyService` 表达一次影像检查、模态、Series、当前 revision 和完整性。
-- 上游用户、宠物和病历正文不复制进 `ms_image`，只保存受控 opaque ID（不透明标识）。
+- 用户、宠物和病历正文属于外部业务域，`ms_image` 不复制公共主数据，只保存受控 opaque ID（不透明标识）。
 
 ### 4.2 上传和服务端校验影像
 
@@ -145,7 +144,7 @@ Image uploading
 - `Image uploading -> validating` 与 `Outbox(validate_image)` 必须同事务。
 - OSS/Broker 外部 I/O 必须在数据库事务外。
 - 校验失败进入 `quarantined`，Study 保持非 ready 或进入 conflict。
-- 替换影像创建新版本；新版本 ready 且 Study revision CAS 成功后，旧版本才能 superseded。
+- 替换影像创建新版本；新版本 ready 且 Study revision CAS 成功后，被替代版本才能 superseded。
 - 必需 Series/Image 未完整前不能创建诊断 Task。
 
 ### 4.3 创建诊断 Task 并可靠投递
@@ -242,14 +241,14 @@ Report final != Report published
 
 ## 6. 家族分类和实验链放在哪里
 
-Clinical Family（临床专项家族）用于：
+Clinical Family（临床专项家族）是一个有稳定临床边界、输入覆盖合同、报告分区和评测分母的**临床评估包**。它用于：
 
 - Primary 输出中的结构化报告分区。
 - Failure Bank（失败样本库）和指标的预注册分层。
 - 候选 TargetedReview（专项复核）选择的一个问题域。
 
-骨骼、心血管、呼吸、消化、泌尿生殖等不是独立数据库表，也不默认各调用一次模型。犬/猫、解剖部位、
-临床家族和任务类型应作为正交字段，不再拼成不可治理的长配置名称。
+骨骼、心血管、呼吸、消化、泌尿生殖等不自动对应独立数据库表或默认模型调用。犬/猫、解剖部位、
+临床家族、报告子域、技术能力和任务类型必须作为正交字段；第 13 节给出专项摘要，完整合同以 14 号专项设计为准。
 
 实验链 `xray_targeted_review_v1`：
 
@@ -321,19 +320,17 @@ Stage Service 首期仍位于同一代码库和现有 `app/service/` 层，不�
 3. 数据库不使用 Foreign Key、数据库 Enum、联合主键或 `tenant_id`；每表使用独立 `id VARCHAR(64)` 单列主键。
 4. 去掉目标表 `tenant_id` 不等于取消认证；owner 由可信 identity、scope 和资源归属校验。
 5. OSS、Broker、Provider 外部 I/O 不得放在数据库事务中。
-6. bytes、Secret、长期 signed URL、Gold、Holdout 标签和旧 V2 fallback 结果不得进入目标在线事实。
+6. bytes、Secret、长期 signed URL、Gold、Holdout 标签和无法由本服务 source Stage/Call 证明的外部结果不得进入目标在线事实。
 7. Python 只做路由、校验、持久化和恢复，不作医学投票、阈值改判或“更好结果”选择。
 8. Task 冻结 Config/handler/input 后不能热切换；版本变化只影响新 Task。
 9. 人工复核当前为 `N/A`；`review_required` 只是 AI 无法确定的合法终态。
-10. 当前目标链为 `DESIGNED_NOT_IMPLEMENTED`；工程通过不能写成医学准确率提高。
+10. P1 影像接入底座是 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`；P2+ 目标链仍为 `DESIGNED_NOT_IMPLEMENTED`，工程通过不能写成医学准确率提高。
 
 ## 10. 开发顺序和阶段完成口径
 
 ```text
-P0 基线阻断
--> P1A 影像 Model/Schema/DAL/Service
--> P1B API/依赖注入/路由
--> P1C Image validate Outbox/Relay/Worker + OSS/revision
+P0 基线阻断（已完成代码前核对）
+-> P1A/P1B/P1C 影像接入底座（代码已实现，未迁移/未真实运行验证）
 -> P2 Task/Stage/Call 可靠执行
 -> P3 Registry/Profile/零模型 replay
 -> P4 AI Config/Call + JointPrimaryReader
@@ -342,7 +339,7 @@ P0 基线阻断
 -> P7 paired A/B/Holdout/医学发布门禁
 ```
 
-只完成 P1A 不能宣称影像模块闭环。没有迁移、真实数据库和真实对象故障演练授权时，P1 最高只能标记：
+P1 已完成 A/B/C 全部代码，不能因代码完成宣称影像模块已在真实环境闭环。没有迁移、真实数据库和真实对象故障演练授权时，P1 最高只能标记：
 
 ```text
 CODE_IMPLEMENTED（代码已实现）
@@ -363,7 +360,7 @@ NOT_RUNTIME_VALIDATED（未做真实运行验证）
 ## 12. 开发沟通结束后的统一口径
 
 ```text
-当前状态：XRay validation-only 骨架，目标链 DESIGNED_NOT_IMPLEMENTED，医学准确率 UNKNOWN
+当前状态：P1 影像接入底座代码已实现但未迁移/未真实运行验证；P2+ 目标链仍为设计，医学准确率 UNKNOWN
 输入主链：Session -> Study -> Series -> Image/OSS -> ready Study revision
 执行主链：Task + Stage + Outbox -> Worker -> AI Call -> Report
 医学主链：Preparation -> JointPrimaryReader -> Finalization -> Report
@@ -374,15 +371,24 @@ NOT_RUNTIME_VALIDATED（未做真实运行验证）
 首期边界：不做人工复核、不启用通用 DAG、不按 Stage 拆网络微服务
 ```
 
-## 13. 新开发首次参与前应能回答
+## 13. XRay 专项摘要
 
-1. 为什么 Image 上传完成后不能直接 ready？
-2. 为什么 `validate_image` Outbox 属于 P1，而 Task/Stage Outbox 扩展属于 P2？
-3. 为什么 JointPrimaryReader 是默认唯一医学 owner？
-4. DecisionFinalization 与 Report 分别负责什么，为什么都不能改判？
-5. `review_required`、`non_diagnostic` 和 `not_produced` 有什么区别？
-6. Family 为什么不是默认多模型调用或数据库分表？
-7. sent/unknown Provider Call 为什么不能直接新建第二调用？
-8. 哪些事实必须同事务写，哪些外部动作必须在事务外？
-9. 当前哪些内容只是目标设计，哪些已有工程证据？
-10. 什么证据才能说明新链医学准确率真的提高？
+专项的完整分类、Prompt Bundle（提示词包）、FamilyRouting（家族路由）、TargetedReview（专项复核）、数据库/Service/Stage 归属和评测门禁统一见[XRay 专项完整设计](14-xray-specialty-design.md)。
+
+首期五个 Clinical Family（临床专项家族）：
+
+| `family_key` | 中文名称 | 报告子域 |
+|---|---|---|
+| `thoracic` | 胸腔专项 | 呼吸、心血管、纵隔/胸膜、胸壁 |
+| `abdominal` | 腹腔专项 | 消化、肝胆/脾、泌尿生殖 |
+| `appendicular_orthopedic` | 四肢骨关节专项 | 前后肢、长骨、关节排列 |
+| `axial_orthopedic` | 轴骨骼专项 | 颈胸腰椎、骨盆/髋、排列 |
+| `head_neck` | 头颈专项 | 头颅、鼻腔/口腔、颈部软组织 |
+
+统一边界：
+
+- 默认 `xray_primary_v1` 只进行一次完整 Study 联合主读。
+- Family 负责报告组织和评测分层，不对应独立表或默认额外模型调用。
+- 一个 Targeted candidate（专项候选）必须有唯一 Family、唯一 Focus、来源 Finding、充分覆盖和预注册评测计划。
+- 每例最多一次 TargetedReview，成功时输出完整病例结果；技术失败不得回退 Primary。
+- `whole_body`（全身）只是多区域覆盖或跨专项标签，不是第六个 Family。

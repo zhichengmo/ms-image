@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from apps.backend.services.runtime.service.ai_request_service import AIRequestService
 from apps.backend.services.runtime.stages.common import (
     DecisionFinalizationStageHandler,
     StudyPreparationStageHandler,
@@ -26,19 +25,14 @@ def resolve_stage_handler(
     *,
     handler_key: str,
     handler_version: str,
-    ai_request_service: AIRequestService,
 ) -> StageHandler:
     """Return only an implementation matching the frozen handler key and version."""
 
     handlers: dict[tuple[str, str], StageHandler] = {
         ("study_preparation", "v1"): StudyPreparationStageHandler(),
-        ("joint_primary_reader", "v1"): XRayJointPrimaryReaderStageHandler(
-            ai_request_service
-        ),
+        ("joint_primary_reader", "v1"): XRayJointPrimaryReaderStageHandler(),
         ("family_routing", "v1"): XRayFamilyRoutingStageHandler(),
-        ("targeted_review", "v1"): XRayTargetedReviewStageHandler(
-            ai_request_service
-        ),
+        ("targeted_review", "v1"): XRayTargetedReviewStageHandler(),
         ("decision_finalization", "v1"): DecisionFinalizationStageHandler(),
     }
     handler = handlers.get((handler_key, handler_version))

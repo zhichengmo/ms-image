@@ -81,10 +81,10 @@
 4. RabbitMQ/Celery 生产拓扑、TTL、重试、consumer timeout 和 DLQ 保留参数。
 5. OSS bucket/region、KMS、retention、legal hold 和孤儿宽限期。
 6. DICOM/PNG/JPG/视频/WSI 首期格式、windowing、orientation 和转换合同。
-7. CT/MRI 上游 Study/Series/SOP UID、预期实例数和完成信号质量。
+7. CT/MRI 接入来源能否稳定提供 Study/Series/SOP UID、预期实例数和完成信号质量。
 8. GPT-5.6 Sol、Gemini 3.7 Flash 等候选的真实 API model ID、视觉、JSON、区域、保留和 receipt 能力。
 9. trusted Gold、病例级 split、failure bank 和 isolated Holdout 可用规模。
-10. 旧 XRay API 的兼容期限、上游 owner 和下线门禁。
+10. 旧 XRay API 的兼容期限、`ms-image` 目标 owner（所有者）迁移门禁和旧接口下线门禁。
 11. AuditSink 是否满足幂等、保留、授权检索、导出和删除证明。
 12. Active Config 是否只允许 global，还是需要受信 experiment scope。
 13. 现有 `xray_accuracy_*` 表最终归档、只读兼容还是受控导入。

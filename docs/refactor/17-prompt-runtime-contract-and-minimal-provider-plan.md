@@ -1,5 +1,7 @@
 # MS-Image Prompt 运行合同与最小 Provider 链路调整方案
 
+> **当前事实边界（2026-08-25）**：本文保留早期 Prompt/Provider（提示词/模型提供方）最小合同和设计取舍。当前 v2（第二版）源码已包含真实网络传输与 Attempt（物理尝试）骨架，但尚未完成完整 Worker（工作进程）运行资格化；因此本文中“尚不发送真实 Provider”“未来才实现 Provider”等阶段性表述不得作为当前事实。当前运行状态、下一开发顺序和新会话入口以 [24-current-runtime-audit-and-next-development-guide.md](24-current-runtime-audit-and-next-development-guide.md)、当前源码、测试和经授权取得的运行证据为准。
+
 状态：`CURRENT_PROMPT_P4_0_TO_P4_3_IMPLEMENTED / PROVIDER_DISABLED_TRUE_BUNDLE_IMPLEMENTED / TARGET_ONLY_CODEBASE / REAL_PROVIDER_NOT_IMPLEMENTED`
 
 日期：2026-08-20
@@ -384,7 +386,7 @@ focus_key = <focus>    -> 唯一具体 Focus
 {
   "bundle_version": "xray-prompt-bundle.v1",
   "catalog_revision": "2026-08-20.1",
-  "language": "en",
+  "language": "zh-CN",
   "primary": {
     "base": {},
     "modules": [],
@@ -819,7 +821,7 @@ Prompt/model/schema 同时改变却进行 A/B
 
 ## 13. 当前固定决策
 
-- Prompt 语言首期固定 `en`。
+- Prompt 语言首期固定 `zh-CN`（中文）；语言不匹配时拒绝编译，不做语言回退。
 - Report 本地化不增加医学调用。
 - Prompt Catalog 使用代码资产，不新增 Prompt 表。
 - 运行时唯一版本中心是 AI Config Release。

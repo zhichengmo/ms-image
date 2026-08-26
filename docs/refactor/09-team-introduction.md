@@ -9,7 +9,7 @@
 
 ## 2. 为什么要重构
 
-当前代码已经有 XRay validation-only（仅验证）的 Session/Run、Outbox、Stage checkpoint、Provider adapter 和 Worker 骨架，但存在三类结构问题：
+当前代码已完成 P1 通用影像接入底座（Session/Study/Series/Image、API、对象上传/校验、Image Outbox/Relay/Worker、替换与 Study finalize），同时仍保留旧 XRay validation-only（仅验证）的 Session/Run、Stage checkpoint、Provider adapter 和 Worker 兼容骨架。当前仍存在三类结构问题：
 
 1. 领域模型仍以 XRay 专项表为中心，不能自然扩展其他影像。
 2. 旧方案曾混合 6/8/10/12 表、固定二次 Reader、人工复核和在线实验节点，事实 owner 不够稳定。
@@ -125,7 +125,8 @@ Registry、Validator、Gateway、Relay 和 AuditSink 是组件，不为了“看
 
 | 角色 | 主要责任 |
 |---|---|
-| 上游业务开发 | 用户/宠物/病历 owner、调用身份、Study 业务关联和发布路由 |
+| 接入/业务开发 | 调用身份、外部业务引用、Study 业务关联和查询集成；不依赖旧 `vet-platform` 在线路由 |
+| 旧系统迁移开发 | 旧 `vet-platform` 表/对象/接口映射、导入校验、来源追溯和旧接口下线 |
 | ms-image 后端 | 在线 10 表、Service/DAL、OSS、异步可靠性、报告和权限 |
 | AI 工程 | Prompt/Schema、Provider adapter、Stage 医学合同和输入 lineage |
 | 数据/评测 | 数据集、Gold、split、paired scorer、统计和 Holdout |
@@ -134,7 +135,7 @@ Registry、Validator、Gateway、Relay 和 AuditSink 是组件，不为了“看
 
 ## 11. 需要团队确认的事项
 
-- 生产身份、scope 和上游资源归属合同。
+- 生产身份、scope（作用域）和外部业务资源归属合同。
 - CT/MRI 的真实 Study/Series/Instance 完整信号。
 - OSS region/KMS/retention/legal hold。
 - Provider 真实 model ID、图像/JSON/receipt 和数据保留能力。

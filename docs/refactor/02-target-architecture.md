@@ -1,6 +1,6 @@
 # MS-Image 目标架构
 
-状态：`PROPOSED_TARGET`（候选目标，尚未实现）
+状态：`TARGET_ARCHITECTURE / P1_PARTIALLY_IMPLEMENTED / P2_PLUS_DESIGNED`（目标架构/P1 部分代码已实现/P2 及后续已设计）
 精确设计依据：[设计母文第 3、4、8、15 章](../ms-image-final-architecture-and-database-design.md)
 
 ## 1. 重构级别

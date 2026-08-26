@@ -1,6 +1,6 @@
 # Canonical XRay Chain（X 光权威主链）逐层目的与责任合同
 
-状态：`CURRENT_LAYER_CONTRACT / DESIGNED_NOT_IMPLEMENTED`（当前逐层合同/已设计尚未实现）
+状态：`CURRENT_LAYER_CONTRACT / P1_PARTIALLY_IMPLEMENTED / P2_PLUS_DESIGNED`（当前逐层合同/P1 部分代码已实现/P2 及后续已设计）
 
 更新日期：2026-08-18
 
@@ -8,7 +8,7 @@
 
 权威关系：本文解释 Canonical XRay Chain（X 光权威主链）中每一层为什么存在、如何工作和不能做什么；精确字段、索引、状态候选值和不变量仍以[设计母文](../ms-image-final-architecture-and-database-design.md)为准，完整时序以[XRay 详细链路](10-xray-detailed-flow.md)为准。
 
-当前目标 Service（业务服务）、Stage Service（阶段服务）和目标表尚未完整实现。本文中的目标行为均为 `PROPOSED`（候选设计），不能写成线上运行事实。
+P1 的 SessionService（会话服务）、StudyService（检查服务）、ImageService（影像服务）、API、对象存储校验和 Image Outbox/Relay/Worker 已有代码实现，但未迁移且未做真实运行验证；Task、Execution、AI、Report、Evaluation 与所有目标 Stage Service（阶段服务）尚未完整实现。本文中 P2+ 的目标行为均为 `PROPOSED`（候选设计），不能写成线上运行事实。
 
 ## 1. 先明确“层”的判断标准
 
@@ -77,7 +77,7 @@ Control Plane 解决“本次 Task 到底允许使用哪一套配置”的问题
 
 ### 4.1 目的与意义
 
-Session 是业务生命周期根，回答“这次影像诊疗从何时开始、包含哪些检查、何时关闭或取消”。它不直接提高模型准确率，但使上游请求、多个 Study/Task 和权限归属拥有稳定业务边界。
+Session 是业务生命周期根，回答“这次影像诊疗从何时开始、包含哪些检查、何时关闭或取消”。它不直接提高模型准确率，但使调用请求、多个 Study/Task 和权限归属拥有稳定业务边界。
 
 ### 4.2 功能逻辑
 
@@ -88,7 +88,7 @@ Session 是业务生命周期根，回答“这次影像诊疗从何时开始、
 
 ### 4.3 输入、输出与落点
 
-- 输入：可信 requester、上游不透明业务引用、幂等键。
+- 输入：可信 requester、外部不透明业务引用、幂等键；旧 `vet-platform` 导入只通过离线迁移适配器提供来源引用。
 - 输出：全局唯一 `session_id` 和当前生命周期状态。
 - 落点：`session_record`。
 
@@ -100,7 +100,7 @@ Session 是业务生命周期根，回答“这次影像诊疗从何时开始、
 
 ### 4.5 如果删除会发生什么
 
-单个 Study 仍可能技术执行，但一次诊疗中的多检查、取消、权限和上游幂等会散落到 Study/Task，形成重复字段和模糊业务根。因此它是业务闭环节点，不是医学 Stage。
+单个 Study 仍可能技术执行，但一次诊疗中的多检查、取消、权限和调用幂等会散落到 Study/Task，形成重复字段和模糊业务根。因此它是业务闭环节点，不是医学 Stage。
 
 ## 5. StudyService（检查服务）
 
@@ -287,26 +287,27 @@ Primary 是默认链唯一医学判断来源。一次发送完整 Study，要求
 
 ### 11.1 目的与意义
 
-FamilyRouting 不负责诊断，只负责回答一个受限问题：“Primary 是否出现了预注册的疑点、冲突或高风险信号，值得花费一次专项视觉调用？”
+FamilyRouting 不负责诊断，只负责回答一个受限问题：“在冻结 Targeted Profile（专项复核流程配置）下，Primary 是否给出了唯一、可追溯、预注册的专项候选，且该专项覆盖、预算与实验资格都满足，值得花费一次专项视觉调用？”“高风险”不是单独触发条件；没有唯一 Family（家族）、Focus（关注点）和来源 Finding（影像发现）的泛化风险描述必须保持 Primary 定稿。
 
 ### 11.2 功能逻辑
 
-1. 只读取 Schema-valid Primary 结果和冻结 Router config（路由配置）。
-2. 按预注册临床家族和白名单规则计算 route reason（路由原因）。
-3. 只能输出 `primary_final` 或 `targeted_review`。
-4. 最多选择一个临床家族和一组冻结问题；不按 Finding 数量投票。
-5. route output 连同规则版本、输入摘要和原因写入 Stage output。
+1. 只读取 Schema-valid Primary 结果、StudyPreparation 的覆盖事实和冻结 Router config（路由配置）。
+2. 只接受 Primary 输出的 `targeted_candidate`（专项候选）：唯一 `family_key`（专项键）、唯一 `focus_key`（关注键）、来源 Finding 和稳定 reason code（原因码）必须齐全。
+3. 按冻结临床家族目录、白名单规则、required coverage（必需覆盖）、Provider capability（能力）、预算和 deadline（截止时间）计算 route reason（路由原因）。
+4. 只能输出 `primary_final` 或 `targeted_review`；覆盖不足、多个候选、无预注册失败假设或预算不足都必须 `primary_final`，不能用 Targeted 掩盖输入不足。
+5. 最多选择一个临床家族和一组冻结问题；不按 Finding 数量投票、不按 Python 阈值推断医学异常。
+6. route output 连同目录/规则版本、输入摘要、覆盖证明和原因写入 Stage output。
 
 ### 11.3 输入、输出与落点
 
-- 输入：完整 Primary 结果、冻结临床家族定义、Router 规则版本。
+- 输入：完整 Primary 结果、StudyPreparation 覆盖事实、冻结临床家族目录、Router 规则版本、预留预算/deadline。
 - 输出：一个确定性 route signal（路由信号）。
 - 落点：`stage_checkpoint_record.output_json` 或大型不可变 Artifact 引用；不新增 Family 表。
 
 ### 11.4 失败与禁止职责
 
 - 规则无法解析或输入 Schema 不匹配：候选链技术失败，不能偷偷走 Primary。
-- 不读取原图、Gold 或 Holdout，不调用模型，不修改 `normal/abnormal`。
+- 不读取原图、Gold 或 Holdout，不调用模型，不修改 `normal/abnormal`；不得从泛化高风险词、原始置信度或 Python 阈值自行创造专项候选。
 - 不比较 Primary 与 Targeted 哪个“更好”，不选择多个家族并行调用。
 
 ### 11.5 是否可以删除
@@ -317,7 +318,7 @@ FamilyRouting 不负责诊断，只负责回答一个受限问题：“Primary �
 
 ### 12.1 目的与意义
 
-TargetedReview 是待验证的准确率杠杆：让模型在看到完整原图、完整 Primary 结果和一个冻结家族问题后，再进行最多一次聚焦复核。它是否提高准确率是实验假设，不是既定事实。
+TargetedReview 是待验证的准确率杠杆：让模型在看到完整原图、完整 Primary 结果和一个冻结的 `family_key + focus_key`（专项键加关注键）问题后，再进行最多一次聚焦复核。它是否提高准确率是实验假设，不是既定事实。临床专项、Focus/Strategy、Prompt Bundle 和 Router 门禁见[XRay 专项完整设计](14-xray-specialty-design.md)。
 
 ### 12.2 功能逻辑
 
@@ -504,7 +505,7 @@ TargetedReview 是否值得上线只能凭主观判断，无法知道提升来�
 | 层 | 最小工程证据 | 医学/业务证据 | Stop（停止）条件 |
 |---|---|---|---|
 | Control Plane | 不可变 revision、资格校验、Active Slot CAS、回滚 | 审批链可追溯 | 未审批配置可被 Task 使用 |
-| Session/Study | 幂等、状态 CAS、revision 不覆盖 | 上游业务归属正确 | 补图覆盖旧 revision |
+| Session/Study | 幂等、状态 CAS、revision 不覆盖 | 外部业务归属正确 | 补图覆盖旧 revision |
 | Image | 流式 hash/格式校验、隔离、替换、故障恢复 | 模型发送对象与冻结对象一致 | 客户端声明可直接 ready |
 | Task | Task/Stage/Outbox 原子创建、快照 hash 稳定 | 同一配置可重放 | 运行中配置发生变化 |
 | Execution | 重复消息、lease 过期、崩溃、unknown reconcile | 无选择性结果覆盖 | 重复 Provider 调用或旧 owner 覆盖 |
@@ -519,7 +520,7 @@ TargetedReview 是否值得上线只能凭主观判断，无法知道提升来�
 
 ## 20. 接口级输入输出合同
 
-状态：`PROPOSED LOGICAL CONTRACT / NOT IMPLEMENTED`（候选逻辑合同/尚未实现）。
+状态：`MIXED LOGICAL CONTRACT / P1_PARTIALLY_IMPLEMENTED / P2_PLUS_NOT_IMPLEMENTED`（混合逻辑合同/P1 部分代码已实现/P2 及后续尚未实现）。
 
 本节把图中的节点继续拆到可开发边界。下列 `Command/Input/Result/View` 名称是逻辑 Schema（结构合同）候选，
 不是仓库中已经存在的 Pydantic（数据校验）类名；实施时可以调整类名，但不得改变字段语义、事实 owner（所有者）、
@@ -556,8 +557,8 @@ TargetedReview 是否值得上线只能凭主观判断，无法知道提升来�
 
 | 项目 | 合同 |
 |---|---|
-| 调用方 | 上游 `vet-platform` 适配层或业务 API |
-| 接收 | `CreateSessionCommand`（创建会话命令）：`RequestContext`、上游不透明 `business_ref`、幂等封装、可选最小业务标签；`CloseSessionCommand/CancelSessionCommand`（关闭/取消命令）：`session_id`、`expected_state_version`、原因码 |
+| 调用方 | 业务/管理 API 的调用端；旧 `vet-platform` 只允许通过 `LegacyMigrationAdapter`（旧系统迁移适配器）离线导入，不能作为在线上游 |
+| 接收 | `CreateSessionCommand`（创建会话命令）：`RequestContext`、外部不透明 `business_ref`（业务引用）、幂等封装、可选最小业务标签；`CloseSessionCommand/CancelSessionCommand`（关闭/取消命令）：`session_id`、`expected_state_version`、原因码 |
 | 必填约束 | requester 对资源有创建/变更权限；不复制用户、宠物和病历全文；状态只允许 `open -> closed/cancelled` 等预定义迁移；ID 放 query/body，不使用 `/{id}` |
 | 成功输出 | `SessionView`（会话视图）：`session_id`、`status`、`state_version`、`created_at/closed_at`、脱敏业务引用 |
 | 失败输出 | `idempotency_conflict`、`session_not_found`、`state_conflict`、`forbidden`；不创建下游 Study |
@@ -681,7 +682,7 @@ MySQL 的 `image_record` 保存影像领域事实；不创建 `file_asset`（公
 | 必填约束 | selected source 与 Task 输入/Profile 一致；Report revision 不可变；Renderer（渲染器）只能生成展示产物，不能改规范医学 JSON |
 | 成功输出 | `ReportView`（报告视图）：`report_id/revision`、`status=final/published/void`、medical status、规范结果、source lineage、`current` 标志；可选派生渲染 ObjectRef |
 | 失败输出 | Report/Task/Finalization 任一持久化失败则最终事务整体回滚；授权失败不泄漏报告存在性 |
-| 下游消费者 | 对外查询 API、上游平台、脱敏 Artifact exporter（产物导出器）、EvaluationPlane |
+| 下游消费者 | 对外查询 API、授权调用端、脱敏 Artifact exporter（产物导出器）、EvaluationPlane |
 | 数据落点 | `report_record` + `task_record.current_report_id`；首期不建 DeliveryService（交付服务）或 callback/ack 字段 |
 
 ### 20.14 TF、CF 与 OUT 的输出合同
@@ -709,7 +710,7 @@ TF 表示“系统没可靠跑完”，CF 表示“系统正确决定调用前�
 
 ### 20.16 一张端到端 I/O 交接表
 
-| 上游 | 交付对象 | 下游 | 下游开始前必须证明 |
+| 前一层 | 交付对象 | 下一层 | 下一层开始前必须证明 |
 |---|---|---|---|
 | ControlPlane | `FrozenAIConfigSnapshot` | TaskService | revision Active、资格/审批/指纹有效 |
 | SessionService | `SessionView(open)` | StudyService | owner 和状态合法 |

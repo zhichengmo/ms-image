@@ -38,14 +38,17 @@
 
 ## 当前指针
 
-- 最后更新：2026-08-18
+- 最后更新：2026-08-26
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前状态：`.agent-handoff/snapshot.md`
 - 下一动作：`.agent-handoff/backlog.md`
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
+- 当前后续 XRay 实施权威：`docs/refactor/24-current-runtime-audit-and-next-development-guide.md`
+- 完整 XRay 架构参考：`docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md`
+- 完整 XRay 能力合同：`docs/refactor/21-xray-complete-capability-chain-and-session-prompt.md`
 - 新会话说明：`docs/refactor/08-new-session-handoff.md`
-- 可复制启动提示：`AGENT_SESSION_PROMPTS.md` 的“开启新的重构会话”章节
+- 可复制启动提示：`AGENT_SESSION_PROMPTS.md` 的“开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）”章节
 
 ## 容量与关闭规则
 

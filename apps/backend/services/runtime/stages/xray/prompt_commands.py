@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from apps.backend.core.ai.prompting import CompiledPrompt, PromptCompiler, PromptContractError
+from apps.backend.core.ai.config_contract import TASK_REQUEST_SNAPSHOT_V2
+from apps.backend.core.ai.prompting import (
+    CompiledPrompt,
+    PromptCompiler,
+    PromptContractError,
+)
 
 
 @dataclass(frozen=True)
@@ -49,7 +54,21 @@ class XRayPromptCommand:
 
 def build_primary_ai_request_command(*, task: Any, stage: Any) -> XRayPromptCommand:
     snapshot = task.request_snapshot_json or {}
-    safe_context = _base_context(task=task, stage=stage, snapshot=snapshot)
+    safe_context = _base_context(
+        task=task,
+        stage=stage,
+        snapshot=snapshot,
+        prompt_mode="primary",
+    )
+    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+        # v2 Configs own exactly one frozen Prompt body.  Prompt family data
+        # is no longer a selection input; this command only transports safe
+        # Task/Stage context to the strict renderer.
+        return XRayPromptCommand(
+            prompt_kind="primary",
+            applicable_family_keys=(),
+            safe_context=safe_context,
+        )
     families = snapshot.get("applicable_family_keys") or ()
     if not isinstance(families, list) or not all(
         isinstance(item, str) for item in families
@@ -64,36 +83,63 @@ def build_primary_ai_request_command(*, task: Any, stage: Any) -> XRayPromptComm
 
 def build_targeted_ai_request_command(*, task: Any, stage: Any) -> XRayPromptCommand:
     snapshot = task.request_snapshot_json or {}
-    previous_output = (stage.input_json or {}).get("previous_output") or {}
-    family_key = (stage.input_json or {}).get("selected_family_key")
-    focus_key = (stage.input_json or {}).get("selected_focus_key")
-    strategy_key = (stage.input_json or {}).get("selected_strategy_key")
+    stage_input = stage.input_json or {}
+    previous_output = stage_input.get("previous_output") or {}
+    primary_complete_result = previous_output.get("complete_medical_result")
+    if not isinstance(primary_complete_result, dict):
+        raise PromptContractError("targeted_primary_result_missing")
+    family_key = stage_input.get("selected_family_key")
+    focus_key = stage_input.get("selected_focus_key")
+    strategy_key = stage_input.get("selected_strategy_key")
     if not isinstance(family_key, str) or not isinstance(focus_key, str):
         raise PromptContractError("targeted_prompt_selection_missing")
+    normalized_strategy_key = strategy_key if isinstance(strategy_key, str) else None
+    base_context = _base_context(
+        task=task,
+        stage=stage,
+        snapshot=snapshot,
+        prompt_mode="targeted",
+    )
     safe_context = {
-        **_base_context(task=task, stage=stage, snapshot=snapshot),
-        "primary_complete_result": previous_output,
+        **base_context,
+        "primary_complete_result": primary_complete_result,
         "selected_family_key": family_key,
         "selected_focus_key": focus_key,
-        "selected_strategy_key": strategy_key
-        if isinstance(strategy_key, str)
-        else None,
-        "source_finding_ids": (stage.input_json or {}).get("source_finding_ids") or [],
-        "coverage_proof": (stage.input_json or {}).get("coverage_proof") or {},
-        "route_reason_codes": (stage.input_json or {}).get("route_reason_codes") or [],
+        "selected_strategy_key": normalized_strategy_key,
+        "source_finding_ids": stage_input.get("source_finding_ids") or [],
+        "coverage_proof": stage_input.get("coverage_proof") or {},
+        "route_reason_codes": stage_input.get("route_reason_codes") or [],
     }
+    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+        # v2 keeps one frozen Prompt body, but the unique Family/Focus route is
+        # still required evidence and must survive into rendering/audit inputs.
+        return XRayPromptCommand(
+            prompt_kind="targeted",
+            applicable_family_keys=(),
+            safe_context=safe_context,
+            family_key=family_key,
+            focus_key=focus_key,
+            strategy_key=normalized_strategy_key,
+            primary_complete_result=primary_complete_result,
+        )
     return XRayPromptCommand(
         prompt_kind="targeted",
         applicable_family_keys=(family_key,),
         safe_context=safe_context,
         family_key=family_key,
         focus_key=focus_key,
-        strategy_key=strategy_key if isinstance(strategy_key, str) else None,
-        primary_complete_result=previous_output,
+        strategy_key=normalized_strategy_key,
+        primary_complete_result=primary_complete_result,
     )
 
 
-def _base_context(*, task: Any, stage: Any, snapshot: dict[str, Any]) -> dict[str, Any]:
+def _base_context(
+    *,
+    task: Any,
+    stage: Any,
+    snapshot: dict[str, Any],
+    prompt_mode: str,
+) -> dict[str, Any]:
     series = snapshot.get("series") or []
     ordered_image_refs = [
         {
@@ -104,8 +150,11 @@ def _base_context(*, task: Any, stage: Any, snapshot: dict[str, Any]) -> dict[st
         for item in series
         if isinstance(item, dict)
     ]
+    if prompt_mode not in {"primary", "targeted"}:
+        raise PromptContractError("prompt_mode_invalid")
     return {
         "task_id": task.id,
+        "prompt_mode": prompt_mode,
         "study_revision_id": stage.input_json["study_revision_id"],
         "ordered_image_refs": ordered_image_refs,
         "species": snapshot.get("species") or "未知",

@@ -1,4 +1,9 @@
+from .ai_api_connection import AIAPIConnection
 from .ai_call import AICall
+from .ai_call_attempt import AICallAttempt
+from .ai_control_audit_record import AIControlAuditRecord
+from .ai_model_pool import AIModelPool
+from .ai_prompt_template import AIPromptTemplate
 from .ai_config_record import AIConfigRecord
 from .image import Image
 from .object_reconcile_cursor import ObjectReconcileCursor
@@ -17,8 +22,13 @@ from .evaluation import (
 )
 
 __all__ = [
+    "AIAPIConnection",
     "AICall",
+    "AICallAttempt",
     "AIConfigRecord",
+    "AIControlAuditRecord",
+    "AIModelPool",
+    "AIPromptTemplate",
     "Image",
     "ObjectReconcileCursor",
     "Outbox",

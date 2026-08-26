@@ -46,6 +46,7 @@ class ObjectHead:
     content_type: str | None
     etag: str | None
     kms_key_version: str | None
+    server_side_encryption: str | None = None
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,16 @@ class ObjectStorageGateway(Protocol):
         self, *, object_key: str, content: bytes, mime_type: str
     ) -> None: ...
 
+    async def put_encrypted_bytes(
+        self,
+        *,
+        object_key: str,
+        content: bytes,
+        mime_type: str,
+        encryption_algorithm: str,
+        kms_key_id: str | None = None,
+    ) -> None: ...
+
     async def head_object(self, *, object_key: str) -> ObjectHead: ...
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
@@ -140,6 +151,10 @@ class ObjectStorageGateway(Protocol):
         expected_object_version_id: str | None = None,
     ) -> ObjectValidation: ...
 
+    async def sign_download_url(
+        self, *, object_key: str, expires_seconds: int = 300
+    ) -> str: ...
+
 
 def validate_object_key(object_key: str) -> str:
     if not isinstance(object_key, str) or not _OBJECT_KEY.fullmatch(object_key):
@@ -154,7 +169,15 @@ class OSSObjectStore:
         self.access_key_id = config.OSS_ACCESS_KEY_ID.strip()
         self.access_key_secret = config.OSS_ACCESS_KEY_SECRET.strip()
         self.bucket_name = config.OSS_BUCKET_NAME.strip()
-        self.endpoint = (config.OSS_ENDPOINT or config.OSS_UPLOAD_ENDPOINT).strip()
+        endpoint_value = (config.OSS_ENDPOINT or config.OSS_UPLOAD_ENDPOINT).strip()
+        # OSS SDK download signing must yield an HTTPS URL. Deployment commonly
+        # supplies a host-only endpoint, so normalize only that form before the
+        # SDK receives it; explicitly configured schemes remain unchanged.
+        self.endpoint = (
+            endpoint_value
+            if not endpoint_value or "://" in endpoint_value
+            else f"https://{endpoint_value}"
+        )
         self.storage_profile = config.OSS_STORAGE_PROFILE.strip() or "default"
         self.signed_url_ttl_seconds = int(config.OSS_SIGNED_URL_TTL_SECONDS)
         if not all((self.access_key_id, self.access_key_secret, self.bucket_name, self.endpoint)):
@@ -222,6 +245,46 @@ class OSSObjectStore:
             )
             if getattr(result, "status", 500) >= 400:
                 raise ObjectStoreError("object_store_upload_failed")
+
+        await asyncio.to_thread(_put)
+
+    async def put_encrypted_bytes(
+        self,
+        *,
+        object_key: str,
+        content: bytes,
+        mime_type: str,
+        encryption_algorithm: str,
+        kms_key_id: str | None = None,
+    ) -> None:
+        object_key = validate_object_key(object_key)
+        if not isinstance(content, bytes) or not content:
+            raise ObjectStoreError("object_content_empty")
+        if len(content) > MAX_IMAGE_BYTES:
+            raise ObjectStoreError("object_content_too_large")
+        normalized_mime = _normalize_content_type(mime_type)
+        algorithm = str(encryption_algorithm or "").strip().upper()
+        normalized_key_id = str(kms_key_id or "").strip() or None
+        if algorithm not in {"AES256", "KMS"}:
+            raise ObjectStoreError("object_encryption_algorithm_invalid")
+        if algorithm == "KMS" and not normalized_key_id:
+            raise ObjectStoreError("object_encryption_kms_key_missing")
+        if algorithm == "AES256" and normalized_key_id:
+            raise ObjectStoreError("object_encryption_kms_key_unexpected")
+        headers = {
+            "Content-Type": normalized_mime,
+            "x-oss-server-side-encryption": algorithm,
+        }
+        if normalized_key_id:
+            headers["x-oss-server-side-encryption-key-id"] = normalized_key_id
+
+        def _put() -> None:
+            try:
+                result = self._bucket.put_object(object_key, content, headers=headers)
+            except oss2.exceptions.OssError as exc:
+                raise ObjectStoreError("object_store_encrypted_upload_failed") from exc
+            if getattr(result, "status", 500) >= 400:
+                raise ObjectStoreError("object_store_encrypted_upload_failed")
 
         await asyncio.to_thread(_put)
 
@@ -381,7 +444,14 @@ class OSSObjectStore:
 
         def _head() -> ObjectHead:
             try:
-                result = self._bucket.get_object_meta(object_key)
+                # ``get_object_meta`` is an OSS ``?objectMeta`` request.  It
+                # deliberately returns only basic metadata and omits MIME/SSE
+                # response facts on some OSS deployments, so it cannot prove
+                # the encrypted-response storage contract.  Use HEAD instead:
+                # the SDK's HeadObjectResult exposes Content-Type and the OSS
+                # server-side-encryption headers needed by the fail-closed
+                # Gateway response store.
+                result = self._bucket.head_object(object_key)
             except (oss2.exceptions.NoSuchKey, oss2.exceptions.NotFound) as exc:
                 raise ObjectStoreError("object_not_found") from exc
             except oss2.exceptions.OssError as exc:
@@ -397,10 +467,17 @@ class OSSObjectStore:
                 object_key=object_key,
                 object_version_id=_header(headers, "x-oss-version-id"),
                 size_bytes=size,
-                content_type=(getattr(result, "content_type", None) or None),
+                content_type=(
+                    getattr(result, "content_type", None)
+                    or _header(headers, "content-type")
+                    or None
+                ),
                 etag=_normalize_optional_etag(getattr(result, "etag", None)),
                 kms_key_version=_header(
                     headers, "x-oss-server-side-encryption-key-id"
+                ),
+                server_side_encryption=_header(
+                    headers, "x-oss-server-side-encryption"
                 ),
             )
 
@@ -535,6 +612,12 @@ def _normalize_optional_etag(value: str | None) -> str | None:
 
 def _header(headers: dict, name: str) -> str | None:
     value = headers.get(name) or headers.get(name.title())
+    if value is None:
+        normalized_name = name.casefold()
+        for key, candidate in headers.items():
+            if str(key).strip().casefold() == normalized_name:
+                value = candidate
+                break
     normalized = str(value or "").strip()
     return normalized or None
 

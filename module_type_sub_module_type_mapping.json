@@ -1,0 +1,134 @@
+{
+  "source": {
+    "repository": "ms-ai-fast",
+    "model_type_field": "module_type",
+    "sub_module_type_field": "sub_module_type",
+    "reference_files": {
+      "constants": "app/service/ai_constants.py",
+      "schema": "app/schemas/ai_pic.py",
+      "migration_comment": "alembic_migrations/versions/20260706_0001_ai_business_tables.py:87",
+      "prompt_mapping": "docs/MS_AI_FAST_PROMPT_INTERFACE_MAPPING_AND_VARIANT_PLAN.md"
+    }
+  },
+  "module_types": {
+    "1": {
+      "code": "ai_doc",
+      "name_zh": "智能问诊",
+      "prompt_module": "intelligent_inquiry"
+    },
+    "5": {
+      "code": "ai_pic",
+      "name_zh": "图片识别 / 图片特征识别",
+      "prompt_module": "image_recognition"
+    },
+    "11": {
+      "code": "ai_video",
+      "name_zh": "视频行为分析",
+      "prompt_module": "video_behavior_analysis"
+    },
+    "13": {
+      "code": "ai_voice",
+      "name_zh": "语音识别",
+      "prompt_module": "ai_voice"
+    }
+  },
+  "model_type_5_sub_module_types": {
+    "1": {
+      "name_zh": "品种识别",
+      "canonical_code": "breed",
+      "diagnosis_key": "diagnosis.breed",
+      "summary_key": "breed.summary",
+      "report_keys": {
+        "1": "report.breed",
+        "2": "report.breed_result",
+        "3": "advice.breed"
+      },
+      "status": "pending_missing_prompt"
+    },
+    "2": {
+      "name_zh": "表情 / 面部",
+      "canonical_code": "face",
+      "diagnosis_key": "diagnosis.face",
+      "summary_key": "face.summary",
+      "report_keys": {
+        "1": "report.face",
+        "2": "report.face_result",
+        "3": "advice.face"
+      },
+      "status": "pending_missing_prompt"
+    },
+    "3": {
+      "name_zh": "牙齿",
+      "canonical_code": "tooth",
+      "diagnosis_key": "diagnosis.tooth",
+      "summary_key": "tooth.summary",
+      "report_keys": {
+        "1": "diagnosis.tooth",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped"
+    },
+    "4": {
+      "name_zh": "排泄物 / 粪便",
+      "canonical_code": "excrement",
+      "diagnosis_key": "diagnosis.faeces",
+      "summary_key": "faeces.summary",
+      "report_keys": {
+        "1": "diagnosis.faeces",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped",
+      "note": "Prompt 内部用 faeces 拼写，跨服务规范编码为 excrement，适配层需 faeces -> excrement"
+    },
+    "5": {
+      "name_zh": "呕吐物",
+      "canonical_code": "vomit",
+      "diagnosis_key": "diagnosis.vomit",
+      "summary_key": "vomit.summary",
+      "report_keys": {
+        "1": "diagnosis.vomit",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped"
+    },
+    "6": {
+      "name_zh": "皮肤",
+      "canonical_code": "skin",
+      "diagnosis_key": "diagnosis.skin",
+      "summary_key": "skin.summary",
+      "report_keys": {
+        "1": "diagnosis.skin",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped"
+    },
+    "7": {
+      "name_zh": "耳道 / 耳部",
+      "canonical_code": "ear",
+      "diagnosis_key": "diagnosis.ear",
+      "summary_key": "ear.summary",
+      "report_keys": {
+        "1": "diagnosis.ear",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped"
+    },
+    "8": {
+      "name_zh": "眼睛 / 眼部",
+      "canonical_code": "eye",
+      "diagnosis_key": "diagnosis.eye",
+      "summary_key": "eye.summary",
+      "report_keys": {
+        "1": "diagnosis.eye",
+        "2": "disease.common_parts",
+        "3": "advice.common_parts"
+      },
+      "status": "mapped"
+    }
+  }
+}

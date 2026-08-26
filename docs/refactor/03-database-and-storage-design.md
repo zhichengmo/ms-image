@@ -1,6 +1,6 @@
 # MS-Image 数据库与 OSS 设计导航
 
-状态：`PROPOSED_SCHEMA`（候选结构，尚未建表）
+状态：`TARGET_SCHEMA / P1_MODEL_CODE_IMPLEMENTED / NOT_MIGRATED`（目标结构/P1 模型代码已实现/尚未迁移）
 目标在线数据库：`ms_image`（影像在线数据库）
 目标评测数据库：`ms_image_eval`（影像评测数据库）
 精确字段依据：[设计母文第 5、6、14 章](../ms-image-final-architecture-and-database-design.md)
@@ -219,4 +219,4 @@ flowchart LR
 - [ ] 所有 ObjectRef 字段组完整。
 - [ ] 不迁明文 Secret、URL、raw Prompt 或未脱敏响应。
 - [ ] 新字段能说明写入者、读取者、不可推导性、索引和删除策略。
-- [ ] 所有目标表仍标注 `NOT IMPLEMENTED`，直到真实 schema Artifact 证明落地。
+- [ ] P1 的 Session/Study/Series/Image 与 Image Outbox 仅可标注 `CODE_IMPLEMENTED / NOT_MIGRATED / NOT_RUNTIME_VALIDATED`；其余目标表保持 `NOT IMPLEMENTED`，直到真实 schema Artifact（结构证据）证明落地。

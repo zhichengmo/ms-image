@@ -1,6 +1,6 @@
 # MS-Image Service 与 Stage 设计
 
-状态：`PROPOSED_SERVICE_CONTRACT`（候选服务合同，尚未实现）
+状态：`SERVICE_CONTRACT / P1_SERVICE_CODE_IMPLEMENTED / P2_PLUS_DESIGNED`（服务合同/P1 服务代码已实现/P2 及后续已设计）
 精确设计依据：[设计母文第 4、8、15 章](../ms-image-final-architecture-and-database-design.md)
 
 各 Service（业务服务）在 XRay（X 光）端到端流程中的顺序、事务和失败分支集中见
@@ -30,7 +30,7 @@
 
 ### 3.1 SessionService（会话服务）
 
-- 输入：可信身份、上游病历 opaque ID、幂等键和开始命令。
+- 输入：可信身份、外部业务 opaque ID（不透明标识）、幂等键和开始命令；旧 `vet-platform` 导入只通过离线迁移适配器提供该引用。
 - 输出：Session ID、状态和版本。
 - 校验：资源归属、重复请求一致性、关闭后禁止新增 Study。
 - 不负责：宠物/病历正文、影像上传和诊断。

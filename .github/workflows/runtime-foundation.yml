@@ -31,6 +31,9 @@ jobs:
           ruff check apps evaluation/replay
           python -m compileall -q apps evaluation/replay
 
+      - name: Run backend tests
+        run: python -m pytest apps/backend/tests
+
       - name: Check application source boundaries
         shell: bash
         run: |

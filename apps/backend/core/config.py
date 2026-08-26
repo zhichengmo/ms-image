@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 import os
 from pathlib import Path
 from dotenv import dotenv_values, find_dotenv, load_dotenv
@@ -205,16 +205,37 @@ class Settings(BaseSettings):
     OPERATIONAL_ALERT_TECHNICAL_FAILURES: int = Field(default=1, ge=0)
     OPERATIONAL_ALERT_ARTIFACT_DRIFT: int = Field(default=1, ge=0)
 
-    # AI transport is selected by the database-backed OpenAI-compatible
-    # connection pool.  These are qualification artifacts/secrets only;
-    # endpoint/model/key/timeout/max_tokens do not belong in environment vars.
-    AI_RECEIPT_SIGNING_KEY: str = ""
-    AI_EGRESS_PROOF_SIGNING_KEY: str = ""
-    AI_TRANSPORT_QUALIFICATION_ARTIFACT_PATH: str = (
-        "docs/artifacts/ai-provider-transport-qualification.v1.json"
-    )
-    AI_QUALIFICATION_ARTIFACT_PATH: str = "docs/artifacts/ai-provider-qualification.v1.json"
-    AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: str = ""
+    # Prompt runtime and Nacos Prompt settings intentionally use the exact
+    # ms-ai-fast deployment contract.  ms-image reads Nacos only in the control
+    # plane; Workers render the already-frozen Prompt snapshot.
+    PROMPT_RUNTIME_URL: str = ""
+    PROMPT_RUNTIME_API_KEY: str = ""
+    PROMPT_RUNTIME_ENV: str = "prod"
+    PROMPT_RUNTIME_CALLER_SERVICE: str = "ms-image"
+    PROMPT_RUNTIME_TIMEOUT_SECONDS: float = Field(30.0, gt=0, allow_inf_nan=False)
+    PROMPT_RUNTIME_PROVIDER: str = "nacos"
+    PROMPT_SERVICE_CODE: str = "ms-image"
+    NACOS_SERVER_ADDR: str = ""
+    NACOS_CONTEXT_PATH: str = "/nacos"
+    NACOS_USERNAME: str = ""
+    NACOS_PASSWORD: str = ""
+    NACOS_NAMESPACE_ID: str = ""
+    NACOS_PROMPT_NAMESPACE_ID: str = ""
+    NACOS_PROMPT_VERSION: str = ""
+    NACOS_PROMPT_LABEL: str = ""
+    NACOS_PROMPT_TIMEOUT_SECONDS: float = Field(10.0, gt=0, allow_inf_nan=False)
+
+    # OpenAI-compatible ms-ai-platform runtime.  This is the same contract used
+    # by ms-ai-fast; there is no separate secret_ref resolver or response-store
+    # encryption selector in the request path.
+    AI_PLATFORM_OPENAI_BASE_URL: str = ""
+    AI_PLATFORM_API_KEY: str = ""
+    AI_PLATFORM_TIMEOUT_SECONDS: float = Field(120.0, gt=0, allow_inf_nan=False)
+
+    # Attempt reconciliation is an ms-image durable-state concern, not an
+    # alternative Provider transport contract.
+    AI_ATTEMPT_RECONCILE_LEASE_SECONDS: int = Field(default=120, ge=30, le=900)
+    AI_ATTEMPT_RECONCILE_RETRY_SECONDS: int = Field(default=300, ge=30, le=86400)
 
     PROJECT_ENV: str = "development"
 
@@ -232,6 +253,31 @@ class Settings(BaseSettings):
     OSS_ENDPOINT: str = ""
     OSS_STORAGE_PROFILE: str = "default"
     OSS_SIGNED_URL_TTL_SECONDS: int = 300
+
+
+    @model_validator(mode="after")
+    def validate_ai_platform_profile(self):
+        platform_url = self.AI_PLATFORM_OPENAI_BASE_URL.strip()
+        platform_key = self.AI_PLATFORM_API_KEY.strip()
+        if bool(platform_url) != bool(platform_key):
+            raise ValueError(
+                "AI_PLATFORM_OPENAI_BASE_URL 与 AI_PLATFORM_API_KEY 必须成组配置"
+            )
+        return self
+
+    @property
+    def ai_platform_configured(self) -> bool:
+        return bool(
+            self.AI_PLATFORM_OPENAI_BASE_URL.strip()
+            and self.AI_PLATFORM_API_KEY.strip()
+        )
+
+    def require_ai_platform_profile(self) -> None:
+        if not self.ai_platform_configured:
+            raise RuntimeError(
+                "ms-ai-platform 配置不完整：请设置 "
+                "AI_PLATFORM_OPENAI_BASE_URL 与 AI_PLATFORM_API_KEY"
+            )
 
     class Config:
         case_sensitive = True

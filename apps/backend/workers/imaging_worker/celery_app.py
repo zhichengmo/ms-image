@@ -12,6 +12,7 @@ from apps.backend.core.config import settings
 from apps.backend.core.messaging.celery import create_celery_app
 from apps.backend.core.messaging.config import runtime_config, topology_for
 
+from .ai_attempt_reconcile import AIAttemptReconcileWorker
 from .image_validation import ImageValidationWorker
 from .stage_execution import StageExecutionWorker
 
@@ -100,7 +101,9 @@ def execute_stage(self: Any, message: dict[str, Any]) -> None:
 
     async def run() -> dict[str, Any]:
         try:
-            return await StageExecutionWorker(session_factory_=session_factory).execute(
+            return await StageExecutionWorker(
+                session_factory_=session_factory,
+            ).execute(
                 event_id=event_id,
                 message=message,
                 message_version=message_version,
@@ -119,4 +122,40 @@ def execute_stage(self: Any, message: dict[str, Any]) -> None:
         raise Reject(str(result.get("error_code") or "stage_execution_conflict"), requeue=False)
 
 
-__all__ = ["celery_app", "runtime", "topology", "validate_image", "execute_stage"]
+@celery_app.task(
+    name="imaging.reconcile_ai_attempts",
+    bind=True,
+    ignore_result=True,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
+def reconcile_ai_attempts(self: Any, limit: int = 50) -> None:
+    if not settings.BROKER_ENABLED:
+        raise Reject("imaging_broker_disabled", requeue=False)
+
+    async def run() -> dict[str, int]:
+        try:
+            return await AIAttemptReconcileWorker(
+                session_factory_=session_factory,
+            ).run_once(
+                limit=max(1, min(500, int(limit))),
+                lease_seconds=settings.AI_ATTEMPT_RECONCILE_LEASE_SECONDS,
+                retry_seconds=settings.AI_ATTEMPT_RECONCILE_RETRY_SECONDS,
+            )
+        finally:
+            await async_engine.dispose()
+
+    try:
+        asyncio.run(run())
+    except Exception:
+        raise Reject("ai_attempt_reconcile_worker_error", requeue=False)
+
+
+__all__ = [
+    "celery_app",
+    "execute_stage",
+    "reconcile_ai_attempts",
+    "runtime",
+    "topology",
+    "validate_image",
+]
