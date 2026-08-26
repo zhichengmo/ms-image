@@ -152,12 +152,22 @@ def _base_context(
     ]
     if prompt_mode not in {"primary", "targeted"}:
         raise PromptContractError("prompt_mode_invalid")
+    species = snapshot.get("species")
+    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+        # New XRay snapshots must carry the caller-supplied, frozen species.
+        # Never turn a missing/corrupted v2 value into an inferred fallback.
+        if species not in {"cat", "dog"}:
+            raise PromptContractError("xray_species_snapshot_invalid")
+    elif not isinstance(species, str) or not species.strip():
+        # Keep v1 frozen Task replay compatibility. New diagnose Tasks always
+        # use the v2 branch above and therefore cannot reach this fallback.
+        species = "unknown"
     return {
         "task_id": task.id,
         "prompt_mode": prompt_mode,
         "study_revision_id": stage.input_json["study_revision_id"],
         "ordered_image_refs": ordered_image_refs,
-        "species": snapshot.get("species") or "未知",
+        "species": species,
         "anatomy_regions": snapshot.get("anatomy_regions") or [],
         "view_positions": snapshot.get("view_positions") or [],
         "coverage": snapshot.get("coverage") or {},

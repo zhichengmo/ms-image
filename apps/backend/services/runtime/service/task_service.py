@@ -121,6 +121,8 @@ class TaskService:
             config=config,
             profile_key=profile_key,
             compiled_profile=contract,
+            task_type=payload.task_type,
+            species=payload.species,
         )
         request_sha = self._sha(snapshot)
         business_key = self._sha(
@@ -361,12 +363,24 @@ class TaskService:
         config,
         profile_key: str,
         compiled_profile: dict,
+        task_type: str,
+        species: str | None,
     ) -> dict:
         """Freeze the active Config identity once, without dereferencing sources later."""
+        is_config_v2 = is_v2_config(config)
+        if task_type == "diagnose" and species not in {"cat", "dog"}:
+            # Species is a caller-bounded fact for every new diagnostic Task.
+            # Reject it before durable Task/Stage/Outbox creation instead of
+            # persisting a v2 snapshot the XRay Prompt command would reject.
+            raise TaskStateConflictError("task_species_snapshot_invalid")
+
         snapshot = {
             "study_id": study.id,
             "study_revision_id": study.revision_id,
             "resolved_manifest_sha256": study.resolved_manifest_sha256,
+            # Replay preserves its legacy compatibility value. Diagnose has
+            # already been fail-closed above, regardless of Config generation.
+            "species": species if task_type == "diagnose" else species or "unknown",
             "series": [
                 {
                     "series_id": item.id,
@@ -383,7 +397,7 @@ class TaskService:
             "profile_key": profile_key,
             "compiled_profile": compiled_profile,
         }
-        if is_v2_config(config):
+        if is_config_v2:
             snapshot.update(
                 {
                     "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V2,

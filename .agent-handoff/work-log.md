@@ -1,98 +1,5 @@
 # 当前工作日志
 
-## 2026-08-24 — Prompt → Gateway → Primary 组合链路验证
-
-- 使用不落盘的 Python heredoc 组合烟测串联 `normalize_imported_prompt`、`PromptRenderer`、`PromptMessageAssembler`、Fake signer/Secret/response store、`OpenAICompatibleGatewayAdapter` 的 `httpx.MockTransport` 和 `XRayJointPrimaryReaderStageHandler.consume_ai_call()`。
-- 验证 structured Prompt 保持 `developer` 规则与 `user` 安全上下文隔离；图片仅在 Gateway 请求时注入最后一个 user 消息，Provider 返回受冻结 JSON Schema 严格校验。
-- 验证 provider request ID、actual model、usage、response SHA-256、`encrypted-object-ref.v1`、`ai-image-receipt.v1`、发送图片数量及 Primary `completed/produced` 结果。
-- 验证未注入基础设施时首先返回 `ai_gateway_image_signer_disabled`，默认 fail closed 未被绕过。
-- 第一次 heredoc 仅因临时 Fake Store 参数别名误写为类型注解而报 `NameError`，未进入项目链路；修正夹具后通过。未发现需要修改的项目代码，未新增测试脚本或迁移脚本。
-- 针对性 46 项、全量 52 项 pytest、Ruff、compileall、diff-check 全部通过；真实 MySQL/OSS/Secret/Nacos/Provider 未连接。
-
-## 2026-08-24 — Nacos 认证修复与真实 AI 链路核验
-
-- 使用 `ms-ai-fast` 自身 `.env` 和源码执行不落盘在线烟测，真实跑通 Nacos Prompt → `AiRuntimeService` → 本地 `ms-ai-platform` → Provider；只记录脱敏 lineage、模型、usage 和哈希。
-- 对照发现 `ms-image` Nacos Source 的 username/password 从未参与认证；旧实现读取已知存在 Prompt 返回 HTTP 403。
-- 修改 `apps/backend/services/ai_control/service/prompt_source.py`，直接复用 `qj-nacos==0.2.0` 的 Nacos v3 登录、token refresh 和 request 合同；保留 404 fallback 与其他错误 fail-closed 语义。
-- 修改 `apps/backend/tests/test_ai_gateway_attempt_contracts.py` 的 Nacos 畸形 payload 用例，改为注入 Fake Nacos client，避免测试依赖客户端私有 `httpx` 字段。
-- 修复后用 `ms-image` Source Client 真实读取参考 Prompt 成功，version/MD5/template SHA 与 `ms-ai-fast` 一致。
-- 读取 Nacos inventory：参考 namespace 共 207 个 Prompt；用户指定目标 namespace 当前 0 个 Prompt。抽查参考 `flow.answer` 无法通过 `ms-image` 的安全变量导入合同，因此未自动切换 namespace。
-- 使用 `ms-image` `OpenAICompatibleGatewayAdapter` 对本地真实 Platform 发起 strict JSON Schema 请求，返回真实 Provider request ID；requested `gemini-3.5-flash`，actual `gpt-5-mini`，Schema/usage/response SHA 均通过。
-
-## 2026-08-24 — Nacos 配置合同与在线链路再收敛
-
-- 对照 `ms-ai-fast` 实际 `.env` 与 `PromptRuntimeClient` 后确认：传输客户端已经一致，但 `ms-image` 仅识别 `AI_PROMPT_NACOS_*`，不能直接消费已跑通的 `NACOS_*` / `NACOS_PROMPT_*` 部署配置。
-- 在 `apps/backend/core/config.py` 使用 Pydantic `AliasChoices` 增加兼容别名；AI 专用变量优先，共享变量次之，namespace 最终默认仍保持用户指定值。没有从其他仓库自动读取配置或 Secret。
-- 在既有 Prompt 控制面测试文件中增加共享配置合同与覆盖优先级用例。
-- 使用 `ms-ai-fast` 的真实 Nacos 配置合同启动 `ms-image` 后，正式 `PromptImportService._fetch_nacos()` 在线读取已知 Prompt 成功；参考 Prompt 仍因变量语义不兼容而按设计拒绝导入。
-- 再次执行 `ms-ai-fast` Nacos → Platform → Provider 在线调用成功，requested `gemini-3.5-flash`、actual `gpt-5-mini`。
-
-## 2026-08-24 — D5 详细开发文档与新会话交接收口
-
-- 基于当前工作树、Prompt/Config、Task/Stage/Worker、Logical Call/Physical Attempt、Gateway Adapter 和 XRay Stage 实现事实，重写 `docs/refactor/20-monorepo-refactor-new-session-prompt.md`。
-- 将下一阶段统一为 `Phase D5：Primary-only Runtime Foundation（D5：仅主读运行时基础闭环）`，不重新建设已存在的 Prompt/AI 主链。
-- 文档补齐当前完整链路、五个 Stage 的目的/输入/逻辑/输出/失败语义、Call/Attempt 三段事务、数据库/OSS 边界、真实依赖组件合同、unknown reconcile 状态机、文件级实施地图、Gate（门禁）、停止/回滚条件和可复制的新会话 Prompt。
-- 明确 `FamilyRouting（家族路由）` 当前固定 `primary_final`，`TargetedReview（专项复核）` 在 D5 保持关闭；默认不新增业务表、不恢复 `file_asset`、不修改医学 Prompt 正文。
-- 更新 `docs/refactor/README.md`，加入 19/20 号文档，并把下一阶段开发阅读顺序调整为 20 → `AGENT_HANDOFF.md` → 当前源码。
-- 本轮只修改文档与 handoff，没有修改业务代码、数据库模型、迁移或测试脚本，也没有执行共享基础设施或医学准确率验证。
-- 根据独立源码核验，同步修正 19 号文档的过期状态：控制面和 Call/Attempt/Gateway 主体已实现；v2 Task 可继续使用 retired Config 冻结快照，v1 legacy 仍保留 active-only 兼容例外。
-
-
-## 2026-08-24 — Phase D5 Primary-only Runtime Foundation 代码闭环
-
-- 新增唯一 `GatewayRuntimeDependencies（网关运行时依赖集合）`，装配 OpenAI-compatible Adapter、SecretResolver、OSSAttemptImageSigner、OSSEncryptedResponseStore 和 ProviderAttemptLookup；默认 disabled，启用配置不完整时 fail closed。
-- 新增受限 `EnvironmentReferenceSecretResolver（环境引用密钥解析器）`、OSS 图片复验/短签名能力和加密原始响应存储；Secret、Signed URL 和原始响应正文不进入数据库或普通错误信息。
-- `StageExecutionWorker（阶段执行工作进程）` 和 Celery composition root（装配根）改为注入统一依赖，Provider/OSS 网络 I/O 保持在数据库事务之外。
-- 实现 unknown Attempt（未知物理尝试）到期查询、CAS claim、事务外 Provider lookup、unknown/unsupported 重排、succeeded/failed 终结及有效 Stage lease 恢复；默认 lookup 为 unsupported，禁止盲目重发。
-- 修复成功 lookup 字段校验漏洞：必需字段改为 `required.issubset(network_result)`，额外字段不再掩盖字段缺失。
-- 只扩展既有 `apps/backend/tests/test_ai_gateway_attempt_contracts.py`，覆盖 due 条件、claim 冲突、四类 lookup 状态、Stage pending/restore、缺失成功字段和重复成功幂等；未新增测试文件、迁移或业务表。
-- 完成验证：后端全量 `67 passed`；相关 Ruff、全后端 compileall、`git diff --check` 通过。完整共享非生产 Worker Runtime 和医学评测仍未运行。
-
-## 2026-08-25 — XRay 完整能力链路与新会话 Prompt 文档
-
-- 新建 `docs/refactor/21-xray-complete-capability-chain-and-session-prompt.md`，整理七项完整能力、当前代码事实、在线总链、阶段依赖、FamilyRouting/TargetedReview、重试、多 Provider、自动降级、双 lane、Prompt 评测闭环、表/Service 复用、阶段 Gate 和回滚合同。
-- 文档固定五个 Family（专项家族）：胸腔、腹腔、四肢骨关节、轴骨骼、头颈；FamilyRouting 保持确定性、零模型调用，TargetedReview 最多一次视觉调用并输出新的完整病例结果。
-- 修正 Prompt 语义为“一份冻结完整 XRay Prompt 正文、Primary/Targeted 两种运行模式”，不引入旧式多 Prompt 家族动态选择。
-- 明确自动降级沿用 `single（单并发执行）`，双通道沿用 `race（并发竞速）`；不新增 fallback execution mode、RetryService、FallbackService、VoteService 或 Lane 表。
-- 更新 `docs/refactor/README.md` 的 21 号入口和当前 D5 状态摘要。
-- 更新 durable handoff（持久交接）的 snapshot、decisions、backlog、risks、work-log 和 validation，使新会话不会把七项能力误读为永久不在范围。
-- 本轮没有修改业务代码、数据库模型/字段、迁移、测试脚本或运行环境。
-
-## 2026-08-25 — 完整 XRay AI/Prompt 链路辩证审查
-
-- 只读审查 22 号完整实施文档、14 号专项设计和当前 Stage/Prompt/Gateway/Reconcile 代码，并使用独立探子核验真实调用链与历史文档漂移。
-- 总体判断：现有数据表和顶层 Service（服务）按事实所有权划分基本合理；复杂度主要来自把全部可选能力绑定为一个完成定义，以及 `AIRequestService（AI 请求服务）` 内部职责集中，而不是缺少更多表或 Service。
-- 定位两个直接阻断：22 号 FamilyRouting 可输出 `review_required` 与“不修改医学结论”冲突；v2 Targeted command 未传 `family_key/focus_key`，启用后会触发 `targeted_prompt_selection_missing`。
-- 定位四项需收敛的设计边界：三类权威、技术覆盖与医学可评估性、Targeted 失败回退 Profile、一份 Prompt 正文的非永久性。
-- 建议把完成状态拆成核心诊断链、医学基线和逐项可选能力资格；先做真实 Primary 与医学 Failure Bank，再让 Prompt/模型优化和 Targeted 由证据驱动，Fallback/Race 由失败率、SLA 和成本驱动。
-- 本轮未修改业务代码、数据库、迁移、测试脚本或现有架构文档；只更新 durable handoff（持久交接）记录。
-
-## 2026-08-25 — OSS 配置事实澄清
-
-- 仅核验当前 `.env（环境配置文件）` 中 `ALIYUN_OSS_ACCESS_KEY_ID`、`ALIYUN_OSS_ACCESS_KEY_SECRET`、`ALIYUN_OSS_ENDPOINT`、`ALIYUN_OSS_BUCKET` 是否存在且非空，未读取、输出或记录任何配置值。
-- 确认 `apps/backend/core/config.py（运行配置）` 已将四项 `ALIYUN_OSS_*（阿里云对象存储配置）` 映射至现有 OSS Runtime（对象存储运行时）字段。
-- 更新 21 号完整能力文档与 handoff（交接）状态：OSS 静态配置已准备，不再重复增加配置；E1 仍需完成真实 Bucket 权限、上传/读取/签名/加密及端到端运行资格化。
-- 继续只输出配置存在性和非敏感解析状态：当前 `.env` 未显式包含 RabbitMQ/AI Gateway（消息队列/AI 网关）门禁项；最终运行配置的 Broker/AI Gateway（消息队列/AI 网关）开关均关闭，AI 密钥解析和响应加密模式均禁用。没有修改 `.env` 或任何运行环境。
-
-## 2026-08-25 — 旧环境对比与当前配置缺口审计
-
-- 按用户授权脱敏读取旧 `vet-platform/.env`：只比较键名、是否非空和同名值是否一致，不输出密码、Token、完整 Endpoint 或 Bucket。
-- 确认当前与旧环境的 MySQL、Redis、RabbitMQ、OSS 同名基础连接配置一致；旧环境没有当前所需的 Runtime/Admin JWT、Nacos Prompt Source、AI Gateway 安全门禁或资格化签名配置。
-- 不迁移旧 `GEMINI_API_KEYS`、Mongo、OSS STS/Role、旧智能路由、裁剪、评测和 Worker Pool 配置；当前 Provider Endpoint/Model/Key 继续由数据库 Connection/Config 与 Secret Reference 表达。
-- 用 `apply_patch` 修改被 Git 忽略的本地 `.env`：主库名为 `ms_image`；新增 `PROJECT_ENV=development`，显式保留 `BROKER_ENABLED=false`、`AI_GATEWAY_ENABLED=false`、`AI_GATEWAY_SECRET_RESOLVER_MODE=disabled`、`AI_GATEWAY_RESPONSE_ENCRYPTION=disabled`。
-- 脱敏实连验证 Redis PING、RabbitMQ 仅连接、主 MySQL `SELECT 1`、OSS Bucket 信息读取均成功；没有声明队列、发送消息、上传或删除对象。
-- 只读检查确认 `ms_image_eval` 不可连接；主库无 `alembic_version` 和 `ai_config_record`，三张既有 AI 表有旧数据但缺当前 ORM 关键字段。因此没有执行 Alembic upgrade，也没有开启 Broker/Gateway。
-- 根据用户“没有的迁移过去”要求，进一步迁入旧环境与当前 Settings 同名且语义兼容的 `APPLICATION_HOST`、`AUTH_DOMAIN`、`LOG_PATH`、`GUNICORN_ERROR_LOG_PATH`；旧 `/www` Gunicorn 日志路径在当前 Mac 不存在，因此按相同用途适配到 `/Users/mozhicheng/workspace/logs/gunicorn_error.log`。
-- 迁移后自动比较确认旧 `.env` 中当前 Settings 同名支持的键已无缺失；仍不转换旧 `GEMINI_API_KEYS`，因为当前数据库尚不能提供冻结 Connection 的 `secret_ref` 身份。
-
-## 2026-08-25 — 完整 XRay AI 与 Prompt 开发指南
-
-- 新建 `docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md`，以当前源码事实为起点，展开完整在线总图、六个平面、九类 Service/评测合同、五个 XRay Stage、Prompt 生命周期、Logical Call/Physical Attempt、Retry、Multi-Provider、Fallback、Race、表关系、失败语义、准确率闭环和完成标准。
-- 文档明确区分 `CODE_IMPLEMENTED（代码已实现）`、`RUNTIME_QUALIFIED（运行时已资格化）` 和 `MEDICALLY_VALIDATED（医学效果已验证）`；未把当前 transport/attempt（传输/尝试）代码骨架描述为完整 Provider 链或医学放行。
-- 更新 `docs/refactor/README.md` 增加 22 号实施权威入口，并更新当前状态导航。
-- 更新 `AGENT_SESSION_PROMPTS.md` 增加可直接复制的“完整 XRay AI 与 Prompt 链路开发会话”当前入口；22 号文档第 17 节保存完整版本。
-- 更新 `AGENT_HANDOFF.md`、snapshot、decisions 和 backlog 的当前指针；本轮未修改业务代码、数据库字段、迁移、测试脚本或运行环境。
-
 ## 2026-08-25 — XRay 后续修正与分阶段实施交接
 
 - 新建并复核 `docs/refactor/23-xray-next-phase-correction-and-implementation-guide.md`，将其设为当前后续实施权威；内容覆盖三类权威、当前事实、完整链路、逐 Service/Stage 输入输出、Prompt 双入口、可靠执行缺口、数据表边界、分阶段 Gate、回滚单位和新会话 Prompt。
@@ -248,3 +155,76 @@
 - 先对两个正式 Data ID 及 latest 进行 Nacos 预检，确认不存在；随后创建 `ms-image.x-ray.primary.cat.zh-CN@1.0.0`（SHA-256：`0be1b353bc4527ff9d70c8dc871300b7b1dd0f746b7e56e81138bd1d23b96b64`）与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`（SHA-256：`b394ccb6cbcefd9f12ab8819e1ce7d743de5758cb0896f1734b13d13f3998022`）。
 - 两个候选的管理端 detail、运行时 exact/latest 以及 `NacosPromptSourceClient -> parse_nacos_prompt_payload -> PromptRenderer -> PromptMessageAssembler` 回读均通过。修复了 Jinja 注入 JSON Schema 的 `$schema`/`$value` 被遗留 `$VARIABLE` 扫描误识别的问题。
 - 未写 MySQL、未导入 `ai_prompt_template`、未编译/激活 Config、未创建 Task Snapshot，未调用 Provider；当前用户优先 P0/P1/E1 工程 AI 链，不开展医学评测。完整 Worker Runtime 与医学验证状态不变。
+
+## 2026-08-26 — 宠物档案迁移来源只读审计
+
+- 用户要求参考 `ms-ai-fast` 的宠物档案实现。只读核验其 `20260706_0001_ai_business_tables.py`、`20260721_0011_add_pet_profile_is_neutered.py` 与关联 Service/DAL。
+- `ms-ai-fast` 的正确业务模式是“档案 ID + 所属用户校验 -> `pet_type` 归一化”；但其首迁移同时创建 `pet_profile`、`pet_profile_record`、`medical_record`、`session_record`、报告及 AI 任务等多张业务表，不能复制到 `ms-image`。
+- 对当前 `.env` 的 `ms_image` 做只读 MySQL 核验：连接成功；`pet_profile`、`study_record`、`task_record` 不存在；现有 `session_record` 是旧聊天记录表，与当前 Runtime ORM 不兼容；未执行 DDL、迁移或代码修改。
+
+## 2026-08-26 — `ms_image` 空旧表备份后清理
+
+- 按用户要求对配置库 `ms_image` 先做全量 `mysqldump` 备份，输出到 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-20260826T102227Z.sql.gz`；metadata 文件为同目录 `ms_image-20260826T102227Z.metadata.json`，raw SQL SHA-256 为 `88d2035fc113af21e6a995ef3990301f3aef13b51a2bccc1084ba7009e897dbe`。
+- 只读盘点确认清理前共 45 张表，无 foreign key、view、routine、trigger、event；当前 `Base.metadata` 只声明 20 张目标表，DB 中只有 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record` 4 个同名表，但列结构是旧版/不兼容。
+- 为避免误删业务历史，本轮仅删除同时满足以下条件的空旧表：当前 ORM 不建模、当前 ms-image 代码不引用、无外键依赖、DROP 前精确 `COUNT(*)=0`。删除清单：`ai_message`、`xray_validation_run`、`api_request_stats`、`xray_validation_consistency`、`xray_validation_prompt`、`ai_agent_recent`、`ai_conversation`、`x_ray_analysis`、`xray_v3_accuracy_run`、`ai_execution_trace`、`xray_validation_step`、`ai_execution_attempt`、`user_usage_account`、`ai_output_schema`。
+- DROP 前额外保存清理元数据与每张被删表 DDL 摘要到 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-empty-unused-20260826T103113Z.metadata.json`。
+- 清理后复核 `ms_image` 物理表数为 31；上述 14 张表均不存在。未删除任何有数据旧表；未创建/迁移/改名目标 Runtime 表。
+
+## 2026-08-26 — 用户确认后删除剩余非 Runtime legacy 表
+
+- 用户明确表示“没有用的表就要去删掉，不然会干扰判断，反正已经有备份”。据此按“当前 `ms-image` SQLAlchemy ORM 模型集合”为保留边界，删除剩余 27 张不在当前模型集合中的 legacy 表。
+- DROP 前保存每张表的精确行数、`SHOW CREATE TABLE` 与 DDL SHA-256 到 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-legacy-non-runtime-20260826T103657Z.metadata.json`，并引用先前全量备份 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-20260826T102227Z.sql.gz`。
+- 删除清单：`ai_agent`、`ai_agent_action`、`ai_agent_prompt`、`ai_agent_runtime_config`、`ai_config`、`ai_config_pool_override`、`ai_connection_profile`、`ai_governance_change_log`、`ai_governance_model_pool`、`ai_prompt`、`ai_prompt_revision`、`ai_provider`、`ai_request_log`、`ai_stage`、`ai_stage_plan`、`ai_stage_round`、`ai_xray_anatomy_crop`、`async_xray_task`、`gpt_config`、`gpt_config_item`、`medical_images`、`prompt_evaluation_analysis`、`prompt_evaluation_detail`、`prompt_performance`、`prompt_publication`、`prompt_publication_history`、`report_content`。
+- 清理后 `ms_image` 仅剩 4 张表：`ai_api_connection`、`ai_model_pool`、`ai_prompt_template`、`session_record`。这 4 张是当前代码同名表，但仍是旧列结构；目标 Runtime 表仍缺失。
+
+## 2026-08-26 — 删除剩余 4 张同名旧结构表
+
+- 用户继续确认“没用的表直接先删掉”。当前 `ms_image` 仅剩 `ai_api_connection`、`ai_model_pool`、`ai_prompt_template`、`session_record` 4 张表；虽然表名在当前 ORM 中存在，但字段结构仍是旧结构，无法作为新 Runtime schema 使用。
+- DROP 前保存每张表的精确行数、`SHOW CREATE TABLE` 与 DDL SHA-256 到 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-remaining-old-structure-20260826T121615Z.metadata.json`，引用先前全量备份 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-20260826T102227Z.sql.gz`。
+- 删除 `ai_api_connection`、`ai_model_pool`、`ai_prompt_template`、`session_record`。清理后 `ms_image` 表数为 0。
+- 当前 DB 已去除旧表干扰，但尚未创建任何正式 Runtime 表；下一步是空库建表/baseline，而不是直接宣称 Runtime ready。
+
+
+## 2026-08-26 — 快速上线 Prompt 共用方向分析
+
+- 读取截图所指 Codex 任务 `审计 XRay Worker 安全资格化` 的近期历史、本地 session 摘要和相关源码，确认历史路径曾要求 cat/dog Prompt 身份隔离，但用户最新目标为快速上线，倾向先不做猫狗医学正文分叉。
+- 未修改业务代码、数据库、Nacos、Prompt 内容或环境配置；仅更新 handoff 记录，标明推荐快速路径为 cat/dog 外部身份壳继承/共用 common Primary 正文，而不是直接启用 XRay `default` fallback。
+
+## 2026-08-26 — 重建当前代码有用 Runtime 表
+
+- 用户发现表被清空后要求“有用的表你给我创建”。立即在当前 `ms_image` 空库中按当前代码 SQLAlchemy `Base.metadata` 创建 20 张模型表，没有生成新的迁移脚本。
+- 执行 `Base.metadata.create_all` 后运行 `alembic stamp head`，将 `alembic_version` 标记为 `20260824_02`。该操作用于把空库快速对齐当前模型表集合；历史旧表数据没有恢复到当前库，仍只在备份中。
+- 复核结果：`ms_image` 当前 21 张物理表（20 张模型表 + `alembic_version`），`model_missing=[]`，`extra_non_model=[]`，`alembic_version=20260824_02`。关键表列数：`ai_prompt_template` 20、`ai_api_connection` 19、`ai_model_pool` 18、`session_record` 17、`task_record` 38、`outbox_record` 22、`ai_config_record` 48、`ai_call_record` 43、`ai_call_attempt_record` 31、`report_record` 15、`study_record` 24、`image_record` 43。所有新表当前 0 行。
+- 仍未创建 `pet_profile`/`medical_record`，因为当前 ms-image 代码模型尚不存在这两张表；若用户要按宠物档案选 XRay 猫/犬 Prompt，需下一步补模型/CRUD/Service/迁移。
+- 用户随后明确：不再检查当前 Model 内哪些表有用，Model 注册表整体就是保留与建表边界；再次只读复核 20 张 Model 表全部存在，未继续删表。
+
+## 2026-08-26 — 重新审查快速上线 Prompt 身份并修正建议
+
+- 按用户“再好好思考”重新核对 22/23 号 XRay 架构文档、PromptSource、Task Config 选择/激活、Prompt 上下文、Config Compiler 冻结字段、既有合同测试以及 cat/dog 分叉提交来源。
+- 结论修正：上一版“cat/dog 两个外部壳共用 common 正文”仍有重复身份债务；当前 Runtime 只有一个 global `xray_diagnose` Config，首版既然不按 species 路由，应直接收敛为一个 `xray_primary` + exact-only `common` variant。
+- 明确“传承”只发生在编写/发布阶段；Runtime 不实现父子 Prompt 动态读取或拼接，仍冻结一份完整正文与 SHA。
+- 同步修正 handoff 中过时的“数据库仍为空”描述：最新验证已创建 20 张模型表并 stamp `20260824_02`；当前阻断是控制面数据、Config/Task 冻结、Worker Platform 配置和 E1 全链，而不是物理缺表。
+- 本轮未修改业务代码、测试、Nacos、数据库或环境；建议等待用户确认后再执行最小精确改动。
+
+
+## 2026-08-26 — 落地 Task 接口 species 参数与 XRay 单一 common Prompt
+
+- `apps/backend/schemas/task.py`：新增 `TaskCreate.species`；`diagnose` 必传，归一化后只接受 `cat` / `dog`；`replay` 兼容可不传。
+- `apps/backend/services/runtime/service/task_service.py`：把接口 species 传给 `_build_request_snapshot()` 并冻结为 Snapshot 顶层字段；只保留三处目标修改，清理了一次非目标 Ruff format 差异。
+- `apps/backend/services/ai_control/service/prompt_source.py`：将 XRay source 从 `xray_cat_primary/cat`、`xray_dog_primary/dog` 收敛到 `xray_primary/common`，保持 exact-only、无 default fallback。
+- 更新现有 `test_ai_gateway_attempt_contracts.py` 与 `test_ai_prompt_control_plane_contracts.py`，覆盖参数必传/归一化/拒绝非法值、Snapshot 冻结、single common source、非法 variant 拒绝和 Primary/Targeted species safe context。
+- 未新增数据库表/字段、迁移脚本、Service、Repository、宠物档案或独立测试脚本；未改 Nacos、MySQL 或环境。
+
+## 2026-08-26 — 宠物档案统一继承方案截图复核
+
+- 截图只标示“评估猫狗统一继承方案”这一历史任务，没有新的表或迁移指令。主线程完整复核当前 Task/Prompt 代码和 `ms-ai-fast` 的宠物档案链。
+- 确认当前 `ms-image` 已正确完成下游冻结边界：`TaskCreate.species` 仅允许 cat/dog，Task Snapshot/request SHA 固化该值，Worker 仅向 `SAFE_STUDY_CONTEXT_JSON` 传递冻结值；不回查档案、不猜测物种，Prompt 保持唯一 `xray_primary/common`。
+- 确认 `ms-ai-fast` 现有事实为 `medical_record.session_id -> pet_profile_id -> pet_profile.pet_type`。不复制其业务迁移：它同时带 BIGINT、外键、file_asset 和多个非本服务表。正确待办是由上游在创建 XRay Task 前完成该解析，传入已规范化的 species；本轮不改表、字段、迁移、Service 或生产代码。
+- 复跑三份既有 AI 合同测试、Ruff、compileall 与 diff check：`94 passed, 19 warnings`；warning 为已有 Pydantic/datetime deprecation。真实上游集成及完整运行链均未运行。
+
+## 2026-08-26 — 猫狗统一继承方案最终复核
+
+- 用户截图仅显示“评估猫狗统一继承方案”历史任务标题，不包含新代码、数据库或迁移指令。
+- 主线程重新核验 `ms-image` Task Snapshot / Prompt Source / Worker safe context 与 `ms-ai-fast` 的 `medical_record.session_id -> pet_profile_id -> pet_profile.pet_type` 语义。结论不变：当前 `ms-image` 不应复制上游宠物档案表；上游负责解析 `cat|dog`，`ms-image` 只校验并冻结，Worker 只消费冻结 Snapshot。
+- 未修改生产代码、数据库、表、迁移、Nacos 或环境；仅将 backlog 中过时的“species -> Config/Prompt identity”措辞改为“species -> Task Snapshot -> SAFE_STUDY_CONTEXT_JSON -> 唯一 xray_primary/common Prompt”。
+- 重跑既有合同测试、Ruff、compileall 和 `git diff --check`，见 `validation.md`；完整上游集成与 Worker Runtime 仍未运行。

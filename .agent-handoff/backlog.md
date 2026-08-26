@@ -109,22 +109,41 @@
 ## 2026-08-25 — 已完成核心 AI 网络 E2E；待完整任务链资格化
 
 - [x] 写入 Nacos 非医疗 smoke Prompt，并完成 `NacosPromptSourceClient → PromptRenderer → PromptMessageAssembler → GatewayClient → ms-ai-platform → gemini-3.5-flash` 严格 Schema 网络烟测；旧 SecretResolver/GatewayAdapter 实现随后已删除。
-- [ ] 仅当用户要求完整 XRay 任务业务链时，按既有 E1 顺序完成数据库 baseline/migration、冻结 Control Plane、OSS image signer 与 Worker Platform 配置、
+- [ ] 数据库 Model schema 已重建；继续按 E1 顺序完成 Prompt/Connection/ModelPool/Config 数据、冻结 Control Plane、OSS image signer 与 Worker Platform 配置。
 
-## 旧表清理（等待精确范围确认）
 
-- [ ] 对 45 张旧库表按“当前必留 / 历史影像报告保留或迁移 / 旧 AI 治理候选归档删除 / 空表候选删除”形成逐表清单；当前不得删除 `session_record`、`ai_prompt_template`、`ai_api_connection`、`ai_model_pool`。
-- [ ] 用户确认精确保留与删除集合后，先审阅备份/归档目标、调用面移除和迁移 rollback，再执行任何实际表删除。
+## XRay 单一 Prompt 与接口物种参数（2026-08-26）
 
-## Nacos XRay 猫/犬 Primary Prompt 候选（2026-08-26）
-
-- [x] 依据 `vet-platform` 猫/犬全图旧 Prompt 的防漏诊、防过诊、技术限制和跨系统扫查规则，分别发布 `ms-image.x-ray.primary.cat.zh-CN@1.0.0` 与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`；严格变量仅为 `SAFE_STUDY_CONTEXT_JSON`、`OUTPUT_SCHEMA_JSON`，两个候选的 Nacos source/render/message 回读均已通过。
-- [x] XRay Prompt 身份已 fail-closed：内部 key 为 `xray_cat_primary` / `xray_dog_primary`，Nacos variant 为 `cat` / `dog`；禁止 XRay `default` fallback 和跨物种读取。
-- [ ] P0 数据库基线授权并落地后，使用既有 `PromptImportService` 分别导入指定 cat/dog `1.0.0`，再编译不可变 Primary Config、控制面审计并激活；不得由 Worker 读取 Nacos latest。
-- [ ] 当前用户优先 P0/P1/E1 的工程 AI 链：在 E1 冻结 Task 真实通过前，不进入 M1 医学评测、Q3 Prompt A/B、TargetedReview、FamilyRouting、Retry、Fallback 或 Race；当前 Candidate 不能作为医学基线或放行依据。
+- [x] 创建 Task 的 request body 已增加 `species`；`diagnose` 必须传 `cat` 或 `dog`，并在 Task 创建期归一化、校验和冻结进 `request_snapshot_json`。
+- [x] XRay Prompt Source 已收敛为唯一内部 key `xray_primary` 和 exact-only `common` variant；禁止 `cat/dog/default -> common` fallback。
+- [x] Primary/Targeted Prompt command 均从冻结 Snapshot 把 `species` 写入 `SAFE_STUDY_CONTEXT_JSON`；Worker 不回查宠物档案、不猜测物种。
+- [ ] 发布并回读校验 `ms-image.x-ray.primary.common.zh-CN@<immutable version>`；历史 cat/dog/default 发布物只保留为不可变历史，不导入、不激活。
+- [ ] 使用既有控制面导入 common Prompt，建立 Connection/ModelPool，编译并激活唯一 `xray_diagnose` `global/global` Config。
+- [ ] 创建显式传 `species=cat|dog` 的冻结真实 Task，完成 P1/E1 全链资格化；E1 前不进入医学 A/B、TargetedReview、Retry、Fallback 或 Race。
 
 ## 当前开发入口（2026-08-25）
 
 - [ ] 完成 P1 Worker Runtime Qualification（工作进程运行时资格化）：当前 AI/Prompt 代码已按 `ms-ai-fast` 收敛，隔离 OSS synthetic 已通过 PUT/HEAD/Worker GET/同机 signed GET/cleanup；仍需确认真实 Worker 加载 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`、Provider Attempt Lookup 与同一冻结任务的 MySQL -> Outbox -> Broker -> Worker -> OSS -> Provider -> Attempt -> Stage -> Report 非敏感证据。
 - [ ] 在 P1（工作进程运行时安全资格化）通过后，完成 E1 Primary-only Runtime（仅主读真实运行链）：ready Revision（就绪修订）-> Outbox（事务发件箱）-> Broker/Worker（消息代理/工作进程）-> OSS（对象存储）-> Provider（模型提供方）-> Attempt/Stage（物理尝试/阶段）-> Finalization（结果定稿）-> Report（报告）。
 - [ ] 仅在 E1（仅主读真实运行链）真实通过后，进入 M1 Primary Medical Baseline（主读医学基线）与 Q3 Primary Prompt A/B（主读提示词配对实验）；之后再按 24 号文档打开 Q4、M2、R1、R2、R3。
+
+## 宠物档案（当前不创建）
+
+- [ ] `pet_profile` / `medical_record` 不在当前 ms-image Model 清单；除非用户明确要求新增，否则不建表、不生成迁移、不增加 Service。
+- [ ] 若未来启用猫/犬自动选择，由上游按 `session_id -> medical_record -> pet_profile -> species` 解析，再把 `species` 冻结进 Task Snapshot，并通过 `SAFE_STUDY_CONTEXT_JSON.species` 交给唯一 `xray_primary/common` Prompt；Worker 不得运行时回查档案。
+- [ ] 上游 `ms-ai-fast` / 病例集成尚未实际执行 `session_id -> medical_record -> pet_profile -> cat|dog -> POST /tasks`；当前 `ms-image` 的 Task 冻结合同已就绪，但不能把调用方手填 `species` 当作已完成档案继承。
+
+## 2026-08-26 — Runtime Schema 重建后待办
+
+- [x] 以当前 `apps/backend/models/__init__.py` 注册 Model 为唯一清单创建 20 张表，并 stamp `20260824_02`；最新复核 `model_missing=[]`、`extra_non_model=[]`。
+- [ ] 导入并激活已确定的 XRay Prompt/Config，同时建立 Connection 与 ModelPool 数据。
+- [ ] 创建 Session/Study/Series/Image、冻结 Task Snapshot 和 Outbox 事实。
+- [ ] 在实际 Worker 注入 AI Platform 成对配置，运行完整冻结任务链并采集脱敏证据。
+- [ ] 在用户没有新增 Model/表要求前，不再执行数据库删表或 Model 用途筛选。
+
+## 2026-08-26 — 快速上线 Prompt 收敛
+
+- [x] 采用接口传参区分猫狗：`POST /tasks` request body 对 `diagnose` 必传 `species=cat|dog`；不引入 `pet_profile` / `medical_record` 自动选择链。
+- [x] Task Snapshot 冻结 `species`，同一 Prompt 通过 `SAFE_STUDY_CONTEXT_JSON` 获得物种上下文；Prompt source identity 不按物种分叉。
+- [x] XRay Prompt 身份收敛为 `xray_primary/common` exact-only；旧 cat/dog/default Nacos 版本不进入新链。
+- [ ] 发布/导入 common Prompt，编译并激活唯一 Config，创建冻结 Task 并跑通 Worker AI 全链。

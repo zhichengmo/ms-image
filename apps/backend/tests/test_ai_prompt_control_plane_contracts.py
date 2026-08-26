@@ -570,46 +570,39 @@ def test_prompt_source_data_id_and_variant_fallback_order() -> None:
     assert variant_candidates("default") == ["default"]
 
 
-def test_prompt_source_xray_uses_species_specific_primary_coordinates() -> None:
+def test_prompt_source_xray_uses_canonical_common_primary_coordinate() -> None:
     assert (
         nacos_data_id(
             service_code="ms-image",
             module_code="xray",
-            prompt_key="xray_cat_primary",
-            variant="cat",
+            prompt_key="xray_primary",
+            variant="common",
             locale="zh-CN",
         )
-        == "ms-image.x-ray.primary.cat.zh-CN"
+        == "ms-image.x-ray.primary.common.zh-CN"
     )
-    assert (
-        nacos_data_id(
-            service_code="ms-image",
-            module_code="xray",
-            prompt_key="xray_dog_primary",
-            variant="dog",
-            locale="zh-CN",
-        )
-        == "ms-image.x-ray.primary.dog.zh-CN"
-    )
-    assert variant_candidates("cat", module_code="xray") == ["cat"]
-    assert variant_candidates("dog", module_code="xray") == ["dog"]
+    assert variant_candidates("common", module_code="xray") == ["common"]
 
-    with pytest.raises(PromptSourceError, match="prompt_source_xray_variant_invalid"):
-        variant_candidates("default", module_code="xray")
+    for invalid_variant in ("cat", "dog", "default"):
+        with pytest.raises(
+            PromptSourceError, match="prompt_source_xray_variant_invalid"
+        ):
+            variant_candidates(invalid_variant, module_code="xray")
+
     with pytest.raises(PromptSourceError, match="prompt_source_xray_variant_mismatch"):
         nacos_data_id(
             service_code="ms-image",
             module_code="xray",
-            prompt_key="xray_cat_primary",
-            variant="dog",
+            prompt_key="xray_primary",
+            variant="cat",
             locale="zh-CN",
         )
     with pytest.raises(PromptSourceError, match="prompt_source_xray_prompt_key_invalid"):
         nacos_data_id(
             service_code="ms-image",
             module_code="xray",
-            prompt_key="xray_primary",
-            variant="cat",
+            prompt_key="xray_cat_primary",
+            variant="common",
             locale="zh-CN",
         )
 
@@ -800,7 +793,7 @@ def _targeted_v2_facts(*, include_selection: bool = True) -> tuple[Any, Any]:
         id="task_1",
         request_snapshot_json={
             "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V2,
-            "species": "canine",
+            "species": "dog",
             "series": [],
         },
     )
@@ -1050,4 +1043,20 @@ def test_xray_prompt_commands_expose_stable_prompt_mode() -> None:
     targeted = build_targeted_ai_request_command(task=task, stage=targeted_stage)
 
     assert primary.safe_context["prompt_mode"] == "primary"
+    assert primary.safe_context["species"] == "dog"
     assert targeted.safe_context["prompt_mode"] == "targeted"
+    assert targeted.safe_context["species"] == "dog"
+
+
+def test_xray_prompt_commands_reject_missing_species_in_v2_snapshot() -> None:
+    task, targeted_stage = _targeted_v2_facts()
+    task.request_snapshot_json = {
+        **task.request_snapshot_json,
+        "species": None,
+    }
+    primary_stage = SimpleNamespace(input_json={"study_revision_id": "revision_1"})
+
+    with pytest.raises(PromptContractError, match="xray_species_snapshot_invalid"):
+        build_primary_ai_request_command(task=task, stage=primary_stage)
+    with pytest.raises(PromptContractError, match="xray_species_snapshot_invalid"):
+        build_targeted_ai_request_command(task=task, stage=targeted_stage)

@@ -39,21 +39,16 @@ NACOS_MODULE_CODE_MAP = {
     "audio_recognition": "audio-recognition",
 }
 
-# ``prompt_key`` is globally unique with its version in ai_prompt_template.
-# XRay Primary therefore carries its species in the internal key while sharing
-# the concise ms-ai-fast-compatible external Nacos role ``x-ray.primary``.
+# XRay uses one canonical Primary Prompt. Cat/dog is a frozen Task input in
+# SAFE_STUDY_CONTEXT_JSON, not part of the Prompt source identity.
 NACOS_PROMPT_KEY_MAP = {
-    ("xray", "xray_cat_primary"): "primary",
-    ("xray", "xray_dog_primary"): "primary",
+    ("xray", "xray_primary"): "primary",
 }
 
-# An XRay Primary Prompt is species-specific.  Its Nacos variant is part of
-# that immutable identity, not a generic variant that may fall back to
-# ``default``.  Keeping this map next to the Nacos key map makes an invalid
-# internal key or a cat/dog mismatch fail before any Nacos read.
+# ``common`` is exact-only for XRay. It is not a generic fallback target:
+# an invalid internal key or variant fails before any Nacos read.
 NACOS_XRAY_PROMPT_VARIANT_MAP = {
-    "xray_cat_primary": "cat",
-    "xray_dog_primary": "dog",
+    "xray_primary": "common",
 }
 XRAY_PROMPT_VARIANTS = frozenset(NACOS_XRAY_PROMPT_VARIANT_MAP.values())
 
@@ -129,9 +124,8 @@ def variant_candidates(
     """Resolve Nacos variants, fail-closing XRay before generic fallback.
 
     Existing modules retain the ms-ai-fast lookup order ``requested`` then
-    ``default``.  XRay cat/dog Primary Prompts must never use that fallback:
-    a missing species-specific Prompt is an import failure rather than a
-    chance to read a mixed-species candidate.
+    ``default``. XRay uses one exact ``common`` Primary coordinate and never
+    falls back from cat, dog, default, or any other variant.
     """
     if not isinstance(requested_variant, str):
         raise PromptSourceError("prompt_source_variant_invalid")

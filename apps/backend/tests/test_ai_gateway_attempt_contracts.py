@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
@@ -449,6 +450,149 @@ def test_task_assignment_accepts_consistent_frozen_v2_gateway_profile(
     )
 
     assert profile_key == "xray_primary_v1"
+
+
+def test_task_create_requires_and_normalizes_species_for_diagnose() -> None:
+    from apps.backend.schemas.task import TaskCreate
+
+    payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_1",
+        task_type="diagnose",
+        species=" DOG ",
+        trace_id="trace_1",
+    )
+
+    assert payload.species == "dog"
+
+    with pytest.raises(ValidationError, match="task_species_required_for_diagnose"):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_2",
+            task_type="diagnose",
+            trace_id="trace_2",
+        )
+    with pytest.raises(ValidationError, match="task_species_not_supported"):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_3",
+            task_type="diagnose",
+            species="rabbit",
+            trace_id="trace_3",
+        )
+
+
+def test_task_request_snapshot_freezes_species_parameter() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    config = SimpleNamespace(
+        id="config_1",
+        config_key="xray_diagnose",
+        version=1,
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        config_contract_version="ai-config.v2",
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256="f" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+    )
+    snapshot = TaskService._build_request_snapshot(
+        study=SimpleNamespace(
+            id="study_1",
+            revision_id="revision_1",
+            resolved_manifest_sha256="1" * 64,
+        ),
+        series=[],
+        config=config,
+        profile_key="xray_primary_v1",
+        compiled_profile={"profile_key": "xray_primary_v1", "stages": []},
+        task_type="diagnose",
+        species="cat",
+    )
+
+    assert snapshot["species"] == "cat"
+
+
+def test_task_request_snapshot_rejects_missing_species_for_diagnose() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    config = SimpleNamespace(
+        id="config_1",
+        config_key="xray_diagnose",
+        version=1,
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        config_contract_version="ai-config.v2",
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256="f" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+    )
+
+    with pytest.raises(TaskStateConflictError, match="task_species_snapshot_invalid"):
+        TaskService._build_request_snapshot(
+            study=SimpleNamespace(
+                id="study_1",
+                revision_id="revision_1",
+                resolved_manifest_sha256="1" * 64,
+            ),
+            series=[],
+            config=config,
+            profile_key="xray_primary_v1",
+            compiled_profile={"profile_key": "xray_primary_v1", "stages": []},
+            task_type="diagnose",
+            species=None,
+        )
+
+
+def test_task_request_snapshot_keeps_replay_species_optional_for_v2_config() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.pipeline import ZERO_MODEL_PROFILE
+    from apps.backend.services.runtime.service import task_service
+
+    config = SimpleNamespace(
+        id="config_1",
+        config_key="zero_model_replay",
+        version=1,
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        config_contract_version="ai-config.v2",
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256="f" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+    )
+
+    snapshot = task_service.TaskService._build_request_snapshot(
+        study=SimpleNamespace(
+            id="study_1",
+            revision_id="revision_1",
+            resolved_manifest_sha256="1" * 64,
+        ),
+        series=[],
+        config=config,
+        profile_key=ZERO_MODEL_PROFILE,
+        compiled_profile={"profile_key": ZERO_MODEL_PROFILE, "stages": []},
+        task_type="replay",
+        species=None,
+    )
+
+    assert snapshot["species"] == "unknown"
 
 
 def test_task_assignment_rejects_v2_gateway_capability_mismatch() -> None:

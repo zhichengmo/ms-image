@@ -25,10 +25,9 @@ Nacos（配置中心）已发布的非医疗 Prompt（提示词）
 -> NacosPromptSourceClient（Nacos 提示词读取客户端）
 -> PromptRenderer（提示词渲染器）
 -> PromptMessageAssembler（提示词消息组装器）
--> EnvironmentReferenceSecretResolver（环境引用密钥解析器）
--> OpenAICompatibleGatewayAdapter（OpenAI 兼容网关适配器）
+-> GatewayClient（OpenAI 兼容 ms-ai-platform 客户端）
 -> 外部 ms-ai-platform（AI 平台）
--> gemini-3.5-flash（模型）
+-> 已冻结的 Provider / 模型（模型提供方/模型）
 -> 严格 JSON Schema（JSON 结构合同）校验与 Provider Request ID（模型提供方请求标识）回传
 ```
 
@@ -102,19 +101,19 @@ flowchart LR
 | `TargetedReview（专项复核）` | 最多创建一次专项 AI Logical Call（逻辑调用），成功时输出新的完整病例结果 | Stage（阶段）入口与 Prompt Command（提示词命令）存在 | 由真实 FamilyRouting（专项家族路由）触发并经 Paired A/B（配对 A/B）证明净收益 |
 | `DecisionFinalization（结果定稿）` | 选择 Primary（主读）或 Targeted（专项复核）的完整结果，不调用模型、不拼接医学结论 | 代码将上游完整结果原样选定 | 取消、迟到结果、工程失败、报告发布幂等的 E1 实证 |
 
-### 3.2 AI（人工智能）网络链已通过，但 Worker（工作进程）安全组成仍未资格化
+### 3.2 AI（人工智能）网络链已通过，但真实 Worker（工作进程）运行配置仍未资格化
 
-当前 `.env（环境配置文件）` 的非敏感核验事实：
+当前代码的运行凭据合同已与 `ms-ai-fast` 收敛：
 
-| 配置 | 当前值/状态 | 含义 |
+| 配置/能力 | 当前代码事实 | 含义 |
 |---|---|---|
-| `BROKER_ENABLED（消息代理开关）` | `true（开启）` | 表示进程允许 Broker（消息代理）路径；不证明 RabbitMQ/Celery（消息队列/异步任务）已真实通达 |
-| `AI_GATEWAY_ENABLED（AI 网关开关）` | `true（开启）` | 表示尝试构建真实 Gateway（网关）依赖；不证明依赖已合格 |
-| Gateway 安全依赖 | 启用时固定 `EnvironmentReferenceSecretResolver（环境引用密钥解析器）` + OSS `AES256（AES-256 加密）` response store（响应存储）；不再有 mode/encryption/KMS 环境 selector（选择器） | 未注入符合前缀的非空 Secret（密钥）时仍 fail-closed（失败关闭）；固定安全合同不表示完整 Worker 已资格化 |
-| `ALIYUN_OSS_*（阿里云 OSS 配置）` | 访问标识、访问密钥、端点、存储桶均存在 | 2026-08-26 隔离 synthetic（合成）对象已通过 AES256 PUT、HEAD、Worker GET、同机 signed GET 与 cleanup；Provider 外部可达性及完整任务链仍未证明 |
-| `NACOS_*（Nacos 配置）` / `AI_PROMPT_NACOS_*（AI 提示词 Nacos 配置）` | `.env` 未显式出现 | 历史 smoke（冒烟）证据来自外部 Nacos 与临时上下文，不能误写为常态部署合同 |
+| `AI_PLATFORM_OPENAI_BASE_URL` + `AI_PLATFORM_API_KEY` | 两者必须成对出现；`settings.ai_platform_configured` 只在二者都为非空时为真 | Worker 只可从自己的进程环境/`.env` 读取这对凭据；不得写入数据库、Nacos、Task Snapshot、审计或日志 |
+| `GatewayClient` | 直接向 `${AI_PLATFORM_OPENAI_BASE_URL}/v1/chat/completions` 发送 OpenAI-compatible 请求，并传递 Idempotency-Key、Request ID 与 Trace ID | 不再存在 `AI_GATEWAY_*` 开关、EnvironmentReferenceSecretResolver、OpenAICompatibleGatewayAdapter 或 Provider 原始响应 response store 链 |
+| `ALIYUN_OSS_*（阿里云 OSS 配置）` | 影像本体在 OSS；已取得隔离 synthetic（合成）对象的非医疗 PUT、HEAD、直读 GET、同机 signed GET 与 cleanup 证据 | Provider 外部对短签名 URL 的可达性、域名/对象范围/TTL/只读权限以及完整任务链仍未证明 |
+| Provider 原始响应 | 当前生产运行链不向 OSS 持久化原始响应正文 | 只保留必要的 Provider Request ID、响应摘要、规范化结构化结果和 Attempt 审计事实；不得把已删除的 AES256/KMS response-store 方案重新接回 |
+| `NACOS_*（Nacos 配置）` | 只由控制面导入 Prompt；Worker 只渲染已冻结 Config/Task Snapshot | Nacos read 或一次 Gateway smoke 不能替代真实 Worker 常态部署合同 |
 
-这是一个正确的安全门：`build_gateway_runtime_dependencies()` 在开关开启时固定注入 `environment-reference（环境引用）` 密钥解析和 `AES256（AES-256 加密）` 响应存储，并继续校验合法 OSS（对象存储）与签名域名合同；不存在可将其切换为明文、disabled（禁用）或 KMS（密钥管理服务）模式的环境 selector（选择器）。当前真实依赖工厂仍使用 `UnsupportedProviderAttemptLookup（不支持的模型尝试查询器）`，因此 unknown（未知）原请求查询尚未资格化。
+因此 P1 的安全门不是恢复旧 Gateway 包装，而是：真实 Worker 启动器将成对的 `AI_PLATFORM_*` 配置安全注入进程；签名器严格限制对象和权限；unknown Attempt 仅按原 Provider 幂等身份查询、绝不盲发。当前 `UnsupportedProviderAttemptLookup（不支持的模型尝试查询器）` 仍说明原请求查询合同尚未资格化。
 
 ### 3.3 旧数据库不能直接承载新 Runtime（运行时）模型
 
@@ -276,7 +275,7 @@ flowchart LR
 | 阶段 | 目的与唯一主要变量 | 输入 | 处理与输出 | 进入 Gate（门禁） | Stop / Rollback（停止/回滚） |
 |---|---|---|---|---|---|
 | `P0 Database Baseline（数据库基线）` | 确认新 Runtime（运行时）数据库归属，唯一变量是数据库基线选择 | 45 张旧表清单、同名冲突、业务保留要求 | 用户确认 `ms_image` 归档与新库边界；输出获批准的数据库切换决策 | 明确库名、备份/回滚、迁移授权 | 未获用户确认，不创建/迁移/删除任何表 |
-| `P1 Worker Runtime Security Qualification（工作进程运行时安全资格化）` | 让真实 Gateway（网关）依赖能够安全组成，唯一变量是安全运行配置 | 现有 `.env`、OSS、Provider Secret Reference（密钥引用）合同 | 启用环境引用密钥解析、响应加密、OSS 签名/加密、Provider Attempt Lookup（模型尝试查询）资格方案；输出依赖资格证据 | 不泄密；OSS 可访问；密钥不落库/Nacos/日志；加密和签名合同可验证 | 任何明文密钥、未加密原始响应、非法签名域名或查询能力缺失均停止 |
+| `P1 Worker Runtime Security Qualification（工作进程运行时安全资格化）` | 资格化真实 Worker 的 Platform 凭据注入和影像访问边界，唯一变量是运行配置 | `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`、OSS signer、Provider 原请求查询合同 | 只读确认 Worker 进程成对配置存在；验证最小权限签名 URL 和 unknown Attempt 查询策略；输出非敏感依赖资格证据 | 不泄密；凭据不落库/Nacos/Snapshot/日志；OSS URL 范围/TTL/只读权限可验证；unknown 不盲发 | 凭据泄露、签名对象越界、Provider 访问不明或 unknown 查询合同缺失时停止；不执行重试 |
 | `E1 Primary-only Runtime（仅主读真实运行链）` | 证明最小业务端到端，唯一变量是单 Provider（单模型提供方）、单 lane（单通道）、单 Attempt（单尝试） | ready Study Revision（就绪检查修订）、冻结 Task Snapshot（任务快照）、已资格化 Config（配置） | Outbox -> Worker -> StudyPreparation -> Primary -> Attempt/Stage -> Finalization -> Report；输出一条可审计任务实例 | 真实 MySQL/OSS/Broker/Worker/Provider 成功；重复投递、取消、失败与报告幂等有证据 | 任一链路断裂、输入漂移、记录不一致或安全门禁绕过即停止；回滚为禁用 E1 Profile（档案） |
 | `M1 Primary Medical Baseline（主读医学基线）` | 得到“当前主读真实水平”，唯一变量是冻结基线 | 冻结病例、Gold、图像哈希、Prompt、模型、Schema、预算、评分器 | 输出正常/异常分层指标、`review_required（需复核）`/`non_diagnostic（影像不可诊断）` 分布、Failure Bank（失败样本库）与置信区间 | 标签审计通过；全量 JSON（结构化输出）保留；工程失败与医学失败分开 | 标签冲突、图像哈希冲突、缺失行或工程污染实验结果时停止，不计算准确率 |
 | `Q3 Primary Prompt A/B（主读提示词配对实验）` | 验证一个 Prompt（提示词）变量是否改善基线，唯一变量是一个 Prompt Package（提示词包）差异 | M1 Failure Bank（失败样本库）、相同病例/图像/模型/Schema/评分器 | Prompt 发布闭环后做 Paired A/B（配对 A/B），输出每病例差异与护栏变化 | 固定失败样本先改善；之后才做完整回归与隔离 Holdout | 没有可解释指标改善、正常误报恶化、结构失败增加或变量不单一即停用候选 Prompt |
@@ -321,11 +320,11 @@ flowchart LR
 最小切片应只回答并处理以下问题：
 
 ```text
-1. Secret Resolver（密钥解析器）如何在正式 Worker 中使用环境引用，且不泄露、不入库、不入 Nacos？
-2. Provider 原始响应如何使用 AES256（AES-256）或 KMS（密钥管理服务）加密保存到 OSS？
-3. Attempt Image Signer（尝试影像签名器）如何只签发允许的 OSS 域名、最短必要有效期？
+1. 正式 Worker 启动器如何成对、安全地注入 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`，且不泄露、不入库、不入 Nacos、不进 Task Snapshot？
+2. Provider 原始响应当前不持久化；如何核验只保留 Provider Request ID、摘要、规范化结果和 Attempt 审计事实？
+3. Attempt Image Signer（尝试影像签名器）如何只签发允许的 OSS 域名、对象范围、最短必要有效期和只读权限？
 4. Provider Attempt Lookup（模型尝试查询）如何在 unknown（未知）请求时确认原请求，而不是盲目重复发送？
-5. 用哪些非敏感运行探针证明 OSS/Broker/Worker/Provider 的真实依赖，而不把一次 API 调用误报为完整任务链？
+5. 用哪些非敏感运行探针证明 MySQL/Outbox/Broker/Worker/OSS/Platform/Provider 的同一冻结任务依赖，而不把一次 API 调用误报为完整任务链？
 ```
 
 在未回答这些问题以前，不要开始 TargetedReview（专项复核）、FamilyRouting（专项家族路由）、Retry（重试）、Fallback（降级）、Race（竞速）或医学 Prompt（提示词）优化。
@@ -336,7 +335,7 @@ flowchart LR
 
 | 主题 | 当前代码证据 |
 |---|---|
-| Gateway（网关）安全组成与 fail-closed（失败关闭） | `apps/backend/core/ai/gateway/runtime_dependencies.py:59-107` |
+| Platform 凭据成对校验与 GatewayClient fail-closed（失败关闭） | `apps/backend/core/config.py:228-280`；`apps/backend/core/ai/gateway_client.py:21-108` |
 | `StudyPreparation（检查准备）` 目前只校验两个冻结字符串 | `apps/backend/services/runtime/stages/common/study_preparation.py:13-40` |
 | `FamilyRouting（专项家族路由）` 当前固定 `primary_final（主读直接定稿）` | `apps/backend/services/runtime/stages/xray/family_routing.py:13-39` |
 | `TargetedReview（专项复核）` 的单次 AI Call（AI 调用）入口 | `apps/backend/services/runtime/stages/xray/targeted_review.py:19-71` |

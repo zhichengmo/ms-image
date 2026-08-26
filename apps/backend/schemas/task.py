@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.backend.schemas.imaging_common import normalize_required_text
 
@@ -12,6 +12,7 @@ class TaskCreate(BaseModel):
     study_revision_id: str = Field(min_length=1, max_length=64)
     request_id: str = Field(min_length=1, max_length=128)
     task_type: str = Field(default="replay", min_length=1, max_length=48)
+    species: str | None = Field(default=None, max_length=16)
     trace_id: str = Field(min_length=1, max_length=128)
 
     @field_validator("study_id", "study_revision_id", "request_id", "trace_id")
@@ -26,6 +27,22 @@ class TaskCreate(BaseModel):
         if normalized not in {"replay", "diagnose"}:
             raise ValueError("task_type_not_supported")
         return normalized
+
+    @field_validator("species")
+    @classmethod
+    def validate_species(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = normalize_required_text(value).lower()
+        if normalized not in {"cat", "dog"}:
+            raise ValueError("task_species_not_supported")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_species_for_diagnose(self) -> "TaskCreate":
+        if self.task_type == "diagnose" and self.species is None:
+            raise ValueError("task_species_required_for_diagnose")
+        return self
 
 
 class TaskCancelRequest(BaseModel):

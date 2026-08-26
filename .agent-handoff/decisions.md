@@ -349,3 +349,66 @@
 | XRay 是独立 `xray` 模态，Nacos module 使用 `x-ray`；Primary 必须使用 `cat` / `dog` variant，禁止 `default` fallback | 猫犬影像不能共享或互相兜底 Prompt。将物种写入内部 key 和 Nacos variant，使不合法 key 或物种组合在 Nacos 读取前失败关闭。 | `prompt_source.py:29-58, 81-151`；`test_ai_prompt_control_plane_contracts.py:573-615`。 |
 | 发布 `ms-image.x-ray.primary.cat.zh-CN@1.0.0` 与 `ms-image.x-ray.primary.dog.zh-CN@1.0.0`，不发布 Targeted 或 A/B 变体 | v2 Primary 只消费一份冻结 Prompt，且 FamilyRouting 当前固定 `primary_final`；Targeted 无路由入口。用户当前优先 P0/P1/E1 工程链，不执行医学评测。 | Nacos read-after-write；用户当前指令；`stages/xray/family_routing.py`。 |
 | Nacos 发布不视为 Config 激活、Worker Runtime 或医学放行 | 旧 MySQL 未具备兼容的 Runtime 控制面表，不能安全导入/编译/冻结；当前先完成工程 AI 链，医学验证后置。 | P0 审计；`.agent-handoff/snapshot.md`；24 号运行时指南。 |
+
+## 2026-08-26 — 宠物档案只复用 ms-ai-fast 的业务语义，不复制其 Alembic revision
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 未来 XRay 宠物档案采用“档案归属校验 -> 物种归一化 -> Task 创建时冻结”的语义；Worker 不重新读取档案 | `ms-image` Worker 只能使用冻结 Task Snapshot。执行期重新读取可变档案会造成 Prompt/物种漂移，破坏重放与审计。 | `ms-ai-fast/app/service/pet_profile_service.py:80-85`；`ai_media_execution_service.py:182-197,515-516`；`ms-image/task_service.py:356-416` |
+| 不直接复制 `ms-ai-fast` 的 `20260706_0001` 或其后续 revision 到 `ms-image` | 其 revision 起点为 `None`，并同时创建多张 fast 业务表；`ms-image` Alembic head 为 `20260824_02`，当前旧 `ms_image` 又无 version 表且有冲突的 `session_record`。 | `ms-ai-fast/.../20260706_0001_ai_business_tables.py:15-43,45-218`；`ms-image/alembic_migrations/versions/20260824_01...:22-23`；2026-08-26 只读 DB 核验 |
+| 仅在独立 Runtime DB 的 P0 边界和用户迁移授权明确后，创建一个 ms-image 原生 PetProfile revision | 需要使用本项目 opaque `VARCHAR(64)` ID、`requester_id`、string `species`、UTC `DATETIME(6)`、不建 FK 的既有模型合同；这些均与 fast 的 `BIGINT/user_uuid/TINYINT` 不同。 | `models/imaging_base.py:15-38`；项目 `AGENTS.md` 数据库规则；`ms-ai-fast/app/models/pet_profile.py:13-48` |
+
+## 2026-08-26 — 数据库清理只删除空旧表，不碰有数据历史表
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 本轮 DB cleanup 只删除“当前 ORM 不建模 + 当前 ms-image 代码不引用 + 无 FK + 精确 0 行”的表 | 用户要求备份后清理无用表；但大量旧表仍有业务历史数据，直接删除不可逆且可能影响旧链追溯。空表清理能降低噪声，同时不丢失业务行数据。 | 备份 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-20260826T102227Z.sql.gz`；清理元数据 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-empty-unused-20260826T103113Z.metadata.json`；清理后表数 31。 |
+| 有数据旧表暂不删除，必须另行列清单并确认 | 当前库残留旧 XRay/AI/governance 数据，且部分表名与目标 ORM 冲突；“当前代码不引用”不足以证明历史数据可丢弃。 | 剩余大表包括 `ai_request_log`、`medical_images`、`report_content`、`async_xray_task`；同名不兼容表包括 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record`。 |
+
+## 2026-08-26 — 用户确认后以当前 ORM 表集合清理 legacy DB 噪声
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 在已有全量备份基础上，删除所有“不在当前 `ms-image` ORM 模型集合中”的剩余物理表 | 用户明确要求无用表应删除，避免干扰判断；当前目标是新 XRay Runtime 链，旧 XRay/AI/governance 表不再作为运行时事实来源。 | 清理元数据 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-legacy-non-runtime-20260826T103657Z.metadata.json`；清理后 `DB_NOT_IN_MODELS=[]`，剩余表数 4。 |
+| 保留 4 张当前代码同名表，不在本轮直接 DROP | 它们虽是旧列结构，但表名由当前 ORM 声明；删除它们属于 Runtime baseline/rebuild 决策，而不是“非 ORM legacy 噪声清理”。下一步需要单独处理以避免 Alembic/运行时冲突。 | `models/ai_prompt_template.py:13`、`models/ai_api_connection.py:13`、`models/ai_model_pool.py:13`、`models/session.py:11`；清理后列差异复核。 |
+
+## 2026-08-26 — 清空剩余同名旧结构表，转为空库 Runtime baseline
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 删除 `ai_api_connection`、`ai_model_pool`、`ai_prompt_template`、`session_record` 4 张剩余旧结构表 | 用户要求删除没用表；这 4 张虽与当前 ORM 同名，但字段结构旧且不可直接用于新 Runtime，会干扰下一步判断和 Alembic 建表。全量备份与每表 DDL/行数 metadata 已保存。 | 清理元数据 `/Users/mozhicheng/workspace/code/cy-code/ms-image-db-backups/ms_image-cleanup-remaining-old-structure-20260826T121615Z.metadata.json`；清理后 `information_schema` 表数 0。 |
+| 清空旧表不等于 Runtime baseline 完成 | 当前 DB 没有任何物理表、没有 `alembic_version`，所有 Runtime 目标表仍需正式建表/迁移。 | 清理后复核 `table_count=0`；当前模型仍声明 20 张表。 |
+
+
+## 2026-08-26 — 快速上线阶段 Prompt 内容共用优先于猫犬医学分叉（已被下节修正）
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 首版快速上线推荐保留 `ms-image.x-ray.primary.cat/dog.zh-CN` 外部身份壳，但让两者继承/共用同一 common XRay Primary 正文 | 这满足用户“先不区分猫狗、快速上线”的目标，同时避免立即改动已通过测试的 XRay fail-closed PromptSource 合同；未来恢复猫/犬差异只需发布不同版本 Prompt。 | 用户 2026-08-26 最新指令；`prompt_source.py` 当前只允许 `xray_cat_primary -> cat` 与 `xray_dog_primary -> dog`；`test_ai_prompt_control_plane_contracts.py` 已覆盖禁止 XRay `default` fallback。 |
+| 不把共用正文视为医学放行 | 共用正文只是工程收敛与上线提速策略；未做病例 gold set、Prompt A/B 或医学评测。 | 当前状态仍为 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。 |
+
+
+## 2026-08-26 — 当前 Model 注册表作为数据库保留与建表唯一清单
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 不再主观判断当前 Model 中哪些表“有用”；`apps/backend/models/__init__.py` 注册的 Model 全部保留并创建 | 用户明确要求基于当前 Model 重建数据库，同时不再做 Model 内部用途筛选；避免再次误删运行链表 | 用户 2026-08-26 指令；最新 DB 复核为 20 张 Model 表 + `alembic_version`，`model_missing=[]`、`extra_non_model=[]` |
+| 后续禁止自行删除当前 Model 对应表 | 当前业务数据虽为空，但结构是 Prompt/Config/Task/Worker 完整链的基础；删除会再次破坏 P0 | `apps/backend/models/__init__.py:1-44`；`alembic_version=20260824_02` |
+
+## 2026-08-26 — 快速上线改为唯一 canonical XRay Primary（修正上一节）
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 首版不按猫/犬选择 Prompt 时，使用唯一内部 key `xray_primary`、唯一 Nacos `primary.common`、唯一 global `xray_diagnose` Config；不再保留两个运行身份壳 | 两个相同正文但不同身份会制造重复 source of truth；当前 Task Runtime 只选择并激活一个 global Config，两个壳不能同时产生运行价值。单一身份更贴合“一份冻结完整 XRay Prompt/唯一 Primary 候选”的既有架构。 | `docs/refactor/22...:769-770`；`docs/refactor/23...:384-397,925-932`；`task_service.py:55-64,102-106,256-282`；`config_compiler.py:488-497` |
+| XRay `common` 只能 exact-only，不能充当 cat/dog/default fallback | `common` 表达首版唯一 canonical variant，同时避开历史 `default` Data ID 歧义；fail-closed 仍由精确 key/variant 校验保证。 | `prompt_source.py:81-149` 当前 XRay exact-only 机制；已有历史 default/cat/dog Nacos 身份 |
+| “传承”只用于编写/发布阶段复用；Runtime 只消费已物化并冻结的一份完整正文、变量合同和 SHA | 动态父子 Prompt 读取/拼接会新增外部 latest 漂移和第二套解析路径，破坏 Config/Task Snapshot 的不可变、可审计、可重放合同。 | `config_compiler.py:488-497`；Worker 只读冻结 Task Snapshot 的既有决策 |
+| 首版 species 是安全上下文，不是 Prompt 路由键；未来只有医学证据支持时才恢复物种分叉 | 可以跳过宠物档案和多 Config 路由的首版复杂度，但不把工程收敛误报为医学合格。 | `docs/refactor/23...:384-397`；当前 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO` |
+
+
+## 2026-08-26 — XRay 由接口参数区分猫狗并共用单一 Prompt
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| `diagnose` Task request body 必传 `species=cat|dog` | 用户要求快速上线并明确“接口通过传参区分猫狗”；避免新增宠物档案表、自动查询链和运行时猜测。 | `apps/backend/schemas/task.py`；用户 2026-08-26 决定。 |
+| species 在 Task 创建期归一化并冻结进 request snapshot | Worker 只消费冻结事实；species 进入 request SHA，可防止相同幂等键下的物种漂移。 | `apps/backend/services/runtime/service/task_service.py`；`apps/backend/services/runtime/stages/xray/prompt_commands.py`。 |
+| XRay 只保留 `xray_primary/common` source identity，`common` exact-only | 物种是安全上下文而非 Prompt 路由坐标；单一 Config/Prompt 更符合快速上线和既有 global/global 激活链，同时禁止 `default` 或跨 variant fallback。 | `apps/backend/services/ai_control/service/prompt_source.py`；既有控制面合同测试。 |
