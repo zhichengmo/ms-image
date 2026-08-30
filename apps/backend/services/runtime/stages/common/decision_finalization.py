@@ -41,4 +41,10 @@ class DecisionFinalizationStageHandler:
         )
 
 
-__all__ = ["DecisionFinalizationStageHandler"]
+class DecisionFinalizationV2StageHandler(DecisionFinalizationStageHandler):
+    """Version-isolated v2 finalizer preserving the model result verbatim."""
+
+    handler_version = "v2"
+
+
+__all__ = ["DecisionFinalizationStageHandler", "DecisionFinalizationV2StageHandler"]

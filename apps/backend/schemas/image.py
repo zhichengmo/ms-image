@@ -3,6 +3,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from apps.backend.core.imaging.manifest import (
+    PROJECTION_PROVENANCE_KEY,
+    PROJECTION_SCHEMA_VERSION,
+    normalize_projection,
+)
 from apps.backend.core.imaging.object_store import MAX_IMAGE_BYTES
 from apps.backend.schemas.imaging_common import normalize_required_text, normalize_utc_datetime
 
@@ -13,12 +18,27 @@ IMAGE_ROLES = frozenset(
 IMAGE_KINDS = frozenset({"instance", "photo", "cine", "video", "wsi", "volume", "other"})
 FILE_FORMATS = frozenset({"dicom", "jpeg", "png", "mp4", "nifti", "tiff", "svs", "other"})
 UPLOAD_MODES = frozenset({"direct_put", "multipart", "internal_import"})
+IMAGE_STATUSES = frozenset(
+    {"uploading", "validating", "ready", "superseded", "quarantined", "deleted"}
+)
 QUALIFIED_UPLOAD_FORMATS = frozenset({"dicom", "jpeg", "png"})
 QUALIFIED_CONTENT_TYPES = {
     "dicom": "application/dicom",
     "jpeg": "image/jpeg",
     "png": "image/png",
 }
+
+
+class ImageProjectionProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(min_length=1, max_length=32)
+    schema_version: str = Field(default=PROJECTION_SCHEMA_VERSION)
+
+
+def _reject_projection_provenance(metadata: dict[str, Any] | None) -> None:
+    if metadata is not None and PROJECTION_PROVENANCE_KEY in metadata:
+        raise ValueError("image_projection_provenance_reserved")
 
 
 class ImageCreate(BaseModel):
@@ -43,6 +63,7 @@ class ImageCreate(BaseModel):
     expected_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     expected_size_bytes: int | None = Field(default=None, ge=1)
     declared_content_type: str | None = Field(default=None, max_length=128)
+    projection: str = Field(min_length=1, max_length=64)
     technical_metadata: dict[str, Any] | None = None
     upload_expires_at: datetime | None = None
 
@@ -81,6 +102,11 @@ class ImageCreate(BaseModel):
             raise ValueError("image_format_invalid")
         return normalized
 
+    @field_validator("projection")
+    @classmethod
+    def validate_projection(cls, value: str) -> str:
+        return normalize_projection(value)
+
     @field_validator("upload_mode")
     @classmethod
     def validate_upload_mode(cls, value: str) -> str:
@@ -108,6 +134,7 @@ class ImageCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_upload_contract(self):
+        _reject_projection_provenance(self.technical_metadata)
         if self.upload_mode == "multipart":
             if not self.upload_session_ref or self.expected_part_count is None:
                 raise ValueError("multipart_upload_contract_incomplete")
@@ -141,6 +168,7 @@ class ImagePrepareUploadRequest(BaseModel):
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     expected_size_bytes: int = Field(ge=1, le=MAX_IMAGE_BYTES)
     declared_content_type: str = Field(min_length=1, max_length=128)
+    projection: str = Field(min_length=1, max_length=64)
     technical_metadata: dict[str, Any] | None = None
 
     @field_validator("series_id", "logical_image_key", "metadata_schema_version")
@@ -186,8 +214,14 @@ class ImagePrepareUploadRequest(BaseModel):
         normalized = normalize_required_text(value).casefold()
         return "image/jpeg" if normalized == "image/jpg" else normalized
 
+    @field_validator("projection")
+    @classmethod
+    def validate_projection(cls, value: str) -> str:
+        return normalize_projection(value)
+
     @model_validator(mode="after")
     def validate_prepare_contract(self):
+        _reject_projection_provenance(self.technical_metadata)
         if QUALIFIED_CONTENT_TYPES[self.file_format] != self.declared_content_type:
             raise ValueError("image_format_content_type_mismatch")
         if self.image_role == "original" and self.source_manifest:
@@ -327,6 +361,7 @@ class ImageReplaceRequest(BaseModel):
     expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     expected_size_bytes: int = Field(ge=1, le=MAX_IMAGE_BYTES)
     declared_content_type: str = Field(min_length=1, max_length=128)
+    projection: str | None = Field(default=None, min_length=1, max_length=64)
     technical_metadata: dict[str, Any] | None = None
 
     @field_validator("old_image_id", "metadata_schema_version")
@@ -356,8 +391,16 @@ class ImageReplaceRequest(BaseModel):
         normalized = normalize_required_text(value).casefold()
         return "image/jpeg" if normalized == "image/jpg" else normalized
 
+    @field_validator("projection")
+    @classmethod
+    def validate_projection(cls, value: str | None) -> str | None:
+        return normalize_projection(value) if value is not None else None
+
     @model_validator(mode="after")
     def validate_replace_contract(self):
+        _reject_projection_provenance(self.technical_metadata)
+        if "projection" in self.model_fields_set and self.projection is None:
+            raise ValueError("image_projection_null_forbidden")
         if QUALIFIED_CONTENT_TYPES[self.file_format] != self.declared_content_type:
             raise ValueError("image_format_content_type_mismatch")
         return self
@@ -378,6 +421,95 @@ class ImageAbortCommand(BaseModel):
     @classmethod
     def normalize_id(cls, value: str) -> str:
         return normalize_required_text(value)
+
+
+class ImagePageQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    series_id: str = Field(min_length=1, max_length=64)
+    status: str | None = Field(default=None, min_length=1, max_length=32)
+    image_role: str | None = Field(default=None, min_length=1, max_length=32)
+    current_only: bool = True
+    include_versions: bool = False
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+    @field_validator("series_id")
+    @classmethod
+    def normalize_series_id(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = normalize_required_text(value).lower()
+        if normalized not in IMAGE_STATUSES:
+            raise ValueError("image_status_invalid")
+        return normalized
+
+    @field_validator("image_role")
+    @classmethod
+    def validate_page_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = normalize_required_text(value).lower()
+        if normalized not in IMAGE_ROLES:
+            raise ValueError("image_role_invalid")
+        return normalized
+
+    @property
+    def resolved_current_only(self) -> bool:
+        """Explicit history inclusion takes precedence over the default current view."""
+        return self.current_only and not self.include_versions
+
+
+class ImagePageItemResponse(BaseModel):
+    """Runtime-safe Image summary without object-store or validation lease details."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    series_id: str
+    source_image_id: str | None = None
+    logical_image_key: str
+    image_version_no: int
+    supersedes_image_id: str | None = None
+    sequence_no: int
+    image_role: str
+    image_kind: str
+    metadata_schema_version: str
+    file_format: str
+    upload_mode: str
+    expected_part_count: int | None = None
+    expected_sha256: str | None = None
+    expected_size_bytes: int | None = None
+    declared_content_type: str | None = None
+    content_type: str | None = None
+    sha256: str | None = None
+    size_bytes: int | None = None
+    sop_instance_uid: str | None = None
+    sop_class_uid: str | None = None
+    instance_no: int | None = None
+    projection: str | None = None
+    projection_provenance: ImageProjectionProvenance | None = None
+    status: str
+    state_version: int
+    error_code: str | None = None
+    upload_expires_at: datetime | None = None
+    verified_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImagePageResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: list[ImagePageItemResponse]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    limit: int = Field(ge=1, le=100)
 
 
 class ImageResponse(BaseModel):
@@ -411,6 +543,7 @@ class ImageResponse(BaseModel):
     sop_class_uid: str | None = None
     instance_no: int | None = None
     projection: str | None = None
+    projection_provenance: ImageProjectionProvenance | None = None
     technical_metadata_json: dict[str, Any] | None = None
     status: str
     state_version: int
@@ -428,6 +561,7 @@ __all__ = [
     "FILE_FORMATS",
     "IMAGE_KINDS",
     "IMAGE_ROLES",
+    "IMAGE_STATUSES",
     "MAX_IMAGE_BYTES",
     "QUALIFIED_UPLOAD_FORMATS",
     "UPLOAD_MODES",
@@ -437,6 +571,10 @@ __all__ = [
     "ImageMultipartPartReceipt",
     "ImageMultipartPartsResponse",
     "ImageMultipartUploadTicket",
+    "ImagePageItemResponse",
+    "ImagePageQuery",
+    "ImagePageResult",
+    "ImageProjectionProvenance",
     "ImageListMultipartPartsRequest",
     "ImagePrepareMultipartRequest",
     "ImagePreparePartsRequest",

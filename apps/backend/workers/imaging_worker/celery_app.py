@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 from celery.exceptions import MaxRetriesExceededError, Reject
+from celery.utils.log import get_task_logger
 
 from apps.backend.core.async_db import async_engine, session_factory
 from apps.backend.core.config import settings
@@ -17,12 +19,51 @@ from .image_validation import ImageValidationWorker
 from .stage_execution import StageExecutionWorker
 
 
+AI_ATTEMPT_RECONCILE_TASK_NAME = "imaging.reconcile_ai_attempts"
+AI_ATTEMPT_RECONCILE_SCHEDULE_KEY = "imaging-ai-attempt-reconcile"
+
 runtime = runtime_config(source=settings, prefix="IMAGING")
 topology = topology_for("imaging", source=settings)
 celery_app = create_celery_app(
     name="imaging",
     runtime=runtime,
     topology=topology,
+)
+logger = get_task_logger(__name__)
+
+
+def build_ai_attempt_reconcile_schedule(
+    *,
+    enabled: bool,
+    interval_seconds: int,
+    batch_limit: int,
+) -> dict[str, dict[str, Any]]:
+    """Build the single-owner Beat entry with an explicit imaging route."""
+
+    if not enabled:
+        return {}
+    if interval_seconds < 30 or interval_seconds > 3600:
+        raise ValueError("ai_attempt_reconcile_interval_invalid")
+    if batch_limit < 1 or batch_limit > 500:
+        raise ValueError("ai_attempt_reconcile_batch_limit_invalid")
+    return {
+        AI_ATTEMPT_RECONCILE_SCHEDULE_KEY: {
+            "task": AI_ATTEMPT_RECONCILE_TASK_NAME,
+            "schedule": float(interval_seconds),
+            "args": (batch_limit,),
+            "options": {
+                "queue": topology.queue,
+                "exchange": topology.exchange,
+                "routing_key": topology.routing_key,
+            },
+        }
+    }
+
+
+celery_app.conf.beat_schedule = build_ai_attempt_reconcile_schedule(
+    enabled=settings.AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED,
+    interval_seconds=settings.AI_ATTEMPT_RECONCILE_INTERVAL_SECONDS,
+    batch_limit=settings.AI_ATTEMPT_RECONCILE_BATCH_LIMIT,
 )
 
 
@@ -123,7 +164,7 @@ def execute_stage(self: Any, message: dict[str, Any]) -> None:
 
 
 @celery_app.task(
-    name="imaging.reconcile_ai_attempts",
+    name=AI_ATTEMPT_RECONCILE_TASK_NAME,
     bind=True,
     ignore_result=True,
     acks_late=True,
@@ -141,17 +182,28 @@ def reconcile_ai_attempts(self: Any, limit: int = 50) -> None:
                 limit=max(1, min(500, int(limit))),
                 lease_seconds=settings.AI_ATTEMPT_RECONCILE_LEASE_SECONDS,
                 retry_seconds=settings.AI_ATTEMPT_RECONCILE_RETRY_SECONDS,
+                max_reconcile_count=settings.AI_ATTEMPT_RECONCILE_MAX_COUNT,
+                max_unknown_age_seconds=(
+                    settings.AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS
+                ),
             )
         finally:
             await async_engine.dispose()
 
     try:
-        asyncio.run(run())
+        outcomes = asyncio.run(run())
     except Exception:
         raise Reject("ai_attempt_reconcile_worker_error", requeue=False)
+    logger.info(
+        "ai_attempt_reconcile_completed %s",
+        json.dumps(outcomes, sort_keys=True, separators=(",", ":")),
+    )
 
 
 __all__ = [
+    "AI_ATTEMPT_RECONCILE_SCHEDULE_KEY",
+    "AI_ATTEMPT_RECONCILE_TASK_NAME",
+    "build_ai_attempt_reconcile_schedule",
     "celery_app",
     "execute_stage",
     "reconcile_ai_attempts",

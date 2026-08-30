@@ -8,6 +8,7 @@ persists Provider response bodies.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
@@ -19,14 +20,35 @@ from apps.backend.core.ai.prompting.contracts import canonical_json, sha256_json
 
 GATEWAY_PROFILE_V1 = "ai-gateway-profile.v1"
 AI_IMAGE_RECEIPT_V1 = "ai-image-receipt.v1"
+AI_IMAGE_RECEIPT_V2 = "ai-image-receipt.v2"
+_JSON_MARKDOWN_FENCE = re.compile(
+    r"\A```json[ \t]*\r?\n(?P<body>[\s\S]*?)\r?\n```[ \t]*\Z"
+)
 
 
 class GatewayContractError(ValueError):
     """Raised when frozen Gateway input or Provider output violates a contract."""
 
 
-class GatewayRejectedError(GatewayContractError):
-    """A Provider definitely returned a terminal HTTP or protocol rejection."""
+class GatewayDefiniteResponseError(GatewayContractError):
+    """A definite Provider response failed its technical output contract."""
+
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        image_receipt: Mapping[str, Any],
+        image_manifest_sha256: str | None,
+        image_count_sent: int,
+    ) -> None:
+        super().__init__(error_code)
+        self.image_receipt = dict(image_receipt)
+        self.image_manifest_sha256 = image_manifest_sha256
+        self.image_count_sent = image_count_sent
+
+
+class GatewayRejectedError(GatewayDefiniteResponseError):
+    """A Provider definitely returned a terminal HTTP rejection."""
 
 
 class GatewayUnknownDeliveryError(GatewayContractError):
@@ -114,6 +136,12 @@ def validate_signed_image_url(value: str, *, allowed_hosts: Iterable[str]) -> st
 def schema_validate_result(*, value: Any, schema: Mapping[str, Any]) -> dict[str, Any]:
     """Parse Provider message content and validate the frozen strict schema."""
     if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("```"):
+            fenced = _JSON_MARKDOWN_FENCE.fullmatch(stripped)
+            if fenced is None or "```" in fenced.group("body"):
+                raise GatewayContractError("provider_response_json_invalid")
+            value = fenced.group("body").strip()
         try:
             value = json.loads(value)
         except json.JSONDecodeError as exc:
@@ -211,8 +239,10 @@ def canonical_user_context(value: Mapping[str, Any]) -> str:
 
 __all__ = [
     "AI_IMAGE_RECEIPT_V1",
+    "AI_IMAGE_RECEIPT_V2",
     "GATEWAY_PROFILE_V1",
     "GatewayContractError",
+    "GatewayDefiniteResponseError",
     "GatewayExecutionResult",
     "GatewayImageInput",
     "GatewayRejectedError",

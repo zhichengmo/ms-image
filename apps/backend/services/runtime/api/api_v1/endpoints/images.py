@@ -1,3 +1,6 @@
+from math import ceil
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +12,7 @@ from apps.backend.core.dependencies import (
     get_image_storage_dependencies,
     require_resource_scope,
 )
-from apps.backend.schemas.base import GenericResponse
+from apps.backend.schemas.base import GenericResponse, PageInfo, PagedResponse
 from apps.backend.schemas.image import (
     ImageAbortCommand,
     ImageCompleteUploadRequest,
@@ -17,6 +20,8 @@ from apps.backend.schemas.image import (
     ImageMultipartPartReceipt,
     ImageMultipartPartsResponse,
     ImageMultipartUploadTicket,
+    ImagePageItemResponse,
+    ImagePageQuery,
     ImagePrepareMultipartRequest,
     ImagePreparePartsRequest,
     ImagePrepareUploadRequest,
@@ -191,6 +196,32 @@ async def get_image(
     except Exception as exc:
         return await rollback_and_map(db, exc)
     return GenericResponse(message="Image 查询成功", data=data)
+
+
+@router.get("/page", response_model=PagedResponse[ImagePageItemResponse])
+async def page_images(
+    query: Annotated[ImagePageQuery, Query()],
+    context: dict = Depends(resource_context),
+    service: ImageService = Depends(get_image_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        result = await service.page_images(
+            query=query,
+            requester_id=context["subject"],
+        )
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return PagedResponse(
+        message="Image 分页查询成功",
+        data=result.data,
+        page_info=PageInfo(
+            total=result.total,
+            page=result.page,
+            limit=result.limit,
+            total_pages=ceil(result.total / result.limit) if result.total else 0,
+        ),
+    )
 
 
 @router.post("/abort-upload", response_model=GenericResponse[ImageResponse])

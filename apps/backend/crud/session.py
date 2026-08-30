@@ -1,5 +1,6 @@
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,16 @@ class SessionDal(DalBase):
 
     async def get_by_id(self, session_id: str) -> Session | None:
         return await self.get_data(data_id=session_id, v_return_none=True)
+
+    async def get_by_id_for_update(self, session_id: str) -> Session | None:
+        """Read the current Session row under a lifecycle row lock."""
+        return await self.get_data(
+            data_id=session_id,
+            v_start_sql=select(self.model).with_for_update().execution_options(
+                populate_existing=True
+            ),
+            v_return_none=True,
+        )
 
     async def get_by_request_id(self, request_id: str) -> Session | None:
         return await self.get_data(request_id=request_id, v_return_none=True)

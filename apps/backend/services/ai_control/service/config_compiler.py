@@ -33,9 +33,12 @@ from apps.backend.core.ai.prompting.renderer import (
     PromptRenderError,
     PromptRenderer,
 )
+from apps.backend.core.ai.xray_result_contract import COMPLETE_MEDICAL_RESULT_V2
 from apps.backend.core.pipeline import (
     PipelineContractError,
     StageRegistry,
+    XRAY_PRIMARY_PROFILE_V2,
+    XRAY_TARGETED_REVIEW_PROFILE_V2,
     compile_profile_contract,
 )
 from apps.backend.models.ai_api_connection import AIAPIConnection
@@ -47,8 +50,16 @@ from apps.backend.schemas.ai_control import (
 )
 from apps.backend.services.ai_control.service.errors import AIControlValidationError
 
-_OUTPUT_SCHEMA_RELATIVE_PATH = Path("prompts/xray/complete_medical_result.schema.json")
-_OUTPUT_SCHEMA_CONTRACT_VERSION = "complete-medical-result.v1"
+_OUTPUT_SCHEMA_V1_RELATIVE_PATH = Path(
+    "prompts/xray/complete_medical_result.schema.json"
+)
+_OUTPUT_SCHEMA_V2_RELATIVE_PATH = Path(
+    "prompts/xray/complete_medical_result.v2.schema.json"
+)
+_OUTPUT_SCHEMA_V1_CONTRACT_VERSION = "complete-medical-result.v1"
+_V2_RESULT_PROFILES = frozenset(
+    {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+)
 
 
 @dataclass(frozen=True)
@@ -93,9 +104,15 @@ class AIConfigCompiler:
         self.registry = registry
 
     @staticmethod
-    def _output_schema() -> dict[str, Any]:
+    def _output_schema(*, profile_key: str) -> dict[str, Any]:
+        if profile_key in _V2_RESULT_PROFILES:
+            relative_path = _OUTPUT_SCHEMA_V2_RELATIVE_PATH
+            contract_version = COMPLETE_MEDICAL_RESULT_V2
+        else:
+            relative_path = _OUTPUT_SCHEMA_V1_RELATIVE_PATH
+            contract_version = _OUTPUT_SCHEMA_V1_CONTRACT_VERSION
         root = Path(__file__).resolve().parents[5]
-        path = root / _OUTPUT_SCHEMA_RELATIVE_PATH
+        path = root / relative_path
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -106,11 +123,11 @@ class AIConfigCompiler:
         # exposing the old Prompt Catalog / Schema Bundle abstraction.
         if loaded.get("x-ms-image-contract-version") not in (
             None,
-            _OUTPUT_SCHEMA_CONTRACT_VERSION,
+            contract_version,
         ):
             raise AIControlValidationError("output_schema_contract_version_conflict")
         result = dict(loaded)
-        result["x-ms-image-contract-version"] = _OUTPUT_SCHEMA_CONTRACT_VERSION
+        result["x-ms-image-contract-version"] = contract_version
         return result
 
     @staticmethod
@@ -170,9 +187,7 @@ class AIConfigCompiler:
             required, optional = PromptRenderer.declared_variables(variables_json)
         except PromptRenderError as exc:
             raise AIControlValidationError(str(exc)) from exc
-        if not set(message_contract["user_context_keys"]).issubset(
-            required | optional
-        ):
+        if not set(message_contract["user_context_keys"]).issubset(required | optional):
             raise AIControlValidationError(
                 "config_prompt_message_contract_variable_missing"
             )
@@ -185,7 +200,10 @@ class AIConfigCompiler:
         message_contract: Mapping[str, Any] | None,
     ) -> None:
         """Enforce Profile-specific structured context at freeze and replay time."""
-        if profile_key != "xray_targeted_review_v1":
+        if profile_key not in {
+            "xray_targeted_review_v1",
+            XRAY_TARGETED_REVIEW_PROFILE_V2,
+        }:
             return
         if message_contract is None:
             raise AIControlValidationError(
@@ -380,7 +398,6 @@ class AIConfigCompiler:
                         "provider_type": connection.provider_type,
                         "api_format": connection.api_format,
                         "base_url": connection.base_url,
-                        "secret_ref": connection.secret_ref,
                         "region": connection.region,
                         "capability_json": connection.capability_json,
                     }
@@ -422,7 +439,6 @@ class AIConfigCompiler:
                     "provider_type": connection.provider_type,
                     "api_format": connection.api_format,
                     "base_url": connection.base_url,
-                    "secret_ref": connection.secret_ref,
                     "requested_model": lane["requested_model"],
                     "timeout_ms": lane["timeout_ms"],
                     "max_attempts": lane["max_attempts"],
@@ -456,7 +472,7 @@ class AIConfigCompiler:
             "winner_policy": "single",
             "lanes": model_lanes,
         }
-        output_schema = self._output_schema()
+        output_schema = self._output_schema(profile_key=str(source["profile_key"]))
         gateway_profile = dict(capabilities[0]["gateway_profile"])
         capability_manifest = {
             "contract_version": "ai-capability-manifest.v1",

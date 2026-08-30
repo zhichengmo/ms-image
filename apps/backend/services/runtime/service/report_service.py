@@ -10,6 +10,9 @@ from apps.backend.crud.stage_checkpoint import StageCheckpointDal
 from apps.backend.crud.task import TaskDal
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.schemas.report import ReportResponse
+from apps.backend.services.runtime.medical_status_contract import (
+    PERSISTED_MEDICAL_STATUSES,
+)
 
 
 class ReportServiceError(ValueError):
@@ -43,6 +46,16 @@ class ReportService:
         medical_status: str,
         content: dict[str, Any],
     ) -> ReportResponse | None:
+        if medical_status not in PERSISTED_MEDICAL_STATUSES:
+            raise ReportStateConflictError("report_medical_status_invalid")
+        if not isinstance(content, dict) or "medical_status" not in content:
+            raise ReportStateConflictError(
+                "report_content_medical_status_missing"
+            )
+        if content["medical_status"] != medical_status:
+            raise ReportStateConflictError(
+                "report_content_medical_status_conflict"
+            )
         task = await self.task_dal.get_by_id_for_update(task_id)
         stage = await self.stage_dal.get_by_id(finalization_stage_id)
         if (
@@ -132,6 +145,27 @@ class ReportService:
         report = await self.report_dal.get_by_id(task.current_report_id)
         if report is None or report.task_id != task.id or report.status not in {"final", "published"}:
             raise ReportStateConflictError("current_report_invalid")
+        return self._response(report)
+
+    async def get_current_for_requester(
+        self,
+        *,
+        task_id: str,
+        requester_id: str,
+    ) -> ReportResponse | None:
+        task = await self.task_dal.get_by_id(task_id)
+        if task is None or task.requester_id != requester_id:
+            raise ReportNotFoundError("task_not_found")
+        if task.current_report_id is None:
+            return None
+
+        report = await self.report_dal.get_by_id(task.current_report_id)
+        if (
+            report is None
+            or report.task_id != task.id
+            or report.status not in {"final", "published"}
+        ):
+            raise ReportNotFoundError("current_report_not_found")
         return self._response(report)
 
     async def get_for_requester(self, *, report_id: str, requester_id: str) -> ReportResponse:

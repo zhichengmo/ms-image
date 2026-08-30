@@ -13,6 +13,7 @@ from apps.backend.core.ai.prompting.contracts import sha256_json
 
 AI_CONFIG_V2 = "ai-config.v2"
 TASK_REQUEST_SNAPSHOT_V2 = "task-request-snapshot.v2"
+TASK_REQUEST_SNAPSHOT_V3 = "task-request-snapshot.v3"
 
 
 def activation_scope_payload(
@@ -80,6 +81,7 @@ def is_v2_config(value: Any) -> bool:
 __all__ = [
     "AI_CONFIG_V2",
     "TASK_REQUEST_SNAPSHOT_V2",
+    "TASK_REQUEST_SNAPSHOT_V3",
     "activation_scope_payload",
     "activation_slot_sha256",
     "is_v2_config",

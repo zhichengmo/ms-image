@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,6 @@ from apps.backend.core.ai.connection_contract import (
     ConnectionContractError,
     canonical_connection_metadata_sha256,
     canonicalize_connection_base_url,
-    validate_secret_ref_structure,
 )
 from apps.backend.crud.ai_api_connection import AIAPIConnectionDal
 from apps.backend.models.ai_api_connection import AIAPIConnection
@@ -36,22 +34,15 @@ from apps.backend.services.ai_control.service.errors import (
 
 class APIConnectionService:
     RESOURCE_TYPE = "connection"
+    # Physical-column compatibility only. The current schema predates the
+    # ms-ai-platform runtime contract and keeps this NOT NULL column until a
+    # separately authorized migration removes it. It is never accepted from an
+    # API caller, hashed, returned, audited, frozen, or consumed by the Worker.
+    _LEGACY_SECRET_REF_PLACEHOLDER = ""
 
     def __init__(self, db: AsyncSession):
         self.dal = AIAPIConnectionDal(db)
         self.audit = AIControlAuditService(db)
-
-    @staticmethod
-    def _secret_ref_type(secret_ref: str) -> str:
-        if "://" in secret_ref:
-            return secret_ref.split("://", 1)[0].lower()
-        if ":" in secret_ref:
-            return secret_ref.split(":", 1)[0].lower()
-        return "opaque_ref"
-
-    @staticmethod
-    def _secret_ref_fingerprint(secret_ref: str) -> str:
-        return hashlib.sha256(secret_ref.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _canonical_base_url(base_url: str) -> str:
@@ -80,10 +71,6 @@ class APIConnectionService:
             region=value.region,
             capability_json=value.capability_json,
             connection_sha256=value.connection_sha256,
-            secret_ref_type=APIConnectionService._secret_ref_type(value.secret_ref),
-            secret_ref_fingerprint=APIConnectionService._secret_ref_fingerprint(
-                value.secret_ref
-            ),
             status=value.status,
             state_version=value.state_version,
             validated_at=value.validated_at,
@@ -95,14 +82,10 @@ class APIConnectionService:
         )
 
     @classmethod
-    def _validate_endpoint_and_secret_ref(cls, *, base_url: str, secret_ref: str) -> None:
+    def _validate_endpoint(cls, *, base_url: str) -> None:
         canonical_base_url = cls._canonical_base_url(base_url)
         if canonical_base_url != base_url:
             raise AIControlValidationError("ai_connection_base_url_not_canonical")
-        try:
-            validate_secret_ref_structure(secret_ref)
-        except ConnectionContractError as exc:
-            raise AIControlValidationError(str(exc)) from exc
 
     async def _replay_or_none(
         self, *, request_id: str, action_type: str
@@ -246,7 +229,7 @@ class APIConnectionService:
             "provider_type": payload.provider_type,
             "api_format": payload.api_format,
             "base_url": base_url,
-            "secret_ref": payload.secret_ref,
+            "secret_ref": self._LEGACY_SECRET_REF_PLACEHOLDER,
             "region": payload.region,
             "capability_json": capability,
             "status": "draft",
@@ -254,9 +237,7 @@ class APIConnectionService:
             "created_by_id": actor.subject_id,
             "updated_by_id": actor.subject_id,
         }
-        self._validate_endpoint_and_secret_ref(
-            base_url=values["base_url"], secret_ref=values["secret_ref"]
-        )
+        self._validate_endpoint(base_url=values["base_url"])
         values["connection_sha256"] = self._connection_sha(values)
         item = await self.dal.create_idempotent(values)
         if item is None:
@@ -282,7 +263,6 @@ class APIConnectionService:
                 "provider_type",
                 "api_format",
                 "base_url",
-                "secret_ref_fingerprint",
                 "region",
                 "capability_json",
                 "status",
@@ -318,13 +298,10 @@ class APIConnectionService:
             "provider_type": payload.provider_type,
             "api_format": payload.api_format,
             "base_url": base_url,
-            "secret_ref": payload.secret_ref,
             "region": payload.region,
             "capability_json": capability,
         }
-        self._validate_endpoint_and_secret_ref(
-            base_url=base_url, secret_ref=payload.secret_ref
-        )
+        self._validate_endpoint(base_url=base_url)
         updated = await self.dal.cas_update(
             connection_id=item.id,
             expected_version=payload.expected_state_version,
@@ -333,7 +310,6 @@ class APIConnectionService:
                 "provider_type": payload.provider_type,
                 "api_format": payload.api_format,
                 "base_url": base_url,
-                "secret_ref": payload.secret_ref,
                 "region": payload.region,
                 "capability_json": capability,
                 "connection_sha256": self._connection_sha(content),
@@ -361,7 +337,6 @@ class APIConnectionService:
                 "provider_type",
                 "api_format",
                 "base_url",
-                "secret_ref_fingerprint",
                 "region",
                 "capability_json",
             ],
@@ -391,9 +366,7 @@ class APIConnectionService:
                 "ai_api_connection_validate_draft_required"
             )
         try:
-            self._validate_endpoint_and_secret_ref(
-                base_url=item.base_url, secret_ref=item.secret_ref
-            )
+            self._validate_endpoint(base_url=item.base_url)
             expected_sha = self._connection_sha(
                 {
                     "connection_key": item.connection_key,
@@ -401,7 +374,6 @@ class APIConnectionService:
                     "provider_type": item.provider_type,
                     "api_format": item.api_format,
                     "base_url": item.base_url,
-                    "secret_ref": item.secret_ref,
                     "region": item.region,
                     "capability_json": item.capability_json,
                 }

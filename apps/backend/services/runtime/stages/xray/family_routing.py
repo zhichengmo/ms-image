@@ -10,6 +10,32 @@ from apps.backend.services.runtime.stages.contracts import (
 )
 
 
+_TARGETED_FOCUS_BY_FAMILY = {
+    "thoracic": frozenset(
+        {
+            "cardiac_silhouette",
+            "pulmonary_pattern",
+            "pleural_mediastinal",
+            "thoracic_wall",
+        }
+    ),
+    "abdominal": frozenset(
+        {
+            "gastrointestinal_obstruction",
+            "urinary_mineralization",
+            "abdominal_mineralization",
+            "soft_tissue_mass",
+        }
+    ),
+    "appendicular_orthopedic": frozenset(
+        {"fracture_luxation", "long_bone_joint", "alignment", "stifle_patella"}
+    ),
+    "axial_orthopedic": frozenset(
+        {"fracture_luxation", "alignment", "pelvis_hip"}
+    ),
+}
+
+
 class XRayFamilyRoutingStageHandler:
     """Route deterministically while carrying the accepted Primary result forward."""
 
@@ -39,4 +65,69 @@ class XRayFamilyRoutingStageHandler:
         )
 
 
-__all__ = ["XRayFamilyRoutingStageHandler"]
+class XRayFamilyRoutingV2StageHandler(XRayFamilyRoutingStageHandler):
+    """Route one schema-valid Primary candidate in the experiment profile.
+
+    The model owns the candidate.  This handler only checks its frozen,
+    versioned vocabulary and referential integrity; it does not inspect pixels,
+    infer a Family or change the Primary medical result.
+    """
+
+    handler_version = "v2"
+
+    async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
+        primary_final = await super().execute(context)
+        completed = primary_final.completed_result
+        if completed is None:
+            raise StageHandlerContractError("family_routing_result_missing")
+
+        previous_output = (context.stage.input_json or {}).get("previous_output") or {}
+        complete_result = previous_output.get("complete_medical_result")
+        if not isinstance(complete_result, dict):
+            return primary_final
+        candidate = complete_result.get("targeted_candidate")
+        if not isinstance(candidate, dict):
+            return primary_final
+
+        family_key = candidate.get("family_key")
+        focus_key = candidate.get("focus_key")
+        source_finding_ids = candidate.get("source_finding_ids")
+        allowed_focus = _TARGETED_FOCUS_BY_FAMILY.get(family_key)
+        if (
+            not isinstance(focus_key, str)
+            or allowed_focus is None
+            or focus_key not in allowed_focus
+            or not isinstance(source_finding_ids, list)
+            or not source_finding_ids
+            or not all(isinstance(item, str) and item for item in source_finding_ids)
+            or len(source_finding_ids) != len(set(source_finding_ids))
+        ):
+            return primary_final
+
+        finding_ids = {
+            finding.get("finding_id")
+            for finding in complete_result.get("findings") or []
+            if isinstance(finding, dict)
+            and isinstance(finding.get("finding_id"), str)
+        }
+        if any(item not in finding_ids for item in source_finding_ids):
+            return primary_final
+
+        output = dict(completed.output)
+        output.update(
+            {
+                "route_signal": "targeted_review",
+                "selected_family_key": family_key,
+                "selected_focus_key": focus_key,
+                "selected_strategy_key": None,
+                "source_finding_ids": list(source_finding_ids),
+                "coverage_proof": complete_result.get("coverage") or {},
+                "route_reason_codes": ["primary_targeted_candidate"],
+            }
+        )
+        return StageExecutionPlan(
+            completed_result=StageResult(status="completed", output=output)
+        )
+
+
+__all__ = ["XRayFamilyRoutingStageHandler", "XRayFamilyRoutingV2StageHandler"]

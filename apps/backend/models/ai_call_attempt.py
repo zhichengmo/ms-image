@@ -113,6 +113,18 @@ class AICallAttempt(ImagingRecordBase):
     finished_at: Mapped[datetime | None] = mapped_column(
         DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: Attempt 终态/已收敛时间"
     )
+    first_unknown_at: Mapped[datetime | None] = mapped_column(
+        DATETIME(fsp=6),
+        nullable=True,
+        comment="DATETIME(6)|NULL: Attempt 首次进入 unknown 的可信时间；历史未知可为 NULL",
+    )
+    reconcile_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        comment="INT: 已获持久 CAS 授权的 Provider 原请求 lookup 次数，从 0 开始",
+    )
     next_reconcile_at: Mapped[datetime | None] = mapped_column(
         DATETIME(fsp=6), nullable=True, comment="DATETIME(6)|NULL: unknown Attempt 下次对账时间"
     )

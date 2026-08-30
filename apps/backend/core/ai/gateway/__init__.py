@@ -8,8 +8,10 @@ from .attempt_lookup import (
 )
 from .contracts import (
     AI_IMAGE_RECEIPT_V1,
+    AI_IMAGE_RECEIPT_V2,
     GATEWAY_PROFILE_V1,
     GatewayContractError,
+    GatewayDefiniteResponseError,
     GatewayExecutionResult,
     GatewayImageInput,
     GatewayRejectedError,
@@ -30,11 +32,13 @@ from .image_signer import (
 
 __all__ = [
     "AI_IMAGE_RECEIPT_V1",
+    "AI_IMAGE_RECEIPT_V2",
     "AttemptImageSigner",
     "AttemptLookupError",
     "AttemptLookupResult",
     "GATEWAY_PROFILE_V1",
     "GatewayContractError",
+    "GatewayDefiniteResponseError",
     "GatewayExecutionResult",
     "GatewayImageInput",
     "GatewayRejectedError",

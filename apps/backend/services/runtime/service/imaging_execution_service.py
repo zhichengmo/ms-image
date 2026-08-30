@@ -8,10 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.backend.crud.outbox import OutboxDal
 from apps.backend.crud.stage_checkpoint import StageCheckpointDal
 from apps.backend.crud.task import TaskDal
+from apps.backend.core.pipeline import StageResult
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.schemas.outbox import ExecuteStageMessage
-from apps.backend.services.runtime.service.report_service import ReportService
+from apps.backend.services.runtime.medical_status_contract import (
+    MedicalStatusContractError,
+    project_persisted_medical_status,
+)
 from apps.backend.services.runtime.service.ai_request_service import AIRequestService
+from apps.backend.services.runtime.service.report_service import ReportService
 from apps.backend.services.runtime.stages.contracts import (
     StageExecutionContext,
     StageExecutionPlan,
@@ -33,6 +38,10 @@ class ImagingExecutionService:
         self.outbox_dal = OutboxDal(db)
         self.stage_dal = StageCheckpointDal(db)
         self.task_dal = TaskDal(db)
+
+    @staticmethod
+    def _project_medical_status(output: Mapping[str, Any]) -> str:
+        return project_persisted_medical_status(output)
 
     @staticmethod
     def _task_cancel_requested(task: Any) -> bool:
@@ -110,11 +119,53 @@ class ImagingExecutionService:
             and stage.state_version >= parsed.expected_state_version + 1
         ):
             return None
+        task_cancel_requested = self._task_cancel_requested(task)
         if (
-            task.execution_status in {"cancelled", "failed", "dead_letter"}
-            or task.cancel_requested_at is not None
+            task_cancel_requested
+            and stage.status == "cancelled"
+            and stage.state_version >= parsed.expected_state_version + 1
         ):
+            return None
+        if task.execution_status in {"failed", "dead_letter"}:
             raise StageExecutionStateConflict("task_not_executable")
+        if task_cancel_requested:
+            if (
+                stage.status != "queued"
+                or stage.state_version != parsed.expected_state_version
+            ):
+                raise StageExecutionStateConflict("stage_cancel_conflict")
+            now = datetime.utcnow()
+            cancelled = await self.stage_dal.cas_update(
+                checkpoint_id=stage.id,
+                expected_version=parsed.expected_state_version,
+                values={
+                    "status": "cancelled",
+                    "error_code": "task_cancelled",
+                    "finished_at": now,
+                },
+            )
+            if cancelled is None:
+                raise StageExecutionStateConflict("stage_cancel_conflict")
+            if task.execution_status != "cancelled":
+                updated = await self.task_dal.cas_update(
+                    task_id=task.id,
+                    expected_version=task.state_version,
+                    values={
+                        "execution_status": "cancelled",
+                        "ai_medical_status": "not_produced",
+                        "finished_at": now,
+                    },
+                )
+                if updated is None:
+                    raise StageExecutionStateConflict("task_cancel_conflict")
+            return None
+        # Freeze the Task scalars required by the following transition before
+        # claiming the Stage.  CAS/readback is an ORM mutation boundary and the
+        # remaining logic must not depend on implicit async attribute refreshes.
+        task_id = task.id
+        task_state_version = task.state_version
+        task_execution_status = task.execution_status
+        task_started_at = task.started_at
         claimed = await self.stage_dal.claim(
             checkpoint_id=stage.id,
             expected_version=parsed.expected_state_version,
@@ -122,13 +173,13 @@ class ImagingExecutionService:
             now=datetime.utcnow(),
             lease_expires_at=datetime.utcnow() + timedelta(seconds=lease_seconds),
         )
-        if claimed is not None and task.execution_status == "queued":
+        if claimed is not None and task_execution_status == "queued":
             running = await self.task_dal.cas_update(
-                task_id=task.id,
-                expected_version=task.state_version,
+                task_id=task_id,
+                expected_version=task_state_version,
                 values={
                     "execution_status": "running",
-                    "started_at": task.started_at or datetime.utcnow(),
+                    "started_at": task_started_at or datetime.utcnow(),
                 },
             )
             if running is None:
@@ -268,18 +319,48 @@ class ImagingExecutionService:
     ) -> dict[str, Any]:
         if result.status == "completed":
             if stage.stage_key == "decision_finalization":
-                return await self._complete_decision_finalization(
+                try:
+                    medical_status = self._project_medical_status(result.output)
+                except MedicalStatusContractError as exc:
+                    current_task = await self.task_dal.get_by_id_for_update(task.id)
+                    if current_task is None:
+                        raise StageExecutionStateConflict("task_not_found") from exc
+                    if self._task_cancel_requested(current_task):
+                        return await self._cancel_running_stage(
+                            task=current_task,
+                            stage=stage,
+                            owner_id=owner_id,
+                            provider_called=False,
+                        )
+                    if current_task.execution_status in {
+                        "completed",
+                        "failed",
+                        "dead_letter",
+                    }:
+                        raise StageExecutionStateConflict(
+                            "task_not_executable"
+                        ) from exc
+                    task = current_task
+                    result = StageResult(
+                        status="failed",
+                        output=result.output,
+                        error_code=str(exc),
+                    )
+                else:
+                    return await self._complete_decision_finalization(
+                        task=task,
+                        stage=stage,
+                        owner_id=owner_id,
+                        output=result.output,
+                        medical_status=medical_status,
+                    )
+            else:
+                return await self._complete_stage(
                     task=task,
                     stage=stage,
                     owner_id=owner_id,
                     output=result.output,
                 )
-            return await self._complete_stage(
-                task=task,
-                stage=stage,
-                owner_id=owner_id,
-                output=result.output,
-            )
         if result.status != "failed":
             raise StageExecutionStateConflict(
                 result.error_code or "stage_handler_execution_failed"
@@ -321,7 +402,13 @@ class ImagingExecutionService:
         return result.output
 
     async def _complete_decision_finalization(
-        self, *, task, stage, owner_id: str, output: dict[str, Any]
+        self,
+        *,
+        task,
+        stage,
+        owner_id: str,
+        output: dict[str, Any],
+        medical_status: str,
     ) -> dict[str, Any]:
         current_task = await self.task_dal.get_by_id_for_update(task.id)
         if current_task is None:
@@ -358,13 +445,17 @@ class ImagingExecutionService:
         source_call_id = (stage.input_json.get("previous_output") or {}).get(
             "source_call_id"
         )
-        medical_status = str(output.get("medical_status") or "not_produced")
+        # Keep the Stage-internal ``produced/not_produced`` marker out of the
+        # persisted Report/Task content: the persisted facts carry the model's
+        # own medical verdict instead.
+        persisted = dict(output)
+        persisted["medical_status"] = medical_status
         report = await ReportService(self.outbox_dal.db).finalize(
             task_id=task.id,
             finalization_stage_id=completed.id,
             source_call_id=source_call_id,
             medical_status=medical_status,
-            content=output,
+            content=persisted,
         )
         if report is None:
             updated = await self.task_dal.cas_update(
@@ -492,6 +583,32 @@ class ImagingExecutionService:
             "previous_output": output,
             "compiled_pipeline_sha256": task.compiled_pipeline_sha256,
         }
+        if (
+            stage.stage_key == "family_routing"
+            and output.get("route_signal") == "targeted_review"
+        ):
+            route_fields = {
+                key: output.get(key)
+                for key in (
+                    "selected_family_key",
+                    "selected_focus_key",
+                    "selected_strategy_key",
+                    "source_finding_ids",
+                    "coverage_proof",
+                    "route_reason_codes",
+                )
+            }
+            if (
+                not isinstance(route_fields["selected_family_key"], str)
+                or not isinstance(route_fields["selected_focus_key"], str)
+                or not isinstance(route_fields["source_finding_ids"], list)
+                or not isinstance(route_fields["coverage_proof"], dict)
+                or not isinstance(route_fields["route_reason_codes"], list)
+            ):
+                raise StageExecutionStateConflict(
+                    "targeted_review_route_evidence_missing"
+                )
+            next_input.update(route_fields)
         input_sha = hashlib.sha256(
             json.dumps(next_input, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()

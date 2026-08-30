@@ -11,6 +11,10 @@ import httpx
 from apps.backend.core.config import settings
 
 
+class GatewayResponseParseError(RuntimeError):
+    """An HTTP response arrived but could not be normalized as Gateway JSON."""
+
+
 class GatewayClient:
     """通过 OpenAI 兼容协议调用 ms-ai-platform 的网关客户端。"""
 
@@ -92,16 +96,24 @@ class GatewayClient:
                 headers=headers,
             )
             response.raise_for_status()
-            body = response.json()
+            try:
+                body = response.json()
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise GatewayResponseParseError(
+                    "provider_response_payload_invalid"
+                ) from exc
 
         if not isinstance(body, dict):
-            raise RuntimeError("ms-ai-platform 返回格式错误：预期 JSON 对象")
+            raise GatewayResponseParseError("provider_response_payload_invalid")
 
-        request_id = self._resolve_request_id(
-            response_headers=response.headers,
-            body=body,
-            outbound_request_id=outbound_request_id,
-        )
+        try:
+            request_id = self._resolve_request_id(
+                response_headers=response.headers,
+                body=body,
+                outbound_request_id=outbound_request_id,
+            )
+        except RuntimeError as exc:
+            raise GatewayResponseParseError("provider_request_id_missing") from exc
         return {
             "request_id": request_id,
             "body": body,

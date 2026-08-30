@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, load_only
 
 from apps.backend.core.crud import DalBase
 from apps.backend.models.image import Image
@@ -82,6 +83,102 @@ class ImageDal(DalBase):
             v_order_field="sequence_no",
             v_return_objs=True,
         )
+
+    async def list_ready_for_series_ids(self, series_ids: list[str]) -> list[Image]:
+        normalized = sorted({item.strip() for item in series_ids if item.strip()})
+        if not normalized:
+            return []
+        return await self.get_datas(
+            limit=0,
+            v_where=[
+                self.model.series_id.in_(normalized),
+                self.model.status == "ready",
+            ],
+            v_order_field="sequence_no",
+            v_return_objs=True,
+        )
+
+    async def page_for_series(
+        self,
+        *,
+        series_id: str,
+        status: str | None,
+        image_role: str | None,
+        current_only: bool,
+        page: int,
+        limit: int,
+    ) -> tuple[list[Image], int]:
+        if page < 1 or limit < 1 or limit > 100:
+            raise ValueError("image_page_invalid")
+        where = [self.model.series_id == series_id]
+        if status is not None:
+            where.append(self.model.status == status)
+        if image_role is not None:
+            where.append(self.model.image_role == image_role)
+        if current_only:
+            newer = aliased(Image)
+            where.extend(
+                [
+                    self.model.status.not_in({"superseded", "deleted"}),
+                    ~exists(
+                        select(newer.id).where(
+                            newer.series_id == self.model.series_id,
+                            newer.logical_image_key == self.model.logical_image_key,
+                            newer.image_version_no > self.model.image_version_no,
+                        )
+                    ),
+                ]
+            )
+        start = select(self.model).order_by(
+            self.model.sequence_no,
+            self.model.logical_image_key,
+            self.model.image_version_no.desc(),
+            self.model.id,
+        )
+        rows, total = await self.get_datas(
+            page=page,
+            limit=limit,
+            v_start_sql=start,
+            v_where=where,
+            v_options=[
+                load_only(
+                    self.model.id,
+                    self.model.series_id,
+                    self.model.source_image_id,
+                    self.model.logical_image_key,
+                    self.model.image_version_no,
+                    self.model.supersedes_image_id,
+                    self.model.sequence_no,
+                    self.model.image_role,
+                    self.model.image_kind,
+                    self.model.metadata_schema_version,
+                    self.model.file_format,
+                    self.model.upload_mode,
+                    self.model.expected_part_count,
+                    self.model.expected_sha256,
+                    self.model.expected_size_bytes,
+                    self.model.declared_content_type,
+                    self.model.content_type,
+                    self.model.sha256,
+                    self.model.size_bytes,
+                    self.model.sop_instance_uid,
+                    self.model.sop_class_uid,
+                    self.model.instance_no,
+                    self.model.projection,
+                    self.model.technical_metadata_json,
+                    self.model.status,
+                    self.model.state_version,
+                    self.model.error_code,
+                    self.model.upload_expires_at,
+                    self.model.verified_at,
+                    self.model.created_at,
+                    self.model.updated_at,
+                )
+            ],
+            v_return_count=True,
+            v_return_objs=True,
+        )
+        return rows, total
 
     async def list_validation_candidates(
         self, *, now: datetime, limit: int

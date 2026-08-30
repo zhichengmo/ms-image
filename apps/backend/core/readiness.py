@@ -128,94 +128,185 @@ async def _broker_domain_ready(
         )
 
 
-async def build_readiness(redis_manager: RedisManager) -> dict[str, Any]:
-    timeout = settings.READINESS_TIMEOUT_SECONDS
+def _broker_timeout_result(*, error_code: str) -> tuple[
+    bool,
+    str,
+    str,
+    dict[str, int | bool | None],
+]:
+    return (
+        False,
+        error_code,
+        "timeout",
+        {
+            "consumer_count": None,
+            "queue_message_count": None,
+            "dead_letter_message_count": None,
+            "oldest_message_age_seconds": None,
+            "oldest_message_age_supported": False,
+        },
+    )
+
+
+async def _redis_dependency_ready(
+    redis_manager: RedisManager,
+    *,
+    timeout: float,
+) -> tuple[bool, str | None]:
     try:
-        redis_ready = await asyncio.wait_for(
+        ready = await asyncio.wait_for(
             redis_manager.check_readiness(), timeout=timeout
         )
-        redis_error = redis_manager.last_error
+        return ready, redis_manager.last_error
     except asyncio.TimeoutError:
-        redis_ready = False
-        redis_error = "redis_timeout"
+        return False, "redis_timeout"
 
+
+async def _database_dependency_ready(
+    engine: Any,
+    *,
+    unavailable_error: str,
+    timeout_error: str,
+    timeout: float,
+) -> tuple[bool, str | None]:
     try:
-        database_ready, database_error = await asyncio.wait_for(
-            _database_ready(async_engine, error_code="database_unavailable"),
+        return await asyncio.wait_for(
+            _database_ready(engine, error_code=unavailable_error),
             timeout=timeout,
         )
     except asyncio.TimeoutError:
-        database_ready, database_error = False, "database_timeout"
+        return False, timeout_error
+
+
+async def _broker_dependency_ready(
+    topology: BrokerTopology,
+    *,
+    timeout_error: str,
+    timeout: float,
+) -> tuple[bool, str | None, str, dict[str, int | bool | None]]:
     try:
-        evaluation_database_ready, evaluation_database_error = await asyncio.wait_for(
-            _database_ready(
-                evaluation_async_engine,
-                error_code="evaluation_database_unavailable",
-            ),
-            timeout=timeout,
+        return await asyncio.wait_for(
+            _broker_domain_ready(topology), timeout=timeout
         )
     except asyncio.TimeoutError:
-        evaluation_database_ready, evaluation_database_error = (
-            False,
-            "evaluation_database_timeout",
+        return _broker_timeout_result(error_code=timeout_error)
+
+
+async def build_runtime_readiness(redis_manager: RedisManager) -> dict[str, Any]:
+    """Return readiness for the online Runtime plane only.
+
+    Evaluation has an isolated database and worker domain. Its availability
+    must not remove the upload/diagnosis Runtime from service or add its
+    connection timeout to the Runtime probe.
+    """
+    timeout = settings.READINESS_TIMEOUT_SECONDS
+    redis_ready, redis_error = await _redis_dependency_ready(
+        redis_manager,
+        timeout=timeout,
+    )
+    database_ready, database_error = await _database_dependency_ready(
+        async_engine,
+        unavailable_error="database_unavailable",
+        timeout_error="database_timeout",
+        timeout=timeout,
+    )
+    imaging_topology = topology_for("imaging", source=settings)
+    (
+        imaging_broker_ready,
+        imaging_broker_error,
+        imaging_broker_state,
+        imaging_broker_metrics,
+    ) = await _broker_dependency_ready(
+        imaging_topology,
+        timeout_error="imaging_broker_timeout",
+        timeout=timeout,
+    )
+
+    provider = await _provider_ready()
+    transport_ready = provider["transport"]["ready"]
+    receipt_ready = provider["receipt"]["ready"]
+    imaging_worker_ready = imaging_broker_ready if settings.BROKER_ENABLED else False
+    online_engineering_ready = database_ready and redis_ready and imaging_worker_ready
+    medical_provider_ready = (
+        online_engineering_ready and transport_ready and receipt_ready
+    )
+    return {
+        "ready": online_engineering_ready,
+        "readiness_scope": "online_runtime",
+        "service_mode": "worker" if settings.BROKER_ENABLED else "api_only",
+        "worker_ready": imaging_worker_ready,
+        "online_engineering_ready": online_engineering_ready,
+        "engineering_worker_ready": online_engineering_ready,
+        "medical_provider_ready": medical_provider_ready,
+        "components": {
+            "database": {
+                "ready": database_ready,
+                "error": database_error,
+            },
+            "redis": {
+                "ready": redis_ready,
+                "error": redis_error,
+            },
+            "imaging_broker": {
+                "ready": imaging_broker_ready if settings.BROKER_ENABLED else None,
+                "required": settings.BROKER_ENABLED,
+                "state": imaging_broker_state,
+                "error": imaging_broker_error,
+                **imaging_broker_metrics,
+            },
+            "provider": {
+                "required": False,
+                **provider,
+            },
+        },
+        "broker_enabled": settings.BROKER_ENABLED,
+    }
+
+
+async def build_readiness(redis_manager: RedisManager) -> dict[str, Any]:
+    """Return the legacy aggregate readiness used by Runtime Admin views."""
+    timeout = settings.READINESS_TIMEOUT_SECONDS
+    redis_ready, redis_error = await _redis_dependency_ready(
+        redis_manager,
+        timeout=timeout,
+    )
+    database_ready, database_error = await _database_dependency_ready(
+        async_engine,
+        unavailable_error="database_unavailable",
+        timeout_error="database_timeout",
+        timeout=timeout,
+    )
+    evaluation_database_ready, evaluation_database_error = (
+        await _database_dependency_ready(
+            evaluation_async_engine,
+            unavailable_error="evaluation_database_unavailable",
+            timeout_error="evaluation_database_timeout",
+            timeout=timeout,
         )
+    )
 
     imaging_topology = topology_for("imaging", source=settings)
     evaluation_topology = topology_for("evaluation", source=settings)
-    try:
-        (
-            imaging_broker_ready,
-            imaging_broker_error,
-            imaging_broker_state,
-            imaging_broker_metrics,
-        ) = await asyncio.wait_for(
-            _broker_domain_ready(imaging_topology), timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        (
-            imaging_broker_ready,
-            imaging_broker_error,
-            imaging_broker_state,
-            imaging_broker_metrics,
-        ) = (
-            False,
-            "imaging_broker_timeout",
-            "timeout",
-            {
-                "consumer_count": None,
-                "queue_message_count": None,
-                "dead_letter_message_count": None,
-                "oldest_message_age_seconds": None,
-                "oldest_message_age_supported": False,
-            },
-        )
-    try:
-        (
-            evaluation_broker_ready,
-            evaluation_broker_error,
-            evaluation_broker_state,
-            evaluation_broker_metrics,
-        ) = await asyncio.wait_for(
-            _broker_domain_ready(evaluation_topology), timeout=timeout
-        )
-    except asyncio.TimeoutError:
-        (
-            evaluation_broker_ready,
-            evaluation_broker_error,
-            evaluation_broker_state,
-            evaluation_broker_metrics,
-        ) = (
-            False,
-            "evaluation_broker_timeout",
-            "timeout",
-            {
-                "consumer_count": None,
-                "queue_message_count": None,
-                "dead_letter_message_count": None,
-                "oldest_message_age_seconds": None,
-                "oldest_message_age_supported": False,
-            },
-        )
+    (
+        imaging_broker_ready,
+        imaging_broker_error,
+        imaging_broker_state,
+        imaging_broker_metrics,
+    ) = await _broker_dependency_ready(
+        imaging_topology,
+        timeout_error="imaging_broker_timeout",
+        timeout=timeout,
+    )
+    (
+        evaluation_broker_ready,
+        evaluation_broker_error,
+        evaluation_broker_state,
+        evaluation_broker_metrics,
+    ) = await _broker_dependency_ready(
+        evaluation_topology,
+        timeout_error="evaluation_broker_timeout",
+        timeout=timeout,
+    )
 
     provider = await _provider_ready()
     transport_ready = provider["transport"]["ready"]

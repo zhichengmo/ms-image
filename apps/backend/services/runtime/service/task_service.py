@@ -6,22 +6,35 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.core.ai.config_contract import (
     TASK_REQUEST_SNAPSHOT_V2,
+    TASK_REQUEST_SNAPSHOT_V3,
     activation_slot_sha256,
     is_v2_config,
     legacy_activation_slot,
 )
+from apps.backend.core.ai.clinical_context import freeze_clinical_context
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
     normalize_gateway_profile,
 )
 from apps.backend.core.ai.prompting.contracts import sha256_json
 from apps.backend.core.contexts import CallerContext
+from apps.backend.core.config import settings
+from apps.backend.core.imaging.manifest import (
+    SERIES_IMAGE_MANIFEST_V2,
+    ManifestContractError,
+    build_series_manifest,
+    build_series_manifest_legacy,
+    build_study_manifest,
+)
 from apps.backend.core.pipeline import (
     ZERO_MODEL_PROFILE,
+    XRAY_PRIMARY_PROFILE_V2,
+    XRAY_TARGETED_REVIEW_PROFILE_V2,
     build_default_registry,
     compile_profile_contract,
 )
 from apps.backend.crud.ai_config_record import AIConfigRecordDal
+from apps.backend.crud.image import ImageDal
 from apps.backend.crud.outbox import OutboxDal
 from apps.backend.crud.series import SeriesDal
 from apps.backend.crud.session import SessionDal
@@ -29,7 +42,14 @@ from apps.backend.crud.stage_checkpoint import StageCheckpointDal
 from apps.backend.crud.study import StudyDal
 from apps.backend.crud.task import TaskDal
 from apps.backend.models.imaging_base import new_opaque_id
-from apps.backend.schemas.task import TaskCreate, TaskResponse
+from apps.backend.schemas.task import (
+    TaskCreate,
+    TaskClinicalContext,
+    TaskPageQuery,
+    TaskPageResult,
+    TaskResponse,
+    TaskStatusResponse,
+)
 
 
 class TaskServiceError(ValueError):
@@ -54,14 +74,23 @@ class TaskIdempotencyConflictError(TaskServiceError):
 
 class TaskService:
     ZERO_MODEL_CONFIG_KEY = "zero_model_replay"
-    DIAGNOSE_CONFIG_KEY = "xray_diagnose"
+    DIAGNOSE_CONFIG_KEYS = {
+        "cat": "xray_diagnose_cat",
+        "dog": "xray_diagnose_dog",
+    }
+    DIAGNOSE_PROMPT_KEYS = {
+        "cat": "xray_cat_primary",
+        "dog": "xray_dog_primary",
+    }
+    TERMINAL_EXECUTION_STATUSES = TaskDal.TERMINAL_EXECUTION_STATUSES
     TASK_CONFIG_KEYS = {
         "replay": ZERO_MODEL_CONFIG_KEY,
-        "diagnose": DIAGNOSE_CONFIG_KEY,
     }
     TASK_PROFILES = {
         "replay": frozenset({ZERO_MODEL_PROFILE}),
-        "diagnose": frozenset({"xray_primary_v1", "xray_targeted_review_v1"}),
+        "diagnose": frozenset(
+            {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+        ),
     }
 
     def __init__(self, db: AsyncSession):
@@ -69,6 +98,7 @@ class TaskService:
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
         self.config_dal = AIConfigRecordDal(db)
+        self.image_dal = ImageDal(db)
         self.task_dal = TaskDal(db)
         self.stage_dal = StageCheckpointDal(db)
         self.outbox_dal = OutboxDal(db)
@@ -81,18 +111,31 @@ class TaskService:
     async def create_task(
         self, *, payload: TaskCreate, caller: CallerContext
     ) -> TaskResponse:
-        config_key = self.TASK_CONFIG_KEYS.get(payload.task_type)
+        config_key = self._config_key_for_task(
+            task_type=payload.task_type,
+            species=payload.species,
+        )
         allowed_profiles = self.TASK_PROFILES.get(payload.task_type)
         if config_key is None or allowed_profiles is None:
             raise TaskStateConflictError("task_type_not_supported")
         study = await self.study_dal.get_by_id(payload.study_id)
         if study is None:
             raise TaskNotFoundError("study_not_found")
-        session = await self.session_dal.get_by_id(study.session_id)
+        session = await self.session_dal.get_by_id_for_update(study.session_id)
         if session is None:
             raise TaskNotFoundError("session_not_found")
         if session.requester_id != caller.subject_id:
             raise TaskAccessDeniedError("task_access_denied")
+        business_key = self._sha(
+            {
+                "requester_id": caller.subject_id,
+                "request_id": payload.request_id,
+                "task_type": payload.task_type,
+            }
+        )
+        existing = await self.task_dal.get_by_business_key(business_key)
+        if session.status not in {"open", "processing"} and existing is None:
+            raise TaskStateConflictError("session_not_accepting_tasks")
         if (
             study.status != "ready"
             or study.revision_id != payload.study_revision_id
@@ -106,6 +149,11 @@ class TaskService:
         )
         if config is None:
             raise TaskStateConflictError("task_config_not_active")
+        self._validate_species_config_binding(
+            config=config,
+            task_type=payload.task_type,
+            species=payload.species,
+        )
         profile_key, contract, profile_sha = self._validate_assignable_config(
             config=config,
             allowed_profiles=allowed_profiles,
@@ -113,6 +161,9 @@ class TaskService:
         first_definition = contract["stages"][0]
 
         series = await self.series_dal.list_for_study(study.id)
+        ready_images = await self.image_dal.list_ready_for_series_ids(
+            [item.id for item in series]
+        )
         run_mode = "replay" if payload.task_type == "replay" else "validation_only"
         report_required = payload.task_type == "diagnose"
         snapshot = self._build_request_snapshot(
@@ -123,16 +174,10 @@ class TaskService:
             compiled_profile=contract,
             task_type=payload.task_type,
             species=payload.species,
+            clinical_context=payload.clinical_context,
+            series_images=ready_images,
         )
         request_sha = self._sha(snapshot)
-        business_key = self._sha(
-            {
-                "requester_id": caller.subject_id,
-                "request_id": payload.request_id,
-                "task_type": payload.task_type,
-            }
-        )
-        existing = await self.task_dal.get_by_business_key(business_key)
         if existing is not None:
             self._ensure_idempotent_task(
                 task=existing,
@@ -255,6 +300,42 @@ class TaskService:
             raise TaskStateConflictError("first_stage_event_conflict")
         return self._response(task)
 
+    @classmethod
+    def _config_key_for_task(
+        cls,
+        *,
+        task_type: str,
+        species: str | None,
+    ) -> str | None:
+        if task_type == "diagnose":
+            config_key = cls.DIAGNOSE_CONFIG_KEYS.get(species or "")
+            if config_key is None:
+                raise TaskStateConflictError("task_species_snapshot_invalid")
+            return config_key
+        return cls.TASK_CONFIG_KEYS.get(task_type)
+
+    @classmethod
+    def _validate_species_config_binding(
+        cls,
+        *,
+        config,
+        task_type: str,
+        species: str | None,
+    ) -> None:
+        if task_type != "diagnose":
+            return
+        expected_config_key = cls.DIAGNOSE_CONFIG_KEYS.get(species or "")
+        expected_prompt_key = cls.DIAGNOSE_PROMPT_KEYS.get(species or "")
+        if (
+            expected_config_key is None
+            or expected_prompt_key is None
+            or config.config_key != expected_config_key
+            or config.prompt_key != expected_prompt_key
+            or config.profile_key
+            not in {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+        ):
+            raise TaskStateConflictError("task_config_invalid")
+
     async def _get_active_config(
         self,
         *,
@@ -263,6 +344,17 @@ class TaskService:
         task_type: str,
     ):
         """Resolve the v2 active slot first and retain v1 read compatibility."""
+        experiment_scope_key = settings.XRAY_TARGETED_EXPERIMENT_SCOPE_KEY.strip()
+        if task_type == "diagnose" and experiment_scope_key:
+            return await self.config_dal.get_active(
+                activation_slot_sha256(
+                    config_key=config_key,
+                    modality_type=modality_type,
+                    task_type=task_type,
+                    activation_scope="experiment",
+                    scope_key=experiment_scope_key,
+                )
+            )
         v2_slot = activation_slot_sha256(
             config_key=config_key,
             modality_type=modality_type,
@@ -299,11 +391,10 @@ class TaskService:
                 gateway_profile = normalize_gateway_profile(config.gateway_profile_json)
             except GatewayContractError as exc:
                 raise TaskStateConflictError(str(exc)) from exc
-            if (
-                capability_manifest.get("provider_disabled")
-                is not (not gateway_profile["provider_enabled"])
-                or capability_manifest.get("gateway_profile_sha256")
-                != sha256_json(gateway_profile)
+            if capability_manifest.get("provider_disabled") is not (
+                not gateway_profile["provider_enabled"]
+            ) or capability_manifest.get("gateway_profile_sha256") != sha256_json(
+                gateway_profile
             ):
                 raise TaskStateConflictError("task_config_gateway_profile_mismatch")
             profile_key = config.profile_key
@@ -334,7 +425,9 @@ class TaskService:
             ):
                 raise TaskStateConflictError("task_config_invalid")
             pipeline = config.compiled_pipeline_json
-            profile_key = pipeline.get("profile_key") if isinstance(pipeline, dict) else None
+            profile_key = (
+                pipeline.get("profile_key") if isinstance(pipeline, dict) else None
+            )
 
         if profile_key not in allowed_profiles:
             raise TaskStateConflictError("task_profile_not_allowed")
@@ -365,6 +458,8 @@ class TaskService:
         compiled_profile: dict,
         task_type: str,
         species: str | None,
+        clinical_context: TaskClinicalContext | None = None,
+        series_images: list | None = None,
     ) -> dict:
         """Freeze the active Config identity once, without dereferencing sources later."""
         is_config_v2 = is_v2_config(config)
@@ -373,7 +468,22 @@ class TaskService:
             # Reject it before durable Task/Stage/Outbox creation instead of
             # persisting a v2 snapshot the XRay Prompt command would reject.
             raise TaskStateConflictError("task_species_snapshot_invalid")
+        if task_type != "diagnose" and clinical_context is not None:
+            raise TaskStateConflictError("task_clinical_context_diagnose_only")
+        frozen_clinical_context = freeze_clinical_context(
+            clinical_context.model_dump(mode="json")
+            if clinical_context is not None
+            else None
+        )
 
+        legacy_series_snapshot = [
+            {
+                "series_id": item.id,
+                "manifest_sha256": item.manifest_sha256,
+                "actual_image_count": item.actual_image_count,
+            }
+            for item in series
+        ]
         snapshot = {
             "study_id": study.id,
             "study_revision_id": study.revision_id,
@@ -381,14 +491,7 @@ class TaskService:
             # Replay preserves its legacy compatibility value. Diagnose has
             # already been fail-closed above, regardless of Config generation.
             "species": species if task_type == "diagnose" else species or "unknown",
-            "series": [
-                {
-                    "series_id": item.id,
-                    "manifest_sha256": item.manifest_sha256,
-                    "actual_image_count": item.actual_image_count,
-                }
-                for item in series
-            ],
+            "series": legacy_series_snapshot,
             "ai_config_id": config.id,
             "config_key": config.config_key,
             "config_version": config.version,
@@ -396,11 +499,79 @@ class TaskService:
             "release_fingerprint": config.release_fingerprint,
             "profile_key": profile_key,
             "compiled_profile": compiled_profile,
+            **frozen_clinical_context.snapshot_fields(),
         }
         if is_config_v2:
+            snapshot_contract_version = TASK_REQUEST_SNAPSHOT_V3
+            if series_images is not None:
+                try:
+                    study_manifest = build_study_manifest(series)
+                    if study_manifest.sha256 != study.resolved_manifest_sha256:
+                        raise TaskStateConflictError(
+                            "task_study_manifest_snapshot_mismatch"
+                        )
+                    images_by_series: dict[str, list] = {
+                        item["series_id"]: [] for item in study_manifest.items
+                    }
+                    for image in series_images:
+                        if image.series_id not in images_by_series:
+                            raise TaskStateConflictError(
+                                "task_series_image_scope_mismatch"
+                            )
+                        images_by_series[image.series_id].append(image)
+                    rows_by_id = {item.id: item for item in series}
+                    frozen_series: list[dict] = []
+                    manifest_contracts: set[str] = set()
+                    for study_item in study_manifest.items:
+                        series_id = study_item["series_id"]
+                        row = rows_by_id[series_id]
+                        ready_images = images_by_series[series_id]
+                        image_manifest = build_series_manifest(ready_images)
+                        legacy_manifest = build_series_manifest_legacy(ready_images)
+                        if len(image_manifest.items) != row.actual_image_count:
+                            raise TaskStateConflictError(
+                                "task_series_manifest_snapshot_mismatch"
+                            )
+                        d1_match = image_manifest.sha256 == row.manifest_sha256
+                        legacy_match = legacy_manifest.sha256 == row.manifest_sha256
+                        if not d1_match and not legacy_match:
+                            raise TaskStateConflictError(
+                                "task_series_manifest_snapshot_mismatch"
+                            )
+                        if d1_match != legacy_match:
+                            manifest_contracts.add("d1" if d1_match else "legacy")
+                        frozen_series.append(
+                            {
+                                "series_id": series_id,
+                                "series_key": study_item["series_key"],
+                                "series_no": study_item["series_no"],
+                                "manifest_contract_version": (SERIES_IMAGE_MANIFEST_V2),
+                                "manifest_sha256": image_manifest.sha256,
+                                "actual_image_count": len(image_manifest.items),
+                                "ordered_images": image_manifest.as_list(),
+                            }
+                        )
+                    if len(manifest_contracts) > 1:
+                        raise TaskStateConflictError(
+                            "task_series_manifest_snapshot_mismatch"
+                        )
+                    if manifest_contracts == {"legacy"}:
+                        snapshot_contract_version = TASK_REQUEST_SNAPSHOT_V2
+                    else:
+                        snapshot["series"] = frozen_series
+                except ManifestContractError as exc:
+                    raise TaskStateConflictError(str(exc)) from exc
+            if (
+                profile_key
+                in {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+                and snapshot_contract_version != TASK_REQUEST_SNAPSHOT_V3
+            ):
+                raise TaskStateConflictError(
+                    "task_result_contract_requires_snapshot_v3"
+                )
             snapshot.update(
                 {
-                    "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V2,
+                    "snapshot_contract_version": snapshot_contract_version,
                     "config_contract_version": config.config_contract_version,
                     "prompt_content_sha256": config.prompt_content_sha256,
                     "model_snapshot_sha256": config.model_snapshot_sha256,
@@ -419,7 +590,9 @@ class TaskService:
             raise TaskStateConflictError("task_config_v1_bundle_invalid")
         prompt_bundle_sha = prompt_bundle.get("bundle_sha256")
         schema_bundle_sha = schema_bundle.get("bundle_sha256")
-        if not isinstance(prompt_bundle_sha, str) or not isinstance(schema_bundle_sha, str):
+        if not isinstance(prompt_bundle_sha, str) or not isinstance(
+            schema_bundle_sha, str
+        ):
             raise TaskStateConflictError("task_config_v1_bundle_invalid")
         snapshot.update(
             {
@@ -449,6 +622,73 @@ class TaskService:
             raise TaskAccessDeniedError("task_access_denied")
         return self._response(task)
 
+    async def page_tasks(
+        self, *, query: TaskPageQuery, caller: CallerContext
+    ) -> TaskPageResult:
+        study = None
+        study_session = None
+        if query.study_id is not None:
+            study = await self.study_dal.get_by_id(query.study_id)
+            if study is None:
+                raise TaskNotFoundError("study_not_found")
+            study_session = await self.session_dal.get_by_id(study.session_id)
+            if study_session is None:
+                raise TaskNotFoundError("session_not_found")
+            if study_session.requester_id != caller.subject_id:
+                raise TaskAccessDeniedError("task_access_denied")
+
+        if query.session_id is not None:
+            session = (
+                study_session
+                if study_session is not None and study_session.id == query.session_id
+                else await self.session_dal.get_by_id(query.session_id)
+            )
+            if session is None:
+                raise TaskNotFoundError("session_not_found")
+            if session.requester_id != caller.subject_id:
+                raise TaskAccessDeniedError("task_access_denied")
+            if study is not None and study.session_id != session.id:
+                raise TaskStateConflictError("task_query_scope_mismatch")
+
+        rows, total = await self.task_dal.page_for_owner(
+            requester_id=caller.subject_id,
+            session_id=query.session_id,
+            study_id=query.study_id,
+            execution_status=query.execution_status,
+            task_type=query.task_type,
+            created_from=query.created_from,
+            created_to=query.created_to,
+            page=query.page,
+            limit=query.page_size,
+        )
+        return TaskPageResult(
+            data=[TaskStatusResponse.model_validate(item) for item in rows],
+            total=total,
+            page=query.page,
+            limit=query.page_size,
+        )
+
+    async def has_non_terminal_tasks_for_session(self, *, session_id: str) -> bool:
+        tasks = await self.task_dal.list_non_terminal_for_session(session_id=session_id)
+        return bool(tasks)
+
+    async def request_cancellation_for_session(
+        self, *, session_id: str, requester_id: str, reason: str
+    ) -> int:
+        tasks = await self.task_dal.list_non_terminal_for_session(
+            session_id=session_id,
+            for_update=True,
+        )
+        for task in tasks:
+            if task.requester_id != requester_id:
+                raise TaskStateConflictError("session_task_owner_conflict")
+            await self._request_cancel_locked_task(
+                task=task,
+                requested_by_id=requester_id,
+                reason=reason,
+            )
+        return len(tasks)
+
     async def cancel_task(
         self,
         *,
@@ -465,22 +705,41 @@ class TaskService:
         if task.cancel_requested_at is not None:
             return self._response(task)
         if (
-            task.execution_status in {"completed", "failed", "cancelled", "dead_letter"}
+            task.execution_status in self.TERMINAL_EXECUTION_STATUSES
             or task.state_version != expected_version
         ):
             raise TaskStateConflictError("task_cancel_conflict")
+        updated = await self._request_cancel_locked_task(
+            task=task,
+            requested_by_id=caller.subject_id,
+            reason=reason,
+        )
+        return self._response(updated)
+
+    async def _request_cancel_locked_task(
+        self,
+        *,
+        task,
+        requested_by_id: str,
+        reason: str | None,
+    ):
+        if task.cancel_requested_at is not None:
+            return task
+        if task.execution_status in self.TERMINAL_EXECUTION_STATUSES:
+            raise TaskStateConflictError("task_cancel_conflict")
+        normalized_reason = (reason or "").strip() or "caller_cancelled"
         updated = await self.task_dal.cas_update(
             task_id=task.id,
-            expected_version=expected_version,
+            expected_version=task.state_version,
             values={
-                "cancel_requested_by_id": caller.subject_id,
-                "cancel_reason": (reason or "caller_cancelled")[:200],
+                "cancel_requested_by_id": requested_by_id,
+                "cancel_reason": normalized_reason[:200],
                 "cancel_requested_at": datetime.utcnow(),
             },
         )
         if updated is None:
             raise TaskStateConflictError("task_cancel_conflict")
-        return self._response(updated)
+        return updated
 
     @staticmethod
     def _sha(value: dict) -> str:

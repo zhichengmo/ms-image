@@ -71,4 +71,13 @@ class XRayTargetedReviewStageHandler:
         )
 
 
-__all__ = ["XRayTargetedReviewStageHandler"]
+class XRayTargetedReviewV2StageHandler(XRayTargetedReviewStageHandler):
+    """Version-isolated v2 targeted handler; it does not merge medical results."""
+
+    handler_version = "v2"
+
+
+__all__ = [
+    "XRayTargetedReviewStageHandler",
+    "XRayTargetedReviewV2StageHandler",
+]

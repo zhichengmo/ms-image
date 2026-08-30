@@ -315,11 +315,18 @@ class DalBase:
         await self.db.flush()
         if result.rowcount != 1:
             return None
+        # ``v_where`` contains pre-update CAS guards.  A successful mutation
+        # may intentionally change those guarded fields (for example clearing
+        # a lease owner or moving ``running`` to ``completed``), so reusing the
+        # guards for readback would turn a committed row match into a false
+        # ``None`` result.  Refresh only the mutated row: expiring the whole
+        # identity map would also expire unrelated Task/Stage objects that the
+        # same Service transaction still needs and can trigger async lazy I/O
+        # from synchronous ORM attribute access.
         return await self.get_data(
             data_id=data_id,
-            v_where=v_where,
+            v_start_sql=select(self.model).execution_options(populate_existing=True),
             v_return_none=True,
-            v_expire_all=True,
         )
 
     async def conditional_update(

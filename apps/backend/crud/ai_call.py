@@ -25,6 +25,15 @@ class AICallDal(DalBase):
     async def get_by_id(self, call_id: str) -> AICall | None:
         return await self.get_data(data_id=call_id, v_return_none=True)
 
+    async def get_by_id_for_update(self, call_id: str) -> AICall | None:
+        return await self.get_data(
+            data_id=call_id,
+            v_start_sql=select(self.model).with_for_update().execution_options(
+                populate_existing=True
+            ),
+            v_return_none=True,
+        )
+
     async def get_by_logical_key(self, logical_call_key: str) -> AICall | None:
         return await self.get_data(logical_call_key=logical_call_key, v_return_none=True)
 
@@ -34,9 +43,10 @@ class AICallDal(DalBase):
         """Use a current, locking read before a budget reservation/create pair."""
         return await self.get_data(
             logical_call_key=logical_call_key,
-            v_start_sql=select(self.model).with_for_update(),
+            v_start_sql=select(self.model).with_for_update().execution_options(
+                populate_existing=True
+            ),
             v_return_none=True,
-            v_expire_all=True,
         )
 
     async def operational_snapshot(self) -> dict[str, Any]:

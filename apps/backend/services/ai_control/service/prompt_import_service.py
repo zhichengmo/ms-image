@@ -60,6 +60,22 @@ class PromptImportService:
         self.prompt_service = PromptTemplateService(db)
         self._fetcher = fetcher
 
+    @staticmethod
+    def _resolve_variables(
+        *,
+        inferred_variables: dict[str, Any],
+        declared_variables: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if declared_variables is None:
+            return inferred_variables
+        inferred_names = set(inferred_variables["required"])
+        declared_names = set(declared_variables["required"]) | set(
+            declared_variables["optional"]
+        )
+        if declared_names != inferred_names:
+            raise AIControlValidationError("prompt_import_variables_mismatch")
+        return declared_variables
+
     async def _fetch_nacos(
         self,
         *,
@@ -227,9 +243,17 @@ class PromptImportService:
             raise AIControlValidationError("prompt_source_not_found")
         resolved_variant, data_id, record = resolved
         try:
-            content, variables = normalize_imported_prompt(record.template)
+            content, inferred_variables = normalize_imported_prompt(record.template)
         except PromptSourceError as exc:
             raise AIControlValidationError(str(exc)) from exc
+        variables = self._resolve_variables(
+            inferred_variables=inferred_variables,
+            declared_variables=(
+                payload.variables_json.model_dump(mode="json")
+                if payload.variables_json is not None
+                else None
+            ),
+        )
         message_contract = self._normalize_message_contract(
             payload.message_contract_json.model_dump(mode="json")
             if payload.message_contract_json is not None

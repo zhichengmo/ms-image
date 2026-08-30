@@ -5,11 +5,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from apps.backend.core.ai.config_contract import TASK_REQUEST_SNAPSHOT_V2
+from apps.backend.core.ai.config_contract import (
+    TASK_REQUEST_SNAPSHOT_V2,
+    TASK_REQUEST_SNAPSHOT_V3,
+)
+from apps.backend.core.ai.clinical_context import (
+    ClinicalContextContractError,
+    read_frozen_clinical_context,
+)
 from apps.backend.core.ai.prompting import (
     CompiledPrompt,
     PromptCompiler,
     PromptContractError,
+)
+from apps.backend.core.imaging.manifest import (
+    ManifestContractError,
+    validate_frozen_study_series,
 )
 
 
@@ -60,7 +71,10 @@ def build_primary_ai_request_command(*, task: Any, stage: Any) -> XRayPromptComm
         snapshot=snapshot,
         prompt_mode="primary",
     )
-    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+    if snapshot.get("snapshot_contract_version") in {
+        TASK_REQUEST_SNAPSHOT_V2,
+        TASK_REQUEST_SNAPSHOT_V3,
+    }:
         # v2 Configs own exactly one frozen Prompt body.  Prompt family data
         # is no longer a selection input; this command only transports safe
         # Task/Stage context to the strict renderer.
@@ -110,7 +124,10 @@ def build_targeted_ai_request_command(*, task: Any, stage: Any) -> XRayPromptCom
         "coverage_proof": stage_input.get("coverage_proof") or {},
         "route_reason_codes": stage_input.get("route_reason_codes") or [],
     }
-    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+    if snapshot.get("snapshot_contract_version") in {
+        TASK_REQUEST_SNAPSHOT_V2,
+        TASK_REQUEST_SNAPSHOT_V3,
+    }:
         # v2 keeps one frozen Prompt body, but the unique Family/Focus route is
         # still required evidence and must survive into rendering/audit inputs.
         return XRayPromptCommand(
@@ -140,20 +157,30 @@ def _base_context(
     snapshot: dict[str, Any],
     prompt_mode: str,
 ) -> dict[str, Any]:
+    snapshot_version = snapshot.get("snapshot_contract_version")
+    try:
+        clinical_context = read_frozen_clinical_context(snapshot).payload
+    except ClinicalContextContractError as exc:
+        raise PromptContractError(str(exc)) from exc
     series = snapshot.get("series") or []
-    ordered_image_refs = [
-        {
-            "series_ref": item.get("series_id"),
-            "manifest_sha256": item.get("manifest_sha256"),
-            "image_count": item.get("actual_image_count"),
-        }
-        for item in series
-        if isinstance(item, dict)
-    ]
+    if snapshot_version == TASK_REQUEST_SNAPSHOT_V3:
+        ordered_image_refs = _v3_ordered_image_refs(snapshot=snapshot)
+        view_positions = [item["projection"] for item in ordered_image_refs]
+    else:
+        ordered_image_refs = [
+            {
+                "series_ref": item.get("series_id"),
+                "manifest_sha256": item.get("manifest_sha256"),
+                "image_count": item.get("actual_image_count"),
+            }
+            for item in series
+            if isinstance(item, dict)
+        ]
+        view_positions = snapshot.get("view_positions") or []
     if prompt_mode not in {"primary", "targeted"}:
         raise PromptContractError("prompt_mode_invalid")
     species = snapshot.get("species")
-    if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V2:
+    if snapshot_version in {TASK_REQUEST_SNAPSHOT_V2, TASK_REQUEST_SNAPSHOT_V3}:
         # New XRay snapshots must carry the caller-supplied, frozen species.
         # Never turn a missing/corrupted v2 value into an inferred fallback.
         if species not in {"cat", "dog"}:
@@ -169,14 +196,43 @@ def _base_context(
         "ordered_image_refs": ordered_image_refs,
         "species": species,
         "anatomy_regions": snapshot.get("anatomy_regions") or [],
-        "view_positions": snapshot.get("view_positions") or [],
+        "view_positions": view_positions,
         "coverage": snapshot.get("coverage") or {},
         "technical_limitations": snapshot.get("technical_limitations") or [],
-        "clinical_context_allowlist": snapshot.get("clinical_context_allowlist") or {},
+        "clinical_context_allowlist": clinical_context,
         "technical_evidence_available": bool(
             snapshot.get("technical_evidence_available", False)
         ),
     }
+
+
+def _v3_ordered_image_refs(*, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    try:
+        series = validate_frozen_study_series(
+            snapshot.get("series"),
+            resolved_manifest_sha256=snapshot.get("resolved_manifest_sha256"),
+        )
+    except ManifestContractError as exc:
+        raise PromptContractError(str(exc)) from exc
+    refs: list[dict[str, Any]] = []
+    for series_item in series:
+        for item in series_item["ordered_images"]:
+            refs.append(
+                {
+                    "sequence_no": len(refs) + 1,
+                    "series_id": series_item["series_id"],
+                    "series_manifest_sha256": series_item["manifest_sha256"],
+                    "image_id": item["image_id"],
+                    "logical_image_key": item["logical_image_key"],
+                    "image_version_no": item["image_version_no"],
+                    "series_sequence_no": item["sequence_no"],
+                    "projection": item["projection"],
+                    "projection_provenance": item["projection_provenance"],
+                    "sha256": item["sha256"],
+                    "content_type": item["content_type"],
+                }
+            )
+    return refs
 
 
 __all__ = [

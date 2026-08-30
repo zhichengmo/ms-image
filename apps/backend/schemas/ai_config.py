@@ -8,7 +8,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.backend.core.ai.config_contract import AI_CONFIG_V2
-from apps.backend.schemas.ai_control import BudgetPolicyContract, CommandRequest, StateCommandRequest
+from apps.backend.core.pipeline import XRAY_TARGETED_REVIEW_PROFILE_V2
+from apps.backend.schemas.ai_control import (
+    BudgetPolicyContract,
+    CommandRequest,
+    StateCommandRequest,
+)
 from apps.backend.schemas.imaging_common import normalize_required_text
 
 
@@ -55,7 +60,14 @@ class AIConfigCreate(CommandRequest):
             raise ValueError("ai_config_global_scope_key_invalid")
         if self.activation_scope == "experiment" and self.scope_key == "global":
             raise ValueError("ai_config_experiment_scope_key_invalid")
-        if self.profile_key == "xray_targeted_review_v1" and self.activation_scope != "experiment":
+        if (
+            self.profile_key
+            in {
+                "xray_targeted_review_v1",
+                XRAY_TARGETED_REVIEW_PROFILE_V2,
+            }
+            and self.activation_scope != "experiment"
+        ):
             raise ValueError("targeted_profile_experiment_scope_required")
         return self
 
@@ -142,7 +154,9 @@ class AIConfigStateRequest(StateCommandRequest):
 
 
 class AIConfigActivateRequest(AIConfigStateRequest):
-    expected_current_active_id: str | None = Field(default=None, min_length=1, max_length=64)
+    expected_current_active_id: str | None = Field(
+        default=None, min_length=1, max_length=64
+    )
     expected_current_active_state_version: int | None = Field(default=None, ge=0)
     reason: str | None = Field(default=None, max_length=500)
 

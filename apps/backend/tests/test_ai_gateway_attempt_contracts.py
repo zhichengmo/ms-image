@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any
 
 import httpx
 import pytest
 from pydantic import ValidationError
 
+from apps.backend.core.ai.config_contract import TASK_REQUEST_SNAPSHOT_V3
 from apps.backend.core.ai.gateway.contracts import (
+    AI_IMAGE_RECEIPT_V2,
     GatewayContractError,
+    GatewayDefiniteResponseError,
     GatewayImageInput,
     GatewayRejectedError,
     GatewayRequest,
@@ -20,7 +24,7 @@ from apps.backend.core.ai.gateway.contracts import (
     schema_validate_result,
     validate_signed_image_url,
 )
-from apps.backend.core.ai.gateway_client import GatewayClient
+from apps.backend.core.ai.gateway_client import GatewayClient, GatewayResponseParseError
 from apps.backend.services.runtime.service.ai_request_service import AIRequestService
 from apps.backend.services.ai_control.service.prompt_source import (
     NacosPromptSourceClient,
@@ -34,6 +38,83 @@ SCHEMA = {
     "properties": {"result": {"type": "string"}},
     "additionalProperties": False,
 }
+
+
+def _complete_medical_result_v2() -> dict[str, Any]:
+    return {
+        "result_schema_version": "xray-complete-medical-result.v2",
+        "medical_status": "review_required",
+        "summary": "本次检查存在需要复核的影像学征象。",
+        "impression": "建议结合完整检查进行专业复核。",
+        "findings": [
+            {
+                "finding_id": "finding-1",
+                "label": "影像学征象",
+                "description": "可见需要复核的局部影像学征象。",
+                "anatomy_region": "thorax",
+                "laterality": "UNKNOWN",
+                "source_ref_ids": ["source-1"],
+            }
+        ],
+        "normal_basis": [],
+        "coverage": {
+            "status": "partial",
+            "assessed_regions": ["thorax"],
+            "missing_or_limited_views": [],
+        },
+        "families_not_assessed": [],
+        "limitations": [],
+        "review_reason": "该征象需要复核。",
+        "source_refs": [
+            {
+                "source_ref_id": "source-1",
+                "image_id": "image_1",
+                "series_id": "series_1",
+                "projection": "VD",
+                "manifest_sha256": "1" * 64,
+            }
+        ],
+        "targeted_candidate": None,
+    }
+
+
+def _image_receipt_v2() -> dict[str, Any]:
+    return {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": 1,
+        "images": [
+            {
+                "sequence_no": 1,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "series_sequence_no": 1,
+                "image_id": "image_1",
+                "logical_image_key": "logical_1",
+                "image_version_no": 1,
+                "projection": "VD",
+                "projection_provenance": {
+                    "source": "caller_declared",
+                    "schema_version": "xray-projection.v1",
+                },
+                "sha256": "a" * 64,
+                "size_bytes": 10,
+                "mime_type": "image/jpeg",
+            }
+        ],
+    }
+
+
+def _clinical_context_v1() -> dict[str, Any]:
+    return {
+        "contract_version": "xray-clinical-context.v1",
+        "source": {
+            "system": "ms-ai-fast",
+            "recorded_at": "2026-08-28T10:30:00+08:00",
+            "temporal_scope": "available_at_request",
+        },
+        "chief_complaint": "间歇性咳嗽三天",
+        "study_reason": "评估胸部影像",
+    }
 
 
 @pytest.fixture
@@ -103,6 +184,7 @@ def test_gateway_client_preserves_ms_ai_fast_platform_base_url() -> None:
         api_key="token",
     )
     assert client.base_url == "http://Platform.Example:80/api/v1"
+
 
 def test_gateway_request_sha_is_stable_without_secret_or_signed_url() -> None:
     first = _request(
@@ -202,7 +284,43 @@ async def test_gateway_client_falls_back_to_body_provider_id(
 
 
 @pytest.mark.anyio
-async def test_ai_request_network_builds_strict_payload_and_persists_only_audit_facts() -> None:
+async def test_gateway_client_classifies_invalid_http_json_as_definite_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="not-json",
+            headers={"x-request-id": "provider-request-1"},
+        )
+
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=httpx.MockTransport(handler),
+            **kwargs,
+        ),
+    )
+
+    with pytest.raises(
+        GatewayResponseParseError,
+        match="provider_response_payload_invalid",
+    ):
+        await GatewayClient(
+            base_url="https://platform.example/v1",
+            api_key="secret-token",
+        ).chat_completions(
+            {"model": "provider-model", "messages": [], "metadata": {}},
+            idempotency_key="idem-1",
+        )
+
+
+@pytest.mark.anyio
+async def test_ai_request_network_builds_strict_payload_and_persists_only_audit_facts() -> (
+    None
+):
     captured: dict[str, Any] = {}
     provider_body = {
         "id": "provider-body-id",
@@ -241,7 +359,7 @@ async def test_ai_request_network_builds_strict_payload_and_persists_only_audit_
     assert not hasattr(execution, "raw_response")
     assert "object_ref" not in result
     assert captured["idempotency_key"] == "idem-1"
-    assert captured["payload"]["strategy"] == "single"
+    assert captured["payload"]["strategy"] == "race"
     assert captured["payload"]["max_tokens"] == 64
     assert captured["payload"]["response_format"]["json_schema"]["strict"] is True
     assert captured["payload"]["metadata"] == {
@@ -269,12 +387,19 @@ async def test_ai_request_provider_reject_is_definite_failure() -> None:
         async def sign(self, **kwargs):
             return []
 
-    with pytest.raises(GatewayRejectedError, match="provider_http_401"):
+    with pytest.raises(GatewayRejectedError, match="provider_http_401") as raised:
         await AIRequestService.execute_gateway_attempt_network(
             network_plan=_network_plan(),
             gateway_client=FakeGateway(),
             image_signer=FakeSigner(),
         )
+    assert raised.value.image_manifest_sha256 == "b" * 64
+    assert raised.value.image_count_sent == 0
+    assert raised.value.image_receipt == {
+        "contract_version": "ai-image-receipt.v1",
+        "image_count": 0,
+        "images": [],
+    }
 
 
 @pytest.mark.anyio
@@ -337,6 +462,146 @@ async def test_ai_request_rejects_model_or_schema_mismatch(
         )
 
 
+@pytest.mark.anyio
+async def test_ai_request_preserves_v2_image_receipt_when_content_parse_fails() -> None:
+    signed_urls = (
+        "https://bucket.oss.example/one.jpg?signature=secret-one",
+        "https://bucket.oss.example/two.jpg?signature=secret-two",
+    )
+    image_inputs = (
+        {
+            "sequence_no": 1,
+            "series_id": "series_1",
+            "series_manifest_sha256": "1" * 64,
+            "series_sequence_no": 1,
+            "image_id": "image_1",
+            "logical_image_key": "logical_1",
+            "image_version_no": 1,
+            "projection": "VD",
+            "projection_provenance": "caller_declared",
+            "sha256": "a" * 64,
+            "size_bytes": 10,
+            "mime_type": "image/jpeg",
+        },
+        {
+            "sequence_no": 2,
+            "series_id": "series_1",
+            "series_manifest_sha256": "1" * 64,
+            "series_sequence_no": 2,
+            "image_id": "image_2",
+            "logical_image_key": "logical_2",
+            "image_version_no": 1,
+            "projection": "Lateral",
+            "projection_provenance": "caller_declared",
+            "sha256": "c" * 64,
+            "size_bytes": 20,
+            "mime_type": "image/jpeg",
+        },
+    )
+
+    class FakeSigner:
+        async def sign(self, **kwargs):
+            return [
+                GatewayImageInput(
+                    sequence_no=index,
+                    mime_type="image/jpeg",
+                    signed_url=signed_url,
+                )
+                for index, signed_url in enumerate(signed_urls, start=1)
+            ]
+
+    class FakeGateway:
+        async def chat_completions(self, payload, *, idempotency_key):
+            return {
+                "request_id": "provider-request-1",
+                "body": {
+                    "choices": [{"message": {"content": "{not json"}}],
+                    "model": "provider-model",
+                },
+            }
+
+    with pytest.raises(
+        GatewayDefiniteResponseError,
+        match="provider_response_json_invalid",
+    ) as raised:
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(
+                image_count_requested=2,
+                image_inputs=image_inputs,
+                snapshot_contract_version=TASK_REQUEST_SNAPSHOT_V3,
+            ),
+            gateway_client=FakeGateway(),
+            image_signer=FakeSigner(),
+        )
+
+    error = raised.value
+    assert error.image_manifest_sha256 == "b" * 64
+    assert error.image_count_sent == 2
+    assert error.image_receipt["contract_version"] == AI_IMAGE_RECEIPT_V2
+    assert error.image_receipt["image_count"] == 2
+    assert [item["image_id"] for item in error.image_receipt["images"]] == [
+        "image_1",
+        "image_2",
+    ]
+    assert [item["projection"] for item in error.image_receipt["images"]] == [
+        "VD",
+        "Lateral",
+    ]
+    assert "signature" not in json.dumps(error.image_receipt)
+    assert "signed_url" not in json.dumps(error.image_receipt)
+
+
+@pytest.mark.anyio
+async def test_ai_request_rejects_v2_source_fact_not_in_actual_receipt() -> None:
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+
+    result = _complete_medical_result_v2()
+    result["source_refs"][0]["projection"] = "Lateral"
+    image_inputs = tuple(_image_receipt_v2()["images"])
+
+    class FakeSigner:
+        async def sign(self, **kwargs):
+            return [
+                GatewayImageInput(
+                    sequence_no=1,
+                    mime_type="image/jpeg",
+                    signed_url="https://bucket.oss.example/one.jpg?signature=secret",
+                )
+            ]
+
+    class FakeGateway:
+        async def chat_completions(self, payload, *, idempotency_key):
+            return {
+                "request_id": "provider-request-1",
+                "body": {
+                    "choices": [{"message": {"content": json.dumps(result)}}],
+                    "model": "provider-model",
+                },
+            }
+
+    with pytest.raises(
+        GatewayDefiniteResponseError,
+        match="provider_result_source_projection_mismatch",
+    ) as raised:
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(
+                response_schema=AIConfigCompiler._output_schema(
+                    profile_key="xray_primary_v2"
+                ),
+                image_count_requested=1,
+                image_inputs=image_inputs,
+                snapshot_contract_version=TASK_REQUEST_SNAPSHOT_V3,
+            ),
+            gateway_client=FakeGateway(),
+            image_signer=FakeSigner(),
+        )
+
+    assert raised.value.image_receipt["contract_version"] == AI_IMAGE_RECEIPT_V2
+    assert raised.value.image_receipt["images"][0]["projection"] == "VD"
+
+
 def test_signed_image_url_enforces_https_and_allowlisted_host() -> None:
     url = validate_signed_image_url(
         "https://oss.example.com/private/obj.jpg?x=1&y=2",
@@ -360,6 +625,167 @@ def test_schema_validate_result_rejects_invalid_json_and_non_schema_payloads() -
         schema_validate_result(value={"unexpected": 1}, schema=SCHEMA)
 
 
+def test_schema_validate_result_accepts_bare_json_and_one_complete_json_fence() -> None:
+    expected = {"result": "ok"}
+    assert (
+        schema_validate_result(
+            value='  {"result":"ok"}\n',
+            schema=SCHEMA,
+        )
+        == expected
+    )
+    assert (
+        schema_validate_result(
+            value='```json\n{"result":"ok"}\n```',
+            schema=SCHEMA,
+        )
+        == expected
+    )
+
+
+def test_schema_validate_result_runs_frozen_schema_after_fence_unwrap() -> None:
+    with pytest.raises(
+        GatewayContractError,
+        match="provider_response_schema_rejected",
+    ):
+        schema_validate_result(
+            value='```json\n{"unexpected":1}\n```',
+            schema=SCHEMA,
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '说明\n```json\n{"result":"ok"}\n```',
+        '```json\n{"result":"ok"}\n```\n说明',
+        '```\n{"result":"ok"}\n```',
+        '```JSON\n{"result":"ok"}\n```',
+        '```json\n{"result":"ok"}\n```\n```json\n{"result":"ok"}\n```',
+        "```json\n{not json}\n```",
+    ],
+)
+def test_schema_validate_result_rejects_non_unique_or_non_json_fence(
+    value: str,
+) -> None:
+    with pytest.raises(GatewayContractError, match="provider_response_json_invalid"):
+        schema_validate_result(value=value, schema=SCHEMA)
+
+
+def test_complete_medical_result_v2_schema_accepts_only_the_versioned_shape() -> None:
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+
+    schema = AIConfigCompiler._output_schema(profile_key="xray_primary_v2")
+    result = _complete_medical_result_v2()
+
+    assert schema_validate_result(value=result, schema=schema) == result
+    with pytest.raises(GatewayContractError, match="provider_response_schema_rejected"):
+        invalid = deepcopy(result)
+        invalid.pop("summary")
+        schema_validate_result(value=invalid, schema=schema)
+    with pytest.raises(GatewayContractError, match="provider_response_schema_rejected"):
+        invalid = deepcopy(result)
+        invalid["findings"][0]["unexpected"] = True
+        schema_validate_result(value=invalid, schema=schema)
+
+
+def test_complete_medical_result_v2_validates_actual_image_references() -> None:
+    from apps.backend.core.ai.xray_result_contract import (
+        COMPLETE_MEDICAL_RESULT_V2,
+        validate_xray_result_contract,
+    )
+
+    result = _complete_medical_result_v2()
+
+    assert (
+        validate_xray_result_contract(
+            result=result,
+            schema_contract_version=COMPLETE_MEDICAL_RESULT_V2,
+            image_receipt=_image_receipt_v2(),
+        )
+        == result
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_code"),
+    [
+        (
+            lambda result: result["findings"].append(deepcopy(result["findings"][0])),
+            "provider_result_finding_id_duplicate",
+        ),
+        (
+            lambda result: result["source_refs"].append(
+                deepcopy(result["source_refs"][0])
+            ),
+            "provider_result_source_ref_id_duplicate",
+        ),
+        (
+            lambda result: result["findings"][0]["source_ref_ids"].append(
+                "source-missing"
+            ),
+            "provider_result_source_ref_missing",
+        ),
+        (
+            lambda result: result["source_refs"][0].update(
+                {"image_id": "image_not_sent"}
+            ),
+            "provider_result_source_image_not_sent",
+        ),
+        (
+            lambda result: result["source_refs"][0].update(
+                {"series_id": "series_not_sent"}
+            ),
+            "provider_result_source_series_id_mismatch",
+        ),
+        (
+            lambda result: result["source_refs"][0].update({"projection": "Lateral"}),
+            "provider_result_source_projection_mismatch",
+        ),
+        (
+            lambda result: result["source_refs"][0].update(
+                {"manifest_sha256": "f" * 64}
+            ),
+            "provider_result_source_manifest_sha256_mismatch",
+        ),
+        (
+            lambda result: result.update(
+                {
+                    "targeted_candidate": {
+                        "family_key": "thoracic",
+                        "focus_key": "pulmonary_pattern",
+                        "reason": "需要专项复核",
+                        "source_finding_ids": ["finding-missing"],
+                    }
+                }
+            ),
+            "provider_result_targeted_source_finding_missing",
+        ),
+    ],
+)
+def test_complete_medical_result_v2_rejects_broken_technical_references(
+    mutation,
+    error_code: str,
+) -> None:
+    from apps.backend.core.ai.xray_result_contract import (
+        COMPLETE_MEDICAL_RESULT_V2,
+        XRayResultContractError,
+        validate_xray_result_contract,
+    )
+
+    result = _complete_medical_result_v2()
+    mutation(result)
+
+    with pytest.raises(XRayResultContractError, match=f"^{error_code}$"):
+        validate_xray_result_contract(
+            result=result,
+            schema_contract_version=COMPLETE_MEDICAL_RESULT_V2,
+            image_receipt=_image_receipt_v2(),
+        )
+
+
 def test_gateway_profile_normalization_is_stable() -> None:
     disabled = normalize_gateway_profile(None)
     assert disabled["provider_enabled"] is False
@@ -375,7 +801,10 @@ def _frozen_task_config(
     from types import SimpleNamespace
 
     from apps.backend.core.ai.prompting.contracts import sha256_json
-    from apps.backend.core.pipeline import build_default_registry, compile_profile_contract
+    from apps.backend.core.pipeline import (
+        build_default_registry,
+        compile_profile_contract,
+    )
 
     registry = build_default_registry()
     profile_key = "xray_primary_v1"
@@ -485,6 +914,281 @@ def test_task_create_requires_and_normalizes_species_for_diagnose() -> None:
         )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("species", "expected_config_key"),
+    (
+        ("cat", "xray_diagnose_cat"),
+        ("dog", "xray_diagnose_dog"),
+    ),
+)
+async def test_task_create_selects_species_specific_active_config(
+    species: str,
+    expected_config_key: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.task import TaskCreate
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    service = object.__new__(TaskService)
+
+    async def get_study(_: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id="study_1",
+            session_id="session_1",
+            status="ready",
+            revision_id="revision_1",
+            resolved_manifest_sha256="a" * 64,
+            modality_type="xray",
+        )
+
+    async def get_session(_: str) -> SimpleNamespace:
+        return SimpleNamespace(requester_id="caller_1", status="open")
+
+    async def get_existing(_: str) -> None:
+        return None
+
+    selected: dict[str, str] = {}
+
+    async def get_active_config(**kwargs: str) -> None:
+        selected.update(kwargs)
+        return None
+
+    service.study_dal = SimpleNamespace(get_by_id=get_study)
+    service.session_dal = SimpleNamespace(get_by_id_for_update=get_session)
+    service.task_dal = SimpleNamespace(get_by_business_key=get_existing)
+    service._get_active_config = get_active_config
+
+    with pytest.raises(TaskStateConflictError, match="task_config_not_active"):
+        await service.create_task(
+            payload=TaskCreate(
+                study_id="study_1",
+                study_revision_id="revision_1",
+                request_id=f"request_{species}",
+                task_type="diagnose",
+                species=species,
+                trace_id=f"trace_{species}",
+            ),
+            caller=SimpleNamespace(subject_id="caller_1"),
+        )
+
+    assert selected == {
+        "config_key": expected_config_key,
+        "modality_type": "xray",
+        "task_type": "diagnose",
+    }
+
+
+@pytest.mark.parametrize(
+    ("species", "config_key", "prompt_key"),
+    (
+        ("cat", "xray_diagnose_cat", "xray_cat_primary"),
+        ("dog", "xray_diagnose_dog", "xray_dog_primary"),
+    ),
+)
+def test_task_species_config_binding_is_exact(
+    species: str,
+    config_key: str,
+    prompt_key: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    correct = SimpleNamespace(
+        config_key=config_key,
+        prompt_key=prompt_key,
+        profile_key="xray_primary_v2",
+    )
+    TaskService._validate_species_config_binding(
+        config=correct,
+        task_type="diagnose",
+        species=species,
+    )
+    TaskService._validate_species_config_binding(
+        config=SimpleNamespace(
+            config_key=config_key,
+            prompt_key=prompt_key,
+            profile_key="xray_targeted_review_v2",
+        ),
+        task_type="diagnose",
+        species=species,
+    )
+
+    for invalid in (
+        SimpleNamespace(
+            config_key="xray_diagnose_dog"
+            if species == "cat"
+            else "xray_diagnose_cat",
+            prompt_key=prompt_key,
+            profile_key="xray_primary_v2",
+        ),
+        SimpleNamespace(
+            config_key=config_key,
+            prompt_key="xray_dog_primary"
+            if species == "cat"
+            else "xray_cat_primary",
+            profile_key="xray_primary_v2",
+        ),
+        SimpleNamespace(
+            config_key=config_key,
+            prompt_key=prompt_key,
+            profile_key="xray_targeted_review_v1",
+        ),
+    ):
+        with pytest.raises(TaskStateConflictError, match="task_config_invalid"):
+            TaskService._validate_species_config_binding(
+                config=invalid,
+                task_type="diagnose",
+                species=species,
+            )
+
+
+@pytest.mark.anyio
+async def test_task_active_config_uses_explicit_targeted_experiment_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.config_contract import activation_slot_sha256
+    from apps.backend.core.config import settings
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    experiment_config = SimpleNamespace(id="config_targeted")
+    slots: list[str] = []
+
+    class FakeConfigDal:
+        async def get_active(self, slot: str):
+            slots.append(slot)
+            return experiment_config
+
+    monkeypatch.setattr(
+        settings,
+        "XRAY_TARGETED_EXPERIMENT_SCOPE_KEY",
+        "full-chain-local-v1",
+    )
+    service = object.__new__(TaskService)
+    service.config_dal = FakeConfigDal()
+
+    resolved = await service._get_active_config(
+        config_key="xray_diagnose_cat",
+        modality_type="xray",
+        task_type="diagnose",
+    )
+
+    assert resolved is experiment_config
+    assert slots == [
+        activation_slot_sha256(
+            config_key="xray_diagnose_cat",
+            modality_type="xray",
+            task_type="diagnose",
+            activation_scope="experiment",
+            scope_key="full-chain-local-v1",
+        )
+    ]
+
+
+def test_task_create_normalizes_strict_clinical_context_v1() -> None:
+    from apps.backend.schemas.task import TaskCreate
+
+    context = _clinical_context_v1()
+    context["source"]["system"] = " ms-ai-fast "
+    context["chief_complaint"] = " 间歇性咳嗽三天 "
+    payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_1",
+        task_type="diagnose",
+        species="dog",
+        clinical_context=context,
+        trace_id="trace_1",
+    )
+
+    frozen = payload.clinical_context.model_dump(mode="json")
+    assert frozen == {
+        "contract_version": "xray-clinical-context.v1",
+        "source": {
+            "system": "ms-ai-fast",
+            "recorded_at": "2026-08-28T02:30:00Z",
+            "temporal_scope": "available_at_request",
+        },
+        "chief_complaint": "间歇性咳嗽三天",
+        "study_reason": "评估胸部影像",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_code"),
+    [
+        (
+            lambda context: context.update({"expected_status": "abnormal"}),
+            "extra_forbidden",
+        ),
+        (
+            lambda context: (
+                context.pop("chief_complaint"),
+                context.pop("study_reason"),
+            ),
+            "task_clinical_context_fact_required",
+        ),
+        (
+            lambda context: context["source"].update(
+                {"recorded_at": "2026-08-28T10:30:00"}
+            ),
+            "datetime_timezone_required",
+        ),
+        (
+            lambda context: context.update(
+                {
+                    "chief_complaint": "症" * 1500,
+                    "study_reason": "状" * 1500,
+                }
+            ),
+            "task_clinical_context_too_large",
+        ),
+    ],
+)
+def test_task_create_rejects_unsafe_or_unbounded_clinical_context(
+    mutation,
+    error_code: str,
+) -> None:
+    from apps.backend.schemas.task import TaskCreate
+
+    context = _clinical_context_v1()
+    mutation(context)
+    with pytest.raises(ValidationError, match=error_code):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_1",
+            task_type="diagnose",
+            species="dog",
+            clinical_context=context,
+            trace_id="trace_1",
+        )
+
+
+def test_task_create_rejects_clinical_context_for_replay() -> None:
+    from apps.backend.schemas.task import TaskCreate
+
+    with pytest.raises(ValidationError, match="task_clinical_context_diagnose_only"):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_1",
+            task_type="replay",
+            clinical_context=_clinical_context_v1(),
+            trace_id="trace_1",
+        )
+
+
 def test_task_request_snapshot_freezes_species_parameter() -> None:
     from types import SimpleNamespace
 
@@ -518,6 +1222,123 @@ def test_task_request_snapshot_freezes_species_parameter() -> None:
     )
 
     assert snapshot["species"] == "cat"
+
+
+def test_task_request_snapshot_freezes_and_hashes_clinical_context() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.clinical_context import read_frozen_clinical_context
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.schemas.task import TaskClinicalContext
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    config = SimpleNamespace(
+        id="config_1",
+        config_key="xray_diagnose",
+        version=1,
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        config_contract_version="ai-config.v2",
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256="f" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+    )
+    clinical_context = TaskClinicalContext.model_validate(_clinical_context_v1())
+    common = {
+        "study": SimpleNamespace(
+            id="study_1",
+            revision_id="revision_1",
+            resolved_manifest_sha256="1" * 64,
+        ),
+        "series": [],
+        "config": config,
+        "profile_key": "xray_primary_v1",
+        "compiled_profile": {"profile_key": "xray_primary_v1", "stages": []},
+        "task_type": "diagnose",
+        "species": "cat",
+    }
+
+    snapshot = TaskService._build_request_snapshot(
+        **common,
+        clinical_context=clinical_context,
+    )
+    without_context = TaskService._build_request_snapshot(**common)
+    frozen = clinical_context.model_dump(mode="json")
+
+    assert snapshot["clinical_context_policy_version"] == ("xray-clinical-context.v1")
+    assert snapshot["clinical_context_allowlist"] == frozen
+    assert snapshot["clinical_context_sha256"] == sha256_json(frozen)
+    assert read_frozen_clinical_context(snapshot).payload == frozen
+    assert TaskService._sha(snapshot) != TaskService._sha(without_context)
+
+
+def test_frozen_clinical_context_is_canonical_and_rejects_hash_drift() -> None:
+    from apps.backend.core.ai.clinical_context import (
+        ClinicalContextContractError,
+        freeze_clinical_context,
+        read_frozen_clinical_context,
+    )
+
+    context = _clinical_context_v1()
+    reordered = {
+        "study_reason": context["study_reason"],
+        "chief_complaint": context["chief_complaint"],
+        "source": {
+            "temporal_scope": context["source"]["temporal_scope"],
+            "recorded_at": context["source"]["recorded_at"],
+            "system": context["source"]["system"],
+        },
+        "contract_version": context["contract_version"],
+    }
+    first = freeze_clinical_context(context)
+    second = freeze_clinical_context(reordered)
+
+    assert first.snapshot_fields() == second.snapshot_fields()
+    corrupted = first.snapshot_fields()
+    corrupted["clinical_context_sha256"] = "0" * 64
+    with pytest.raises(
+        ClinicalContextContractError,
+        match="task_clinical_context_snapshot_mismatch",
+    ):
+        read_frozen_clinical_context(corrupted)
+
+
+def test_evaluation_export_requires_same_context_for_paired_arms() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.evaluation_control.service.evaluation_export_service import (
+        EvaluationExportService,
+        EvaluationExportValidationError,
+    )
+
+    control = SimpleNamespace(
+        case_id="case_1",
+        clinical_context_policy_version="xray-clinical-context.v1",
+        clinical_context_sha256="a" * 64,
+    )
+    matching_candidate = SimpleNamespace(
+        case_id="case_1",
+        clinical_context_policy_version="xray-clinical-context.v1",
+        clinical_context_sha256="a" * 64,
+    )
+    EvaluationExportService._validate_context_arm_consistency(
+        [control, matching_candidate]
+    )
+
+    mismatched_candidate = SimpleNamespace(
+        case_id="case_1",
+        clinical_context_policy_version="xray-clinical-context.v1",
+        clinical_context_sha256="b" * 64,
+    )
+    with pytest.raises(
+        EvaluationExportValidationError,
+        match="evaluation_export_clinical_context_arm_mismatch",
+    ):
+        EvaluationExportService._validate_context_arm_consistency(
+            [control, mismatched_candidate]
+        )
 
 
 def test_task_request_snapshot_rejects_missing_species_for_diagnose() -> None:
@@ -593,6 +1414,82 @@ def test_task_request_snapshot_keeps_replay_species_optional_for_v2_config() -> 
     )
 
     assert snapshot["species"] == "unknown"
+
+
+def test_complete_medical_result_v2_requires_frozen_per_image_snapshot() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import (
+        build_series_manifest_legacy,
+        build_study_manifest,
+    )
+    from apps.backend.core.pipeline import XRAY_PRIMARY_PROFILE_V2
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    image = SimpleNamespace(
+        id="image_1",
+        series_id="series_1",
+        logical_image_key="logical_1",
+        image_version_no=1,
+        sequence_no=1,
+        image_role="source",
+        image_kind="xray",
+        file_format="jpeg",
+        projection=None,
+        technical_metadata_json=None,
+        storage_profile="primary",
+        object_key="images/one.jpg",
+        object_version_id=None,
+        sha256="a" * 64,
+        size_bytes=10,
+        content_type="image/jpeg",
+        status="ready",
+    )
+    legacy_manifest = build_series_manifest_legacy([image])
+    series = SimpleNamespace(
+        id="series_1",
+        series_key="series-key-1",
+        series_no=1,
+        actual_image_count=1,
+        manifest_sha256=legacy_manifest.sha256,
+    )
+    study_manifest = build_study_manifest([series])
+    study = SimpleNamespace(
+        id="study_1",
+        revision_id="revision_1",
+        resolved_manifest_sha256=study_manifest.sha256,
+    )
+    config = SimpleNamespace(
+        id="config_1",
+        config_key="xray_diagnose",
+        version="v2",
+        config_sha256="a" * 64,
+        release_fingerprint="b" * 64,
+        config_contract_version="ai-config.v2",
+        prompt_content_sha256="c" * 64,
+        model_snapshot_sha256="d" * 64,
+        output_schema_sha256="e" * 64,
+        compiled_pipeline_sha256="f" * 64,
+        stage_registry_contract_version="stage-contract.v1",
+    )
+
+    with pytest.raises(
+        TaskStateConflictError,
+        match="task_result_contract_requires_snapshot_v3",
+    ):
+        TaskService._build_request_snapshot(
+            study=study,
+            series=[series],
+            config=config,
+            profile_key=XRAY_PRIMARY_PROFILE_V2,
+            compiled_profile={"profile_key": XRAY_PRIMARY_PROFILE_V2},
+            task_type="diagnose",
+            species="dog",
+            series_images=[image],
+        )
 
 
 def test_task_assignment_rejects_v2_gateway_capability_mismatch() -> None:
@@ -764,9 +1661,7 @@ async def test_oss_object_store_head_reads_mime_and_sse_from_head_response() -> 
 
     head = await store.head_object(object_key="image/image_1/1/source.dcm")
 
-    assert calls == [
-        ("head_object", "image/image_1/1/source.dcm")
-    ]
+    assert calls == [("head_object", "image/image_1/1/source.dcm")]
     assert head.content_type == "application/octet-stream"
     assert head.server_side_encryption == "AES256"
     assert head.kms_key_version == "kms-key-version"
@@ -932,9 +1827,7 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
             return {
                 "request_id": "provider-1",
                 "body": {
-                    "choices": [
-                        {"message": {"content": json.dumps({"result": "ok"})}}
-                    ],
+                    "choices": [{"message": {"content": json.dumps({"result": "ok"})}}],
                     "model": "provider-model",
                     "usage": {"total_tokens": 1},
                 },
@@ -982,6 +1875,266 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
 
 
 @pytest.mark.anyio
+async def test_stage_execution_worker_persists_receipt_on_definite_parse_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+    from apps.backend.workers.imaging_worker.stage_execution import StageExecutionWorker
+
+    receipt = {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": 1,
+        "images": [
+            {
+                "sequence_no": 1,
+                "image_id": "image_1",
+                "sha256": "a" * 64,
+                "projection": "VD",
+                "projection_provenance": "caller_declared",
+                "mime_type": "image/jpeg",
+            }
+        ],
+    }
+    captured: dict[str, Any] = {}
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    def session_factory():
+        return FakeSession()
+
+    async def claim(self, **kwargs):
+        return SimpleNamespace(id="stage_1")
+
+    async def prepare(self, **kwargs):
+        return {"network_required": True, "attempt_id": "attempt_1"}
+
+    async def load(self, **kwargs):
+        return _network_plan(request_id="event_1")
+
+    async def execute_network(**kwargs):
+        raise GatewayDefiniteResponseError(
+            "provider_response_json_invalid",
+            image_receipt=receipt,
+            image_manifest_sha256="b" * 64,
+            image_count_sent=1,
+        )
+
+    async def finalize_failure(self, **kwargs):
+        captured["failure"] = kwargs
+        return {"status": "failed", "result_disposition": "failed"}
+
+    async def finalize_stage(self, **kwargs):
+        captured["stage"] = kwargs
+        return {"status": "failed"}
+
+    monkeypatch.setattr(ImagingExecutionService, "claim", claim)
+    monkeypatch.setattr(ImagingExecutionService, "prepare_stage_execution", prepare)
+    monkeypatch.setattr(ImagingExecutionService, "finalize_ai_stage", finalize_stage)
+    monkeypatch.setattr(AIRequestService, "load_attempt_for_network", load)
+    monkeypatch.setattr(
+        AIRequestService,
+        "execute_gateway_attempt_network",
+        execute_network,
+    )
+    monkeypatch.setattr(
+        AIRequestService,
+        "finalize_attempt_failure",
+        finalize_failure,
+    )
+
+    result = await StageExecutionWorker(
+        session_factory_=session_factory,
+    ).execute(
+        event_id="event_1",
+        message={},
+        message_version="v1",
+        trace_id="trace_1",
+        owner_id="worker_1",
+        lease_seconds=120,
+    )
+
+    assert result["outcome"] == "completed"
+    assert captured["failure"] == {
+        "attempt_id": "attempt_1",
+        "error_code": "provider_response_json_invalid",
+        "unknown": False,
+        "image_receipt": receipt,
+        "image_manifest_sha256": "b" * 64,
+        "image_count_sent": 1,
+    }
+    assert captured["stage"]["call_result"] == {
+        "status": "failed",
+        "result_disposition": "failed",
+    }
+
+
+def test_ai_attempt_reconcile_beat_schedule_is_opt_in_and_routes_explicitly() -> None:
+    from apps.backend.workers.imaging_worker.celery_app import (
+        AI_ATTEMPT_RECONCILE_SCHEDULE_KEY,
+        AI_ATTEMPT_RECONCILE_TASK_NAME,
+        build_ai_attempt_reconcile_schedule,
+        topology,
+    )
+
+    assert (
+        build_ai_attempt_reconcile_schedule(
+            enabled=False,
+            interval_seconds=60,
+            batch_limit=50,
+        )
+        == {}
+    )
+    schedule = build_ai_attempt_reconcile_schedule(
+        enabled=True,
+        interval_seconds=60,
+        batch_limit=50,
+    )
+
+    assert set(schedule) == {AI_ATTEMPT_RECONCILE_SCHEDULE_KEY}
+    entry = schedule[AI_ATTEMPT_RECONCILE_SCHEDULE_KEY]
+    assert entry["task"] == AI_ATTEMPT_RECONCILE_TASK_NAME
+    assert entry["schedule"] == 60.0
+    assert entry["args"] == (50,)
+    assert entry["options"] == {
+        "queue": topology.queue,
+        "exchange": topology.exchange,
+        "routing_key": topology.routing_key,
+    }
+
+
+@pytest.mark.parametrize(
+    ("interval_seconds", "batch_limit", "error_code"),
+    [
+        (29, 50, "ai_attempt_reconcile_interval_invalid"),
+        (3601, 50, "ai_attempt_reconcile_interval_invalid"),
+        (60, 0, "ai_attempt_reconcile_batch_limit_invalid"),
+        (60, 501, "ai_attempt_reconcile_batch_limit_invalid"),
+    ],
+)
+def test_ai_attempt_reconcile_beat_schedule_rejects_invalid_bounds(
+    interval_seconds: int,
+    batch_limit: int,
+    error_code: str,
+) -> None:
+    from apps.backend.workers.imaging_worker.celery_app import (
+        build_ai_attempt_reconcile_schedule,
+    )
+
+    with pytest.raises(ValueError, match=f"^{error_code}$"):
+        build_ai_attempt_reconcile_schedule(
+            enabled=True,
+            interval_seconds=interval_seconds,
+            batch_limit=batch_limit,
+        )
+
+
+def test_ai_attempt_reconcile_policy_v1_has_immutable_bounds() -> None:
+    from pydantic import ValidationError
+
+    from apps.backend.core.config import Settings
+
+    policy = Settings(
+        _env_file=None,
+        AI_PLATFORM_OPENAI_BASE_URL="",
+        AI_PLATFORM_API_KEY="",
+        AI_ATTEMPT_RECONCILE_POLICY_VERSION="ai-attempt-reconcile.v1",
+        AI_ATTEMPT_RECONCILE_MAX_COUNT=3,
+        AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS=10_800,
+    )
+    assert policy.AI_ATTEMPT_RECONCILE_MAX_COUNT == 3
+    assert policy.AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS == 10_800
+
+    with pytest.raises(
+        ValidationError,
+        match="ai_attempt_reconcile_policy_version_invalid",
+    ):
+        Settings(
+            _env_file=None,
+            AI_PLATFORM_OPENAI_BASE_URL="",
+            AI_PLATFORM_API_KEY="",
+            AI_ATTEMPT_RECONCILE_POLICY_VERSION="ai-attempt-reconcile.v2",
+        )
+    with pytest.raises(
+        ValidationError,
+        match="ai_attempt_reconcile_policy_v1_values_invalid",
+    ):
+        Settings(
+            _env_file=None,
+            AI_PLATFORM_OPENAI_BASE_URL="",
+            AI_PLATFORM_API_KEY="",
+            AI_ATTEMPT_RECONCILE_MAX_COUNT=2,
+        )
+
+
+def test_ai_attempt_reconcile_task_clamps_batch_and_logs_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.workers.imaging_worker import celery_app as celery_module
+
+    captured: dict[str, Any] = {}
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            captured["session_factory"] = kwargs["session_factory_"]
+
+        async def run_once(self, **kwargs):
+            captured["run_once"] = kwargs
+            return {
+                "due_scanned": 0,
+                "due_remaining_estimate": 0,
+                "claimed": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "unknown": 0,
+                "unsupported": 0,
+                "conflicted": 0,
+                "stage_pending": 0,
+                "duration_ms": 1,
+            }
+
+    async def dispose() -> None:
+        captured["disposed"] = True
+
+    def log_info(message: str, payload: str) -> None:
+        captured["log"] = (message, json.loads(payload))
+
+    monkeypatch.setattr(celery_module.settings, "BROKER_ENABLED", True)
+    monkeypatch.setattr(celery_module, "AIAttemptReconcileWorker", FakeWorker)
+    monkeypatch.setattr(celery_module, "async_engine", SimpleNamespace(dispose=dispose))
+    monkeypatch.setattr(celery_module.logger, "info", log_info)
+
+    assert celery_module.reconcile_ai_attempts.run(limit=999) is None
+    assert captured["run_once"] == {
+        "limit": 500,
+        "lease_seconds": (celery_module.settings.AI_ATTEMPT_RECONCILE_LEASE_SECONDS),
+        "retry_seconds": (celery_module.settings.AI_ATTEMPT_RECONCILE_RETRY_SECONDS),
+        "max_reconcile_count": (celery_module.settings.AI_ATTEMPT_RECONCILE_MAX_COUNT),
+        "max_unknown_age_seconds": (
+            celery_module.settings.AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS
+        ),
+    }
+    assert captured["disposed"] is True
+    assert captured["log"][0] == "ai_attempt_reconcile_completed %s"
+    assert captured["log"][1]["duration_ms"] == 1
+
+
+@pytest.mark.anyio
 async def test_ai_attempt_dal_reconcile_filters_due_and_claims_with_cas(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1020,24 +2173,49 @@ async def test_ai_attempt_dal_reconcile_filters_due_and_claims_with_cas(
     assert captured["page"]["v_order_field"] == "next_reconcile_at"
 
     lease_expires_at = now + timedelta(seconds=120)
+    unknown_cutoff = now - timedelta(seconds=10_800)
     assert (
         await dal.claim_reconcile_candidate(
             attempt_id="attempt_due",
             expected_version=7,
             now=now,
             lease_expires_at=lease_expires_at,
+            unknown_cutoff=unknown_cutoff,
+            max_reconcile_count=3,
         )
         is None
     )
     claim = captured["claim"]
     assert claim["data_id"] == "attempt_due"
     assert claim["expected_version"] == 7
-    assert claim["data"] == {"next_reconcile_at": lease_expires_at}
+    assert claim["data"]["next_reconcile_at"] == lease_expires_at
+    count_increment = claim["data"]["reconcile_count"]
+    assert count_increment.left.key == "reconcile_count"
+    assert count_increment.operator is operators.add
+    assert count_increment.right.value == 1
     claim_where = claim["v_where"]
     assert claim_where[0].right.value == "unknown"
     assert claim_where[1].operator is operators.is_not
     assert claim_where[2].operator is operators.le
     assert claim_where[2].right.value == now
+    assert claim_where[3].left.key == "reconcile_count"
+    assert claim_where[3].operator is operators.lt
+    assert claim_where[3].right.value == 3
+
+    assert (
+        await dal.claim_exhausted_reconcile_candidate(
+            attempt_id="attempt_due",
+            expected_version=7,
+            now=now,
+            lease_expires_at=lease_expires_at,
+            unknown_cutoff=unknown_cutoff,
+            max_reconcile_count=3,
+        )
+        is None
+    )
+    exhausted_claim = captured["claim"]
+    assert exhausted_claim["data"] == {"next_reconcile_at": lease_expires_at}
+    assert len(exhausted_claim["v_where"]) == 4
 
 
 @pytest.mark.anyio
@@ -1086,11 +2264,16 @@ async def test_ai_attempt_reconcile_worker_converges_each_lookup_status(
     plan = {
         "attempt_id": "attempt_1",
         "attempt_state_version": 3,
+        "first_unknown_at": None,
+        "reconcile_count": (3 if lookup_status in {"succeeded", "failed"} else 1),
+        "lookup_authorized": True,
+        "limit_reasons": (),
     }
     calls: list[str] = []
 
     async def list_due(self, **kwargs):
         calls.append("list")
+        assert kwargs["limit"] == 11
         return [candidate]
 
     async def claim(self, **kwargs):
@@ -1127,15 +2310,304 @@ async def test_ai_attempt_reconcile_worker_converges_each_lookup_status(
     outcomes = await AIAttemptReconcileWorker(
         session_factory_=session_factory,
         attempt_lookup=FakeLookup(),
-    ).run_once(limit=10, lease_seconds=120, retry_seconds=300)
+    ).run_once(
+        limit=10,
+        lease_seconds=120,
+        retry_seconds=300,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    )
 
     assert outcomes["claimed"] == 1
     assert outcomes[expected_counter] == 1
     assert outcomes["stage_pending"] == expected_stage_pending
+    assert outcomes["due_scanned"] == 1
+    assert outcomes["due_remaining_estimate"] == 0
+    assert outcomes["duration_ms"] >= 0
     if lookup_status in {"unknown", "unsupported"}:
         assert calls == ["list", "claim", "lookup", "reschedule"]
     else:
         assert calls == ["list", "claim", "lookup", "apply"]
+
+
+def test_ai_attempt_reconcile_limit_reasons_use_inclusive_boundaries() -> None:
+    from datetime import datetime, timedelta
+
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    assert (
+        AIAttemptReconcileService.limit_reasons(
+            first_unknown_at=now - timedelta(seconds=10_799),
+            reconcile_count=2,
+            now=now,
+            max_reconcile_count=3,
+            max_unknown_age_seconds=10_800,
+        )
+        == ()
+    )
+    assert AIAttemptReconcileService.limit_reasons(
+        first_unknown_at=now - timedelta(seconds=10_800),
+        reconcile_count=2,
+        now=now,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    ) == ("age",)
+    assert AIAttemptReconcileService.limit_reasons(
+        first_unknown_at=None,
+        reconcile_count=3,
+        now=now,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    ) == ("count",)
+
+
+@pytest.mark.anyio
+async def test_ai_attempt_reconcile_worker_terminates_exhausted_without_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+    from apps.backend.workers.imaging_worker.ai_attempt_reconcile import (
+        AIAttemptReconcileWorker,
+    )
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    def session_factory():
+        return FakeSession()
+
+    async def list_due(self, **kwargs):
+        return [SimpleNamespace(id="attempt_1", state_version=8)]
+
+    async def claim(self, **kwargs):
+        return {
+            "attempt_id": "attempt_1",
+            "attempt_state_version": 9,
+            "first_unknown_at": None,
+            "reconcile_count": 3,
+            "lookup_authorized": False,
+            "limit_reasons": ("count",),
+        }
+
+    async def finalize_unresolved(self, **kwargs):
+        return {
+            "disposition": "terminal_unresolved",
+            "stage_outcome": "stage_restored",
+        }
+
+    class LookupMustNotRun:
+        async def lookup(self, **kwargs):
+            raise AssertionError("bounded_attempt_must_not_lookup")
+
+    monkeypatch.setattr(AIAttemptReconcileService, "list_due", list_due)
+    monkeypatch.setattr(AIAttemptReconcileService, "claim", claim)
+    monkeypatch.setattr(
+        AIAttemptReconcileService,
+        "finalize_unresolved",
+        finalize_unresolved,
+    )
+
+    outcomes = await AIAttemptReconcileWorker(
+        session_factory_=session_factory,
+        attempt_lookup=LookupMustNotRun(),
+    ).run_once(
+        limit=10,
+        lease_seconds=120,
+        retry_seconds=300,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    )
+
+    assert outcomes["claimed"] == 1
+    assert outcomes["lookup_authorized"] == 0
+    assert outcomes["terminal_unresolved"] == 1
+    assert outcomes["count_limit_reached"] == 1
+
+
+@pytest.mark.anyio
+async def test_ai_attempt_reconcile_last_lookup_unknown_terminates_without_post(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.gateway.attempt_lookup import AttemptLookupResult
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+    from apps.backend.workers.imaging_worker.ai_attempt_reconcile import (
+        AIAttemptReconcileWorker,
+    )
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    def session_factory():
+        return FakeSession()
+
+    async def list_due(self, **kwargs):
+        return [SimpleNamespace(id="attempt_1", state_version=8)]
+
+    async def claim(self, **kwargs):
+        return {
+            "attempt_id": "attempt_1",
+            "attempt_state_version": 9,
+            "first_unknown_at": None,
+            "reconcile_count": 3,
+            "lookup_authorized": True,
+            "limit_reasons": (),
+        }
+
+    async def reschedule(self, **kwargs):
+        raise AssertionError("last_lookup_must_not_reschedule")
+
+    async def finalize_unresolved(self, **kwargs):
+        return {
+            "disposition": "terminal_unresolved",
+            "stage_outcome": "attempt_finalized_stage_pending",
+        }
+
+    lookup_count = 0
+    replacement_post_count = 0
+
+    class LookupOnly:
+        async def lookup(self, **kwargs):
+            nonlocal lookup_count
+            lookup_count += 1
+            return AttemptLookupResult(
+                status="unsupported",
+                error_code="provider_attempt_lookup_unsupported",
+            )
+
+        async def post(self, **kwargs):
+            nonlocal replacement_post_count
+            replacement_post_count += 1
+            raise AssertionError("reconcile_must_never_post_provider")
+
+    monkeypatch.setattr(AIAttemptReconcileService, "list_due", list_due)
+    monkeypatch.setattr(AIAttemptReconcileService, "claim", claim)
+    monkeypatch.setattr(AIAttemptReconcileService, "reschedule_unknown", reschedule)
+    monkeypatch.setattr(
+        AIAttemptReconcileService,
+        "finalize_unresolved",
+        finalize_unresolved,
+    )
+
+    outcomes = await AIAttemptReconcileWorker(
+        session_factory_=session_factory,
+        attempt_lookup=LookupOnly(),
+    ).run_once(
+        limit=10,
+        lease_seconds=120,
+        retry_seconds=300,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    )
+
+    assert lookup_count == 1
+    assert replacement_post_count == 0
+    assert outcomes["lookup_authorized"] == 1
+    assert outcomes["unsupported"] == 1
+    assert outcomes["terminal_unresolved"] == 1
+    assert outcomes["count_limit_reached"] == 1
+    assert outcomes["stage_pending"] == 1
+
+
+@pytest.mark.anyio
+async def test_ai_attempt_reconcile_worker_freezes_due_candidate_before_transaction_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+    from apps.backend.workers.imaging_worker.ai_attempt_reconcile import (
+        AIAttemptReconcileWorker,
+    )
+
+    transaction_open = False
+    calls: list[tuple[str, str, int]] = []
+
+    class ExpiringCandidate:
+        @property
+        def id(self) -> str:
+            if not transaction_open:
+                raise RuntimeError("candidate_accessed_after_transaction_exit")
+            return "attempt_1"
+
+        @property
+        def state_version(self) -> int:
+            if not transaction_open:
+                raise RuntimeError("candidate_accessed_after_transaction_exit")
+            return 4
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            nonlocal transaction_open
+            transaction_open = True
+            try:
+                yield
+            finally:
+                transaction_open = False
+
+    def session_factory():
+        return FakeSession()
+
+    async def list_due(self, **kwargs):
+        return [ExpiringCandidate()]
+
+    async def claim(self, **kwargs):
+        calls.append(("claim", kwargs["attempt_id"], kwargs["expected_version"]))
+        return None
+
+    monkeypatch.setattr(AIAttemptReconcileService, "list_due", list_due)
+    monkeypatch.setattr(AIAttemptReconcileService, "claim", claim)
+
+    outcomes = await AIAttemptReconcileWorker(
+        session_factory_=session_factory,
+    ).run_once(
+        limit=10,
+        lease_seconds=120,
+        retry_seconds=300,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    )
+
+    assert calls == [("claim", "attempt_1", 4)]
+    assert outcomes["claimed"] == 0
+    assert outcomes["conflicted"] == 1
 
 
 @pytest.mark.anyio
@@ -1181,9 +2653,128 @@ async def test_ai_attempt_reconcile_worker_counts_claim_conflict_without_lookup(
     outcomes = await AIAttemptReconcileWorker(
         session_factory_=session_factory,
         attempt_lookup=LookupMustNotRun(),
-    ).run_once(limit=10, lease_seconds=120, retry_seconds=300)
+    ).run_once(
+        limit=10,
+        lease_seconds=120,
+        retry_seconds=300,
+        max_reconcile_count=3,
+        max_unknown_age_seconds=10_800,
+    )
     assert outcomes["claimed"] == 0
     assert outcomes["conflicted"] == 1
+
+
+@pytest.mark.anyio
+async def test_overlapping_reconcile_workers_claim_and_lookup_only_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.gateway.attempt_lookup import AttemptLookupResult
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+    from apps.backend.workers.imaging_worker.ai_attempt_reconcile import (
+        AIAttemptReconcileWorker,
+    )
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    def session_factory():
+        return FakeSession()
+
+    candidate = SimpleNamespace(id="attempt_1", state_version=4)
+    plan = {
+        "attempt_id": candidate.id,
+        "attempt_state_version": 5,
+        "first_unknown_at": None,
+        "reconcile_count": 1,
+        "lookup_authorized": True,
+        "limit_reasons": (),
+    }
+    both_scanned = asyncio.Event()
+    claim_lock = asyncio.Lock()
+    scan_count = 0
+    claimed = False
+    lookup_count = 0
+    reschedule_count = 0
+    replacement_post_count = 0
+
+    async def list_due(self, **kwargs):
+        nonlocal scan_count
+        scan_count += 1
+        if scan_count == 2:
+            both_scanned.set()
+        await both_scanned.wait()
+        return [candidate]
+
+    async def claim(self, **kwargs):
+        nonlocal claimed
+        async with claim_lock:
+            if claimed:
+                return None
+            claimed = True
+            return plan
+
+    async def reschedule(self, **kwargs):
+        nonlocal reschedule_count
+        reschedule_count += 1
+        return True
+
+    class LookupOnly:
+        async def lookup(self, **kwargs):
+            nonlocal lookup_count
+            lookup_count += 1
+            return AttemptLookupResult(
+                status="unsupported",
+                error_code="provider_attempt_lookup_unsupported",
+            )
+
+        async def post(self, **kwargs):
+            nonlocal replacement_post_count
+            replacement_post_count += 1
+            raise AssertionError("reconcile_must_never_post_provider")
+
+    monkeypatch.setattr(AIAttemptReconcileService, "list_due", list_due)
+    monkeypatch.setattr(AIAttemptReconcileService, "claim", claim)
+    monkeypatch.setattr(AIAttemptReconcileService, "reschedule_unknown", reschedule)
+
+    workers = [
+        AIAttemptReconcileWorker(
+            session_factory_=session_factory,
+            attempt_lookup=LookupOnly(),
+        )
+        for _ in range(2)
+    ]
+    outcomes = await asyncio.gather(
+        *(
+            worker.run_once(
+                limit=10,
+                lease_seconds=120,
+                retry_seconds=300,
+                max_reconcile_count=3,
+                max_unknown_age_seconds=10_800,
+            )
+            for worker in workers
+        )
+    )
+
+    assert sum(item["claimed"] for item in outcomes) == 1
+    assert sum(item["conflicted"] for item in outcomes) == 1
+    assert lookup_count == 1
+    assert reschedule_count == 1
+    assert replacement_post_count == 0
 
 
 @pytest.mark.anyio
@@ -1197,7 +2788,9 @@ async def test_ai_attempt_reconcile_rejects_incomplete_success() -> None:
     )
 
     service = object.__new__(AIAttemptReconcileService)
-    with pytest.raises(AIAttemptReconcileError, match="ai_attempt_lookup_result_invalid"):
+    with pytest.raises(
+        AIAttemptReconcileError, match="ai_attempt_lookup_result_invalid"
+    ):
         await service.apply_lookup_result(
             attempt_id="attempt_1",
             result=AttemptLookupResult(
@@ -1280,7 +2873,129 @@ async def test_ai_attempt_reconcile_failed_result_restores_running_stage() -> No
 
 
 @pytest.mark.anyio
-async def test_ai_attempt_reconcile_repeated_success_does_not_refinalize_stage() -> None:
+async def test_ai_attempt_reconcile_unresolved_uses_technical_failure_path() -> None:
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+        PROVIDER_RESULT_UNRESOLVED,
+    )
+
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    attempt = SimpleNamespace(id="attempt_1", ai_call_id="call_1")
+    call = SimpleNamespace(id="call_1", stage_checkpoint_id="stage_1")
+    stage = SimpleNamespace(
+        id="stage_1",
+        status="running",
+        lease_owner_id="worker_1",
+        lease_expires_at=now + timedelta(seconds=120),
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeAIRequestService:
+        async def finalize_attempt_failure(self, **kwargs):
+            captured["failure"] = kwargs
+            return {
+                "attempt_status": "failed",
+                "status": "failed",
+                "result_disposition": "failed",
+                "error_code": PROVIDER_RESULT_UNRESOLVED,
+            }
+
+    class FakeAttemptDal:
+        async def get_by_id(self, attempt_id: str):
+            return attempt
+
+    class FakeCallDal:
+        async def get_by_id(self, call_id: str):
+            return call
+
+    class FakeStageDal:
+        async def get_by_id(self, stage_id: str):
+            return stage
+
+    class FakeImagingExecutionService:
+        async def finalize_ai_stage(self, **kwargs):
+            captured["stage"] = kwargs
+            return {"status": "failed"}
+
+    service = object.__new__(AIAttemptReconcileService)
+    service.ai_request_service = FakeAIRequestService()
+    service.attempt_dal = FakeAttemptDal()
+    service.call_dal = FakeCallDal()
+    service.stage_dal = FakeStageDal()
+    service.imaging_execution_service = FakeImagingExecutionService()
+
+    result = await service.finalize_unresolved(attempt_id=attempt.id, now=now)
+
+    assert captured["failure"] == {
+        "attempt_id": attempt.id,
+        "error_code": PROVIDER_RESULT_UNRESOLVED,
+        "unknown": False,
+    }
+    assert captured["stage"]["call_result"]["error_code"] == (
+        PROVIDER_RESULT_UNRESOLVED
+    )
+    assert result == {
+        "disposition": "terminal_unresolved",
+        "stage_outcome": "stage_restored",
+    }
+
+
+@pytest.mark.anyio
+async def test_ai_attempt_reconcile_unresolved_preserves_late_terminal_success() -> (
+    None
+):
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.ai_attempt_reconcile_service import (
+        AIAttemptReconcileService,
+    )
+
+    now = datetime(2026, 8, 28, 12, 0, 0)
+    attempt = SimpleNamespace(id="attempt_1", ai_call_id="call_1")
+    call = SimpleNamespace(id="call_1", stage_checkpoint_id="stage_1")
+
+    class FakeAIRequestService:
+        async def finalize_attempt_failure(self, **kwargs):
+            return {
+                "attempt_status": "succeeded",
+                "status": "succeeded",
+                "result_disposition": "accepted",
+                "error_code": None,
+            }
+
+    class FakeAttemptDal:
+        async def get_by_id(self, attempt_id: str):
+            return attempt
+
+    class FakeCallDal:
+        async def get_by_id(self, call_id: str):
+            return call
+
+    class FakeStageDal:
+        async def get_by_id(self, stage_id: str):
+            return None
+
+    service = object.__new__(AIAttemptReconcileService)
+    service.ai_request_service = FakeAIRequestService()
+    service.attempt_dal = FakeAttemptDal()
+    service.call_dal = FakeCallDal()
+    service.stage_dal = FakeStageDal()
+    service.imaging_execution_service = object()
+
+    assert await service.finalize_unresolved(attempt_id=attempt.id, now=now) == {
+        "disposition": "terminal_preserved",
+        "stage_outcome": "attempt_finalized_stage_pending",
+    }
+
+
+@pytest.mark.anyio
+async def test_ai_attempt_reconcile_repeated_success_does_not_refinalize_stage() -> (
+    None
+):
     from datetime import datetime, timedelta
     from types import SimpleNamespace
 
@@ -1355,7 +3070,9 @@ async def test_ai_attempt_reconcile_repeated_success_does_not_refinalize_stage()
 
 
 @pytest.mark.anyio
-async def test_xray_family_routing_only_returns_primary_final_and_preserves_primary_result() -> None:
+async def test_xray_family_routing_only_returns_primary_final_and_preserves_primary_result() -> (
+    None
+):
     from types import SimpleNamespace
 
     from apps.backend.services.runtime.stages.contracts import StageExecutionContext
@@ -1396,6 +3113,566 @@ async def test_xray_family_routing_only_returns_primary_final_and_preserves_prim
         "review_required",
         "non_diagnostic",
     }.intersection(output)
+
+
+@pytest.mark.anyio
+async def test_xray_family_routing_v2_routes_one_valid_primary_candidate() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.family_routing import (
+        XRayFamilyRoutingV2StageHandler,
+    )
+
+    primary_result = _complete_medical_result_v2()
+    primary_result["targeted_candidate"] = {
+        "family_key": "thoracic",
+        "focus_key": "pulmonary_pattern",
+        "reason": "肺野征象需要一次专项复核",
+        "source_finding_ids": ["finding-1"],
+    }
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1"),
+        stage=SimpleNamespace(
+            stage_key="family_routing",
+            input_json={
+                "previous_output_sha256": "a" * 64,
+                "previous_output": {
+                    "medical_status": "produced",
+                    "source_call_id": "call_1",
+                    "complete_medical_result": primary_result,
+                },
+            },
+        ),
+    )
+
+    plan = await XRayFamilyRoutingV2StageHandler().execute(context)
+
+    assert plan.ai_request is None
+    assert plan.completed_result is not None
+    output = plan.completed_result.output
+    assert output["route_signal"] == "targeted_review"
+    assert output["selected_family_key"] == "thoracic"
+    assert output["selected_focus_key"] == "pulmonary_pattern"
+    assert output["source_finding_ids"] == ["finding-1"]
+    assert output["route_reason_codes"] == ["primary_targeted_candidate"]
+    assert output["coverage_proof"] == primary_result["coverage"]
+    assert output["complete_medical_result"] is primary_result
+
+
+@pytest.mark.anyio
+async def test_xray_family_routing_v2_rejects_unapproved_focus_without_inference() -> (
+    None
+):
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.family_routing import (
+        XRayFamilyRoutingV2StageHandler,
+    )
+
+    primary_result = _complete_medical_result_v2()
+    primary_result["targeted_candidate"] = {
+        "family_key": "thoracic",
+        "focus_key": "invented_focus",
+        "reason": "不受控候选",
+        "source_finding_ids": ["finding-1"],
+    }
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1"),
+        stage=SimpleNamespace(
+            stage_key="family_routing",
+            input_json={
+                "previous_output_sha256": "a" * 64,
+                "previous_output": {
+                    "medical_status": "produced",
+                    "source_call_id": "call_1",
+                    "complete_medical_result": primary_result,
+                },
+            },
+        ),
+    )
+
+    plan = await XRayFamilyRoutingV2StageHandler().execute(context)
+
+    assert plan.completed_result is not None
+    assert plan.completed_result.output["route_signal"] == "primary_final"
+    assert "selected_family_key" not in plan.completed_result.output
+
+
+@pytest.mark.anyio
+async def test_targeted_route_evidence_is_frozen_into_dynamic_stage_input() -> None:
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from apps.backend.core.pipeline import (
+        XRAY_TARGETED_REVIEW_PROFILE_V2,
+        build_default_registry,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    contract, pipeline_sha = compile_profile_contract(
+        XRAY_TARGETED_REVIEW_PROFILE_V2,
+        build_default_registry(),
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeStageDal:
+        async def create_idempotent(self, values: dict[str, Any]):
+            captured["stage"] = values
+            return SimpleNamespace(**values)
+
+    class FakeOutboxDal:
+        async def create_idempotent(self, values: dict[str, Any]):
+            captured["outbox"] = values
+            return SimpleNamespace(**values)
+
+    class FakeTaskDal:
+        async def cas_update(self, **kwargs):
+            captured["task"] = kwargs
+            return SimpleNamespace(id="task_1")
+
+    service = object.__new__(ImagingExecutionService)
+    service.stage_dal = FakeStageDal()
+    service.outbox_dal = FakeOutboxDal()
+    service.task_dal = FakeTaskDal()
+    task = SimpleNamespace(
+        id="task_1",
+        study_revision_id="revision_1",
+        request_snapshot_json={
+            "compiled_profile": contract,
+            "resolved_manifest_sha256": "a" * 64,
+        },
+        compiled_pipeline_sha256=pipeline_sha,
+        attempt_no=1,
+        trace_id="trace_1",
+        state_version=3,
+    )
+    stage = SimpleNamespace(
+        id="stage_route",
+        stage_key="family_routing",
+        stage_no=3,
+    )
+    output = {
+        "route_signal": "targeted_review",
+        "medical_status": "produced",
+        "source_call_id": "call_1",
+        "complete_medical_result": _complete_medical_result_v2(),
+        "selected_family_key": "thoracic",
+        "selected_focus_key": "pulmonary_pattern",
+        "selected_strategy_key": None,
+        "source_finding_ids": ["finding-1"],
+        "coverage_proof": {"status": "partial"},
+        "route_reason_codes": ["primary_targeted_candidate"],
+    }
+
+    await service._schedule_next_or_complete(
+        task=task,
+        stage=stage,
+        output=output,
+        output_sha="b" * 64,
+        now=datetime(2026, 8, 29),
+    )
+
+    assert captured["stage"]["stage_key"] == "targeted_review"
+    stage_input = captured["stage"]["input_json"]
+    assert stage_input["selected_family_key"] == "thoracic"
+    assert stage_input["selected_focus_key"] == "pulmonary_pattern"
+    assert stage_input["source_finding_ids"] == ["finding-1"]
+    assert stage_input["route_reason_codes"] == ["primary_targeted_candidate"]
+    assert captured["outbox"]["aggregate_id"] == captured["stage"]["id"]
+    assert captured["task"]["values"]["execution_status"] == "queued"
+
+
+def test_xray_v1_and_v2_profiles_keep_exact_handler_versions() -> None:
+    from apps.backend.core.pipeline import (
+        XRAY_PRIMARY_PROFILE_V2,
+        XRAY_TARGETED_REVIEW_PROFILE_V2,
+        build_default_registry,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.stages.registry import resolve_stage_handler
+
+    registry = build_default_registry()
+    primary_v1, primary_v1_sha = compile_profile_contract("xray_primary_v1", registry)
+    primary_v2, primary_v2_sha = compile_profile_contract(
+        XRAY_PRIMARY_PROFILE_V2, registry
+    )
+    targeted_v2, _ = compile_profile_contract(XRAY_TARGETED_REVIEW_PROFILE_V2, registry)
+
+    assert [item["handler_version"] for item in primary_v1["stages"]] == [
+        "v1",
+        "v1",
+        "v1",
+    ]
+    assert [item["handler_version"] for item in primary_v2["stages"]] == [
+        "v1",
+        "v2",
+        "v2",
+    ]
+    assert primary_v1_sha != primary_v2_sha
+    assert targeted_v2["dynamic_stage_definitions"][0]["handler_version"] == "v2"
+    assert (
+        resolve_stage_handler(
+            handler_key="joint_primary_reader", handler_version="v1"
+        ).handler_version
+        == "v1"
+    )
+    assert (
+        resolve_stage_handler(
+            handler_key="joint_primary_reader", handler_version="v2"
+        ).handler_version
+        == "v2"
+    )
+
+
+def test_xray_v2_reader_preserves_complete_result_without_projection() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.joint_primary_reader import (
+        XRayJointPrimaryReaderV2StageHandler,
+    )
+
+    complete_result = _complete_medical_result_v2()
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1"),
+        stage=SimpleNamespace(
+            stage_key="joint_primary_reader",
+            input_json={"manifest_sha256": "a" * 64},
+        ),
+    )
+
+    stage_result = XRayJointPrimaryReaderV2StageHandler().consume_ai_call(
+        context,
+        {
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": complete_result,
+            "call_id": "call_1",
+        },
+    )
+
+    assert stage_result.status == "completed"
+    assert stage_result.output["medical_status"] == "produced"
+    assert stage_result.output["complete_medical_result"] == complete_result
+
+
+@pytest.mark.parametrize(
+    "medical_status",
+    ["normal", "abnormal", "review_required", "non_diagnostic"],
+)
+def test_medical_status_contract_projects_each_model_status(
+    medical_status: str,
+) -> None:
+    from apps.backend.services.runtime.medical_status_contract import (
+        project_persisted_medical_status,
+    )
+
+    assert (
+        project_persisted_medical_status(
+            {
+                "medical_status": "produced",
+                "complete_medical_result": {"medical_status": medical_status},
+            }
+        )
+        == medical_status
+    )
+
+
+def test_medical_status_contract_accepts_legacy_not_produced_without_result() -> None:
+    from apps.backend.services.runtime.medical_status_contract import (
+        project_persisted_medical_status,
+    )
+
+    assert (
+        project_persisted_medical_status({"medical_status": "not_produced"})
+        == "not_produced"
+    )
+
+
+@pytest.mark.parametrize(
+    ("output", "error_code"),
+    [
+        ({"medical_status": "produced"}, "finalization_medical_result_invalid"),
+        (
+            {"medical_status": "produced", "complete_medical_result": None},
+            "finalization_medical_result_invalid",
+        ),
+        (
+            {"medical_status": "produced", "complete_medical_result": []},
+            "finalization_medical_result_invalid",
+        ),
+        (
+            {"medical_status": "produced", "complete_medical_result": {}},
+            "finalization_medical_result_invalid",
+        ),
+        (
+            {
+                "medical_status": "produced",
+                "complete_medical_result": {"medical_status": "unknown"},
+            },
+            "finalization_medical_result_invalid",
+        ),
+        (
+            {
+                "medical_status": "produced",
+                "complete_medical_result": {"medical_status": "not_produced"},
+            },
+            "finalization_medical_result_invalid",
+        ),
+        (
+            {
+                "medical_status": "not_produced",
+                "complete_medical_result": {"medical_status": "normal"},
+            },
+            "finalization_result_availability_conflict",
+        ),
+        (
+            {"medical_status": "not_produced", "complete_medical_result": None},
+            "finalization_result_availability_conflict",
+        ),
+        ({}, "finalization_result_availability_invalid"),
+        (
+            {
+                "medical_status": "unknown",
+                "complete_medical_result": {"medical_status": "normal"},
+            },
+            "finalization_result_availability_invalid",
+        ),
+    ],
+)
+def test_medical_status_contract_rejects_incoherent_combinations(
+    output: dict[str, Any],
+    error_code: str,
+) -> None:
+    from apps.backend.services.runtime.medical_status_contract import (
+        MedicalStatusContractError,
+        project_persisted_medical_status,
+    )
+
+    with pytest.raises(MedicalStatusContractError, match=f"^{error_code}$"):
+        project_persisted_medical_status(output)
+
+
+def test_runtime_and_evaluation_medical_status_sets_stay_aligned() -> None:
+    from typing import get_args
+
+    from apps.backend.schemas.evaluation_execution import MedicalStatus
+    from apps.backend.services.runtime.medical_status_contract import (
+        PERSISTED_MEDICAL_STATUSES,
+    )
+
+    assert frozenset(get_args(MedicalStatus)) == PERSISTED_MEDICAL_STATUSES
+
+
+def test_xray_v1_reader_keeps_internal_availability_markers() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.joint_primary_reader import (
+        XRayJointPrimaryReaderStageHandler,
+    )
+
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1"),
+        stage=SimpleNamespace(
+            stage_key="joint_primary_reader",
+            input_json={"manifest_sha256": "a" * 64},
+        ),
+    )
+    handler = XRayJointPrimaryReaderStageHandler()
+
+    produced = handler.consume_ai_call(
+        context,
+        {
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": {"medical_status": "normal"},
+            "call_id": "call_1",
+        },
+    )
+    not_produced = handler.consume_ai_call(
+        context,
+        {
+            "status": "failed",
+            "result_disposition": "rejected",
+            "error_code": "provider_disabled",
+            "call_id": "call_2",
+        },
+    )
+
+    assert produced.status == "completed"
+    assert produced.output["medical_status"] == "produced"
+    assert not_produced.status == "completed"
+    assert not_produced.output["medical_status"] == "not_produced"
+
+
+@pytest.mark.anyio
+async def test_decision_finalization_projects_model_status_at_persistence_boundary(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.pipeline import StageResult
+    from apps.backend.services.runtime.service import imaging_execution_service
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    complete_result = _complete_medical_result_v2()
+    output = {
+        "medical_status": "produced",
+        "source_call_id": "call_1",
+        "complete_medical_result": complete_result,
+    }
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=None,
+        execution_status="running",
+        state_version=7,
+    )
+    stage = SimpleNamespace(
+        id="stage_1",
+        task_id=task.id,
+        stage_key="decision_finalization",
+        state_version=5,
+        lease_generation=2,
+        input_json={"previous_output": {"source_call_id": "call_1"}},
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeStageDal:
+        async def finish_with_lease(self, **kwargs):
+            captured["stage_values"] = kwargs["values"]
+            return SimpleNamespace(**{**stage.__dict__, **kwargs["values"]})
+
+    class FakeTaskDal:
+        async def get_by_id_for_update(self, task_id: str):
+            assert task_id == task.id
+            return task
+
+        async def cas_update(self, **kwargs):
+            captured["task_values"] = kwargs["values"]
+            return SimpleNamespace(**{**task.__dict__, **kwargs["values"]})
+
+    class FakeReportService:
+        def __init__(self, db):
+            assert db == "db"
+
+        async def finalize(self, **kwargs):
+            captured["report_values"] = kwargs
+            return None
+
+    monkeypatch.setattr(
+        imaging_execution_service,
+        "ReportService",
+        FakeReportService,
+    )
+    service = object.__new__(ImagingExecutionService)
+    service.outbox_dal = SimpleNamespace(db="db")
+    service.stage_dal = FakeStageDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service._apply_stage_result(
+        task=task,
+        stage=stage,
+        owner_id="worker_1",
+        result=StageResult(status="completed", output=output),
+    )
+
+    assert result is output
+    assert captured["stage_values"]["status"] == "completed"
+    assert captured["stage_values"]["output_json"]["medical_status"] == "produced"
+    assert captured["report_values"]["medical_status"] == "review_required"
+    assert captured["report_values"]["content"]["medical_status"] == "review_required"
+    assert (
+        captured["report_values"]["content"]["complete_medical_result"]
+        == complete_result
+    )
+    assert captured["task_values"]["ai_medical_status"] == "review_required"
+    assert "produced" not in {
+        captured["report_values"]["medical_status"],
+        captured["report_values"]["content"]["medical_status"],
+        captured["task_values"]["ai_medical_status"],
+    }
+
+
+@pytest.mark.anyio
+async def test_incoherent_decision_finalization_fails_without_report(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.pipeline import StageResult
+    from apps.backend.services.runtime.service import imaging_execution_service
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    output = {"medical_status": "produced"}
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=None,
+        execution_status="running",
+        state_version=7,
+    )
+    stage = SimpleNamespace(
+        id="stage_1",
+        task_id=task.id,
+        stage_key="decision_finalization",
+        state_version=5,
+        lease_generation=2,
+    )
+    captured: dict[str, Any] = {}
+
+    class FakeStageDal:
+        async def finish_with_lease(self, **kwargs):
+            captured["stage_values"] = kwargs["values"]
+            return SimpleNamespace(**{**stage.__dict__, **kwargs["values"]})
+
+    class FakeTaskDal:
+        async def get_by_id_for_update(self, task_id: str):
+            assert task_id == task.id
+            return task
+
+        async def cas_update(self, **kwargs):
+            captured["task_values"] = kwargs["values"]
+            return SimpleNamespace(**{**task.__dict__, **kwargs["values"]})
+
+    class RejectReportService:
+        def __init__(self, _db):
+            raise AssertionError("incoherent finalization must not create a report")
+
+    monkeypatch.setattr(
+        imaging_execution_service,
+        "ReportService",
+        RejectReportService,
+    )
+    service = object.__new__(ImagingExecutionService)
+    service.stage_dal = FakeStageDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service._apply_stage_result(
+        task=task,
+        stage=stage,
+        owner_id="worker_1",
+        result=StageResult(status="completed", output=output),
+    )
+
+    assert result is output
+    assert captured["stage_values"]["status"] == "failed"
+    assert (
+        captured["stage_values"]["error_code"] == "finalization_medical_result_invalid"
+    )
+    assert captured["task_values"]["execution_status"] == "failed"
+    assert captured["task_values"]["ai_medical_status"] == "not_produced"
+    assert (
+        captured["task_values"]["error_code"] == "finalization_medical_result_invalid"
+    )
 
 
 @pytest.mark.anyio
@@ -1476,7 +3753,185 @@ async def test_task_cancel_uses_task_row_lock() -> None:
 
 
 @pytest.mark.anyio
-async def test_ai_request_rejects_cancelled_task_before_call_or_retry_creation() -> None:
+async def test_stage_claim_converges_queued_cancel_before_provider() -> None:
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.outbox import ExecuteStageMessage
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    message = {
+        "task_id": "task_1",
+        "stage_checkpoint_id": "stage_1",
+        "expected_state_version": 3,
+        "trace_id": "trace_1",
+    }
+    event = SimpleNamespace(
+        id="event_1",
+        message_version="stage-execution.v1",
+        trace_id="trace_1",
+        message_json=message,
+    )
+    stage = SimpleNamespace(
+        id="stage_1",
+        task_id="task_1",
+        status="queued",
+        state_version=3,
+    )
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=datetime(2026, 8, 27, 6, 0, 0),
+        execution_status="queued",
+        ai_medical_status="not_produced",
+        state_version=5,
+    )
+    captured: dict[str, Any] = {"stage_claim_count": 0}
+
+    class FakeOutboxDal:
+        async def get_by_id(self, event_id: str):
+            return event
+
+        def validate_stage_event(self, current_event):
+            return ExecuteStageMessage.model_validate(current_event.message_json)
+
+    class FakeStageDal:
+        async def get_by_id(self, checkpoint_id: str):
+            return stage
+
+        async def cas_update(self, **kwargs):
+            captured["stage_values"] = kwargs["values"]
+            return SimpleNamespace(
+                **{
+                    **stage.__dict__,
+                    **kwargs["values"],
+                    "state_version": stage.state_version + 1,
+                }
+            )
+
+        async def claim(self, **kwargs):
+            captured["stage_claim_count"] += 1
+            raise AssertionError("cancelled_stage_must_not_be_claimed")
+
+    class FakeTaskDal:
+        async def get_by_id(self, task_id: str):
+            return task
+
+        async def cas_update(self, **kwargs):
+            captured["task_values"] = kwargs["values"]
+            return SimpleNamespace(
+                **{
+                    **task.__dict__,
+                    **kwargs["values"],
+                    "state_version": task.state_version + 1,
+                }
+            )
+
+    service = object.__new__(ImagingExecutionService)
+    service.outbox_dal = FakeOutboxDal()
+    service.stage_dal = FakeStageDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service.claim(
+        event_id=event.id,
+        message=message,
+        message_version=event.message_version,
+        trace_id=event.trace_id,
+        owner_id="worker_1",
+        lease_seconds=120,
+    )
+
+    assert result is None
+    assert captured["stage_values"]["status"] == "cancelled"
+    assert captured["stage_values"]["error_code"] == "task_cancelled"
+    assert captured["stage_values"]["finished_at"] is not None
+    assert captured["task_values"]["execution_status"] == "cancelled"
+    assert captured["task_values"]["ai_medical_status"] == "not_produced"
+    assert captured["task_values"]["finished_at"] is not None
+    assert captured["stage_claim_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_stage_claim_is_idempotent_for_cancelled_duplicate_delivery() -> None:
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.outbox import ExecuteStageMessage
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    message = {
+        "task_id": "task_1",
+        "stage_checkpoint_id": "stage_1",
+        "expected_state_version": 3,
+        "trace_id": "trace_1",
+    }
+    event = SimpleNamespace(
+        id="event_1",
+        message_version="stage-execution.v1",
+        trace_id="trace_1",
+        message_json=message,
+    )
+    stage = SimpleNamespace(
+        id="stage_1",
+        task_id="task_1",
+        status="cancelled",
+        state_version=4,
+    )
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=datetime(2026, 8, 27, 6, 0, 0),
+        execution_status="cancelled",
+        state_version=6,
+    )
+
+    class FakeOutboxDal:
+        async def get_by_id(self, event_id: str):
+            return event
+
+        def validate_stage_event(self, current_event):
+            return ExecuteStageMessage.model_validate(current_event.message_json)
+
+    class FakeStageDal:
+        async def get_by_id(self, checkpoint_id: str):
+            return stage
+
+        async def cas_update(self, **kwargs):
+            raise AssertionError("duplicate_cancel_must_not_update_stage")
+
+        async def claim(self, **kwargs):
+            raise AssertionError("duplicate_cancel_must_not_claim_stage")
+
+    class FakeTaskDal:
+        async def get_by_id(self, task_id: str):
+            return task
+
+        async def cas_update(self, **kwargs):
+            raise AssertionError("duplicate_cancel_must_not_update_task")
+
+    service = object.__new__(ImagingExecutionService)
+    service.outbox_dal = FakeOutboxDal()
+    service.stage_dal = FakeStageDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service.claim(
+        event_id=event.id,
+        message=message,
+        message_version=event.message_version,
+        trace_id=event.trace_id,
+        owner_id="worker_1",
+        lease_seconds=120,
+    )
+
+    assert result is None
+
+
+@pytest.mark.anyio
+async def test_ai_request_rejects_cancelled_task_before_call_or_retry_creation() -> (
+    None
+):
     from datetime import datetime
     from types import SimpleNamespace
 
@@ -1534,11 +3989,243 @@ async def test_ai_request_rejects_cancelled_task_before_call_or_retry_creation()
 
 
 @pytest.mark.anyio
+async def test_finalize_definite_failure_projects_receipt_to_attempt_and_call() -> None:
+    from types import SimpleNamespace
+
+    attempt = SimpleNamespace(
+        id="attempt_1",
+        ai_call_id="call_1",
+        status="prepared",
+        state_version=4,
+        error_code=None,
+    )
+    call = SimpleNamespace(
+        id="call_1",
+        task_id="task_1",
+        status="running",
+        result_disposition="pending",
+        winner_attempt_id=None,
+        state_version=6,
+        error_code=None,
+        parsed_result_json=None,
+        rendered_prompt_sha256="a" * 64,
+        schema_sha256="b" * 64,
+    )
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=None,
+        execution_status="running",
+    )
+    receipt = {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": 1,
+        "images": [{"image_id": "image_1", "sha256": "c" * 64}],
+    }
+    captured: dict[str, Any] = {}
+
+    class FakeAttemptDal:
+        async def get_by_id_for_update(self, attempt_id: str):
+            return attempt
+
+        async def cas_update(self, **kwargs):
+            captured["attempt"] = kwargs
+            return SimpleNamespace(
+                **{
+                    **attempt.__dict__,
+                    **kwargs["values"],
+                    "state_version": attempt.state_version + 1,
+                }
+            )
+
+    class FakeCallDal:
+        async def get_by_id_for_update(self, call_id: str):
+            return call
+
+        async def cas_update(self, **kwargs):
+            captured["call"] = kwargs
+            return SimpleNamespace(
+                **{
+                    **call.__dict__,
+                    **kwargs["values"],
+                    "state_version": call.state_version + 1,
+                }
+            )
+
+    class FakeTaskDal:
+        async def get_by_id_for_update(self, task_id: str):
+            return task
+
+    service = object.__new__(AIRequestService)
+    service.attempt_dal = FakeAttemptDal()
+    service.call_dal = FakeCallDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service.finalize_attempt_failure(
+        attempt_id=attempt.id,
+        error_code="provider_response_json_invalid",
+        unknown=False,
+        image_receipt=receipt,
+        image_manifest_sha256="d" * 64,
+        image_count_sent=1,
+    )
+
+    expected_delivery = {
+        "sent_image_manifest_sha256": "d" * 64,
+        "image_count_sent": 1,
+        "image_receipt_json": receipt,
+    }
+    assert captured["attempt"]["values"] == {
+        "error_code": "provider_response_json_invalid",
+        "finished_at": captured["attempt"]["values"]["finished_at"],
+        **expected_delivery,
+        "status": "failed",
+        "next_reconcile_at": None,
+    }
+    assert captured["call"]["expected_version"] == call.state_version
+    assert captured["call"]["values"] == {
+        **expected_delivery,
+        "status": "failed",
+        "result_disposition": "failed",
+        "error_code": "provider_response_json_invalid",
+        "finished_at": captured["call"]["values"]["finished_at"],
+    }
+    assert result["attempt_status"] == "failed"
+    assert result["status"] == "failed"
+    assert result["result_disposition"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_finalize_unknown_sets_first_timestamp_once_and_starts_at_zero() -> None:
+    from types import SimpleNamespace
+
+    current_attempt = SimpleNamespace(
+        id="attempt_1",
+        ai_call_id="call_1",
+        status="prepared",
+        state_version=4,
+        error_code=None,
+        first_unknown_at=None,
+        reconcile_count=0,
+    )
+    call = SimpleNamespace(
+        id="call_1",
+        task_id="task_1",
+        status="running",
+        result_disposition="pending",
+        winner_attempt_id=None,
+        state_version=6,
+        error_code=None,
+        parsed_result_json=None,
+        rendered_prompt_sha256="a" * 64,
+        schema_sha256="b" * 64,
+    )
+    task = SimpleNamespace(
+        id="task_1",
+        cancel_requested_at=None,
+        execution_status="running",
+    )
+    attempt_updates: list[dict[str, Any]] = []
+
+    class FakeAttemptDal:
+        async def get_by_id_for_update(self, attempt_id: str):
+            return current_attempt
+
+        async def cas_update(self, **kwargs):
+            nonlocal current_attempt
+            attempt_updates.append(kwargs["values"])
+            current_attempt = SimpleNamespace(
+                **{
+                    **current_attempt.__dict__,
+                    **kwargs["values"],
+                    "state_version": current_attempt.state_version + 1,
+                }
+            )
+            return current_attempt
+
+    class FakeCallDal:
+        async def get_by_id_for_update(self, call_id: str):
+            return call
+
+        async def cas_update(self, **kwargs):
+            raise AssertionError("unknown_must_not_finalize_logical_call")
+
+    class FakeTaskDal:
+        async def get_by_id_for_update(self, task_id: str):
+            return task
+
+    service = object.__new__(AIRequestService)
+    service.attempt_dal = FakeAttemptDal()
+    service.call_dal = FakeCallDal()
+    service.task_dal = FakeTaskDal()
+
+    first = await service.finalize_attempt_failure(
+        attempt_id=current_attempt.id,
+        error_code="provider_delivery_unknown",
+        unknown=True,
+        reconcile_after_seconds=300,
+    )
+    second = await service.finalize_attempt_failure(
+        attempt_id=current_attempt.id,
+        error_code="provider_delivery_unknown",
+        unknown=True,
+        reconcile_after_seconds=30,
+    )
+
+    assert len(attempt_updates) == 1
+    values = attempt_updates[0]
+    assert values["status"] == "unknown"
+    assert values["first_unknown_at"] == values["finished_at"]
+    assert (
+        values["next_reconcile_at"] - values["first_unknown_at"]
+    ).total_seconds() == 300
+    assert current_attempt.reconcile_count == 0
+    assert second["attempt_status"] == first["attempt_status"] == "unknown"
+    assert current_attempt.first_unknown_at == values["first_unknown_at"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("unknown", "image_receipt", "image_manifest_sha256", "image_count_sent"),
+    [
+        (False, {"image_count": 1}, None, 1),
+        (False, None, "d" * 64, 1),
+        (False, {"image_count": 1}, "d" * 64, None),
+        (True, {"image_count": 1}, "d" * 64, 1),
+    ],
+)
+async def test_finalize_failure_rejects_partial_or_unknown_delivery_audit(
+    unknown: bool,
+    image_receipt: dict[str, Any] | None,
+    image_manifest_sha256: str | None,
+    image_count_sent: int | None,
+) -> None:
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestStateConflict,
+    )
+
+    service = object.__new__(AIRequestService)
+    with pytest.raises(
+        AIRequestStateConflict,
+        match="ai_call_attempt_delivery_audit_invalid",
+    ):
+        await service.finalize_attempt_failure(
+            attempt_id="attempt_1",
+            error_code="provider_response_json_invalid",
+            unknown=unknown,
+            image_receipt=image_receipt,
+            image_manifest_sha256=image_manifest_sha256,
+            image_count_sent=image_count_sent,
+        )
+
+
+@pytest.mark.anyio
 async def test_late_attempt_success_is_audited_but_cannot_win_cancelled_task() -> None:
     from datetime import datetime
     from types import SimpleNamespace
 
-    from apps.backend.services.runtime.service.ai_request_service import AIRequestService
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestService,
+    )
 
     attempt = SimpleNamespace(
         id="attempt_1",
@@ -1619,6 +4306,8 @@ async def test_late_attempt_success_is_audited_but_cannot_win_cancelled_task() -
     )
 
     assert captured["attempt_values"]["status"] == "succeeded"
+    assert captured["attempt_values"]["error_code"] is None
+    assert captured["attempt_values"]["next_reconcile_at"] is None
     assert captured["attempt_values"]["usage_json"] == {"total_tokens": 17}
     assert captured["attempt_values"]["actual_model"] == "provider-model"
     assert captured["call_values"]["status"] == "cancelled"
@@ -1692,9 +4381,11 @@ async def test_report_finalization_is_idempotent_for_same_stage_and_content() ->
     from apps.backend.services.runtime.service.report_service import ReportService
 
     content = {"medical_status": "normal", "findings": []}
-    content_sha = __import__("hashlib").sha256(
-        json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    content_sha = (
+        __import__("hashlib")
+        .sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode())
+        .hexdigest()
+    )
     task = SimpleNamespace(
         id="task_1",
         cancel_requested_at=None,
@@ -1749,6 +4440,56 @@ async def test_report_finalization_is_idempotent_for_same_stage_and_content() ->
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("medical_status", "content", "error_code"),
+    [
+        (
+            "produced",
+            {"medical_status": "produced"},
+            "report_medical_status_invalid",
+        ),
+        (
+            "normal",
+            {},
+            "report_content_medical_status_missing",
+        ),
+        (
+            "normal",
+            {"medical_status": "abnormal"},
+            "report_content_medical_status_conflict",
+        ),
+    ],
+)
+async def test_report_finalization_rejects_status_drift_before_dal_access(
+    medical_status: str,
+    content: dict[str, Any],
+    error_code: str,
+) -> None:
+    from apps.backend.services.runtime.service.report_service import (
+        ReportService,
+        ReportStateConflictError,
+    )
+
+    class RejectDalAccess:
+        def __getattr__(self, _name: str):
+            raise AssertionError("invalid report status must fail before DAL access")
+
+    service = object.__new__(ReportService)
+    service.task_dal = RejectDalAccess()
+    service.stage_dal = RejectDalAccess()
+    service.report_dal = RejectDalAccess()
+
+    with pytest.raises(ReportStateConflictError, match=f"^{error_code}$"):
+        await service.finalize(
+            task_id="task_1",
+            finalization_stage_id="stage_1",
+            source_call_id="call_1",
+            medical_status=medical_status,
+            content=content,
+        )
+
+
+@pytest.mark.anyio
 async def test_report_publish_is_idempotent_after_cas_race() -> None:
     from types import SimpleNamespace
 
@@ -1794,3 +4535,99 @@ async def test_report_publish_is_idempotent_after_cas_race() -> None:
 
     assert result is published
     assert reads == 2
+
+
+@pytest.mark.anyio
+async def test_runtime_readiness_excludes_evaluation_plane(monkeypatch) -> None:
+    from apps.backend.core import readiness as readiness_module
+
+    checked_engines: list[object] = []
+    checked_domains: list[str] = []
+
+    class ReadyRedis:
+        last_error = None
+
+        async def check_readiness(self) -> bool:
+            return True
+
+    async def database_ready(engine: object, *, error_code: str):
+        checked_engines.append(engine)
+        return True, None
+
+    async def broker_ready(topology):
+        checked_domains.append(topology.domain)
+        return (
+            True,
+            None,
+            "ready",
+            {
+                "consumer_count": 1,
+                "queue_message_count": 0,
+                "dead_letter_message_count": 0,
+                "oldest_message_age_seconds": None,
+                "oldest_message_age_supported": False,
+            },
+        )
+
+    monkeypatch.setattr(readiness_module.settings, "BROKER_ENABLED", True)
+    monkeypatch.setattr(readiness_module, "_database_ready", database_ready)
+    monkeypatch.setattr(readiness_module, "_broker_domain_ready", broker_ready)
+
+    result = await readiness_module.build_runtime_readiness(ReadyRedis())
+
+    assert result["ready"] is True
+    assert result["readiness_scope"] == "online_runtime"
+    assert checked_engines == [readiness_module.async_engine]
+    assert checked_domains == ["imaging"]
+    assert "evaluation_database" not in result["components"]
+    assert "evaluation_broker" not in result["components"]
+
+
+@pytest.mark.anyio
+async def test_admin_aggregate_readiness_keeps_evaluation_plane(monkeypatch) -> None:
+    from apps.backend.core import readiness as readiness_module
+
+    checked_engines: list[object] = []
+    checked_domains: list[str] = []
+
+    class ReadyRedis:
+        last_error = None
+
+        async def check_readiness(self) -> bool:
+            return True
+
+    async def database_ready(engine: object, *, error_code: str):
+        checked_engines.append(engine)
+        if engine is readiness_module.evaluation_async_engine:
+            return False, error_code
+        return True, None
+
+    async def broker_ready(topology):
+        checked_domains.append(topology.domain)
+        return (
+            True,
+            None,
+            "ready",
+            {
+                "consumer_count": 1,
+                "queue_message_count": 0,
+                "dead_letter_message_count": 0,
+                "oldest_message_age_seconds": None,
+                "oldest_message_age_supported": False,
+            },
+        )
+
+    monkeypatch.setattr(readiness_module.settings, "BROKER_ENABLED", True)
+    monkeypatch.setattr(readiness_module, "_database_ready", database_ready)
+    monkeypatch.setattr(readiness_module, "_broker_domain_ready", broker_ready)
+
+    result = await readiness_module.build_readiness(ReadyRedis())
+
+    assert result["ready"] is False
+    assert checked_engines == [
+        readiness_module.async_engine,
+        readiness_module.evaluation_async_engine,
+    ]
+    assert checked_domains == ["imaging", "evaluation"]
+    assert result["components"]["evaluation_database"]["ready"] is False
+    assert result["components"]["evaluation_broker"]["ready"] is True

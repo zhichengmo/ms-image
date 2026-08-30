@@ -21,6 +21,9 @@ class AIAttemptReconcileError(ValueError):
     """An unknown Attempt cannot be safely claimed or converged."""
 
 
+PROVIDER_RESULT_UNRESOLVED = "provider_result_unresolved"
+
+
 class AIAttemptReconcileService:
     """Use DalBase-backed CAS operations; Provider lookup stays outside this service."""
 
@@ -41,17 +44,46 @@ class AIAttemptReconcileService:
         expected_version: int,
         now: datetime,
         lease_seconds: int,
+        max_reconcile_count: int,
+        max_unknown_age_seconds: int,
     ) -> dict[str, Any] | None:
         if lease_seconds < 30 or lease_seconds > 900:
             raise AIAttemptReconcileError("ai_attempt_reconcile_lease_invalid")
+        self._validate_bounds(
+            max_reconcile_count=max_reconcile_count,
+            max_unknown_age_seconds=max_unknown_age_seconds,
+        )
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
+        unknown_cutoff = now - timedelta(seconds=max_unknown_age_seconds)
         claimed = await self.attempt_dal.claim_reconcile_candidate(
             attempt_id=attempt_id,
             expected_version=expected_version,
             now=now,
-            lease_expires_at=now + timedelta(seconds=lease_seconds),
+            lease_expires_at=lease_expires_at,
+            unknown_cutoff=unknown_cutoff,
+            max_reconcile_count=max_reconcile_count,
         )
+        lookup_authorized = claimed is not None
         if claimed is None:
-            return None
+            claimed = await self.attempt_dal.claim_exhausted_reconcile_candidate(
+                attempt_id=attempt_id,
+                expected_version=expected_version,
+                now=now,
+                lease_expires_at=lease_expires_at,
+                unknown_cutoff=unknown_cutoff,
+                max_reconcile_count=max_reconcile_count,
+            )
+            if claimed is None:
+                return None
+        limit_reasons = self.limit_reasons(
+            first_unknown_at=claimed.first_unknown_at,
+            reconcile_count=claimed.reconcile_count,
+            now=now,
+            max_reconcile_count=max_reconcile_count,
+            max_unknown_age_seconds=max_unknown_age_seconds,
+        )
+        if not lookup_authorized and not limit_reasons:
+            raise AIAttemptReconcileError("ai_attempt_reconcile_limit_state_invalid")
         call = await self.call_dal.get_by_id(claimed.ai_call_id)
         if call is None:
             raise AIAttemptReconcileError("ai_call_not_found")
@@ -73,6 +105,10 @@ class AIAttemptReconcileService:
         return {
             "attempt_id": claimed.id,
             "attempt_state_version": claimed.state_version,
+            "first_unknown_at": claimed.first_unknown_at,
+            "reconcile_count": claimed.reconcile_count,
+            "lookup_authorized": lookup_authorized,
+            "limit_reasons": limit_reasons if not lookup_authorized else (),
             "logical_call_id": call.id,
             "stage_checkpoint_id": call.stage_checkpoint_id,
             "provider_idempotency_key": claimed.provider_idempotency_key,
@@ -94,18 +130,52 @@ class AIAttemptReconcileService:
         now: datetime,
         retry_after_seconds: int,
         error_code: str,
+        max_reconcile_count: int,
+        max_unknown_age_seconds: int,
     ) -> bool:
+        self._validate_bounds(
+            max_reconcile_count=max_reconcile_count,
+            max_unknown_age_seconds=max_unknown_age_seconds,
+        )
         retry_seconds = max(30, min(86_400, int(retry_after_seconds)))
-        updated = await self.attempt_dal.cas_update(
+        updated = await self.attempt_dal.reschedule_reconcile_candidate(
             attempt_id=attempt_id,
             expected_version=expected_version,
-            values={
-                "status": "unknown",
-                "error_code": self._safe_error_code(error_code),
-                "next_reconcile_at": now + timedelta(seconds=retry_seconds),
-            },
+            next_reconcile_at=now + timedelta(seconds=retry_seconds),
+            unknown_cutoff=now - timedelta(seconds=max_unknown_age_seconds),
+            max_reconcile_count=max_reconcile_count,
+            error_code=self._safe_error_code(error_code),
         )
         return updated is not None
+
+    async def finalize_unresolved(
+        self,
+        *,
+        attempt_id: str,
+        now: datetime,
+    ) -> dict[str, str]:
+        """Close a bounded-out unknown without issuing another Provider request."""
+
+        call_result = await self.ai_request_service.finalize_attempt_failure(
+            attempt_id=attempt_id,
+            error_code=PROVIDER_RESULT_UNRESOLVED,
+            unknown=False,
+        )
+        disposition = (
+            "terminal_unresolved"
+            if call_result.get("attempt_status") == "failed"
+            and call_result.get("status") == "failed"
+            and call_result.get("error_code") == PROVIDER_RESULT_UNRESOLVED
+            else "terminal_preserved"
+        )
+        return {
+            "disposition": disposition,
+            "stage_outcome": await self._apply_call_result_to_stage(
+                attempt_id=attempt_id,
+                call_result=call_result,
+                now=now,
+            ),
+        }
 
     async def apply_lookup_result(
         self,
@@ -140,6 +210,19 @@ class AIAttemptReconcileService:
         else:
             raise AIAttemptReconcileError("ai_attempt_lookup_result_not_terminal")
 
+        return await self._apply_call_result_to_stage(
+            attempt_id=attempt_id,
+            call_result=call_result,
+            now=now,
+        )
+
+    async def _apply_call_result_to_stage(
+        self,
+        *,
+        attempt_id: str,
+        call_result: dict[str, Any],
+        now: datetime,
+    ) -> str:
         attempt = await self.attempt_dal.get_by_id(attempt_id)
         if attempt is None:
             raise AIAttemptReconcileError("ai_call_attempt_not_found")
@@ -163,6 +246,57 @@ class AIAttemptReconcileService:
         return "stage_restored"
 
     @staticmethod
+    def _validate_bounds(
+        *,
+        max_reconcile_count: int,
+        max_unknown_age_seconds: int,
+    ) -> None:
+        if (
+            not isinstance(max_reconcile_count, int)
+            or isinstance(max_reconcile_count, bool)
+            or max_reconcile_count < 1
+            or max_reconcile_count > 100
+        ):
+            raise AIAttemptReconcileError("ai_attempt_reconcile_max_count_invalid")
+        if (
+            not isinstance(max_unknown_age_seconds, int)
+            or isinstance(max_unknown_age_seconds, bool)
+            or max_unknown_age_seconds < 300
+            or max_unknown_age_seconds > 604_800
+        ):
+            raise AIAttemptReconcileError("ai_attempt_reconcile_max_age_invalid")
+
+    @classmethod
+    def limit_reasons(
+        cls,
+        *,
+        first_unknown_at: datetime | None,
+        reconcile_count: int,
+        now: datetime,
+        max_reconcile_count: int,
+        max_unknown_age_seconds: int,
+    ) -> tuple[str, ...]:
+        cls._validate_bounds(
+            max_reconcile_count=max_reconcile_count,
+            max_unknown_age_seconds=max_unknown_age_seconds,
+        )
+        if (
+            not isinstance(reconcile_count, int)
+            or isinstance(reconcile_count, bool)
+            or reconcile_count < 0
+        ):
+            raise AIAttemptReconcileError("ai_attempt_reconcile_count_invalid")
+        reasons: list[str] = []
+        if reconcile_count >= max_reconcile_count:
+            reasons.append("count")
+        if (
+            first_unknown_at is not None
+            and first_unknown_at + timedelta(seconds=max_unknown_age_seconds) <= now
+        ):
+            reasons.append("age")
+        return tuple(reasons)
+
+    @staticmethod
     def _safe_error_code(value: str) -> str:
         code = str(value or "").strip()
         if not code or len(code) > 80 or any(char.isspace() for char in code):
@@ -170,4 +304,8 @@ class AIAttemptReconcileService:
         return code
 
 
-__all__ = ["AIAttemptReconcileError", "AIAttemptReconcileService"]
+__all__ = [
+    "AIAttemptReconcileError",
+    "AIAttemptReconcileService",
+    "PROVIDER_RESULT_UNRESOLVED",
+]

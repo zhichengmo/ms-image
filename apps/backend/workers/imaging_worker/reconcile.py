@@ -59,6 +59,10 @@ class ImageReconciler:
             limit=limit,
             lease_seconds=settings.AI_ATTEMPT_RECONCILE_LEASE_SECONDS,
             retry_seconds=settings.AI_ATTEMPT_RECONCILE_RETRY_SECONDS,
+            max_reconcile_count=settings.AI_ATTEMPT_RECONCILE_MAX_COUNT,
+            max_unknown_age_seconds=(
+                settings.AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS
+            ),
         )
         now = datetime.utcnow()
         async with self.session_factory() as session:

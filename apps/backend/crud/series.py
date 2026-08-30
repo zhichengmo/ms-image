@@ -1,5 +1,6 @@
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,18 @@ class SeriesDal(DalBase):
     async def get_by_key(self, *, study_id: str, series_key: str) -> Series | None:
         return await self.get_data(
             study_id=study_id, series_key=series_key, v_return_none=True
+        )
+
+    async def get_by_key_for_update(
+        self, *, study_id: str, series_key: str
+    ) -> Series | None:
+        return await self.get_data(
+            study_id=study_id,
+            series_key=series_key,
+            v_start_sql=select(self.model).with_for_update().execution_options(
+                populate_existing=True
+            ),
+            v_return_none=True,
         )
 
     async def list_for_study(self, study_id: str) -> list[Series]:

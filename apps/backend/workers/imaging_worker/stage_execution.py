@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
+    GatewayDefiniteResponseError,
     GatewayUnknownDeliveryError,
 )
 from apps.backend.core.ai.gateway.image_signer import (
@@ -56,9 +57,11 @@ class StageExecutionWorker:
                     owner_id=owner_id,
                     lease_seconds=lease_seconds,
                 )
-        if stage is None:
+                # The claim transaction expires ORM state on commit.  Keep only
+                # the scalar identity needed by the next transaction boundary.
+                stage_id = None if stage is None else stage.id
+        if stage_id is None:
             return {"outcome": "already_applied", "event_id": event_id}
-        stage_id = stage.id
         try:
             async with self.session_factory() as session:
                 async with session.begin():
@@ -109,6 +112,26 @@ class StageExecutionWorker:
                     "event_id": event_id,
                     "attempt_id": attempt_id,
                 }
+            except GatewayDefiniteResponseError as exc:
+                async with self.session_factory() as session:
+                    async with session.begin():
+                        ai_service = AIRequestService(session)
+                        call_result = await ai_service.finalize_attempt_failure(
+                            attempt_id=attempt_id,
+                            error_code=str(exc),
+                            unknown=False,
+                            image_receipt=exc.image_receipt,
+                            image_manifest_sha256=exc.image_manifest_sha256,
+                            image_count_sent=exc.image_count_sent,
+                        )
+                        output = await ImagingExecutionService(
+                            session
+                        ).finalize_ai_stage(
+                            stage_checkpoint_id=stage_id,
+                            owner_id=owner_id,
+                            call_result=call_result,
+                        )
+                return self._completed(event_id=event_id, output=output)
             except (GatewayContractError, ImageSigningError) as exc:
                 async with self.session_factory() as session:
                     async with session.begin():

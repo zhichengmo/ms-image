@@ -232,8 +232,28 @@ class Settings(BaseSettings):
     AI_PLATFORM_API_KEY: str = ""
     AI_PLATFORM_TIMEOUT_SECONDS: float = Field(120.0, gt=0, allow_inf_nan=False)
 
+    # Optional local/controlled TargetedReview experiment selector.  Public
+    # Task requests still carry only the caller-owned species; when this is
+    # non-empty, diagnose Tasks resolve the matching experiment activation
+    # slot and fail closed instead of falling back to the global Primary slot.
+    XRAY_TARGETED_EXPERIMENT_SCOPE_KEY: str = Field(default="", max_length=128)
+
     # Attempt reconciliation is an ms-image durable-state concern, not an
     # alternative Provider transport contract.
+    AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED: bool = False
+    AI_ATTEMPT_RECONCILE_INTERVAL_SECONDS: int = Field(
+        default=60,
+        ge=30,
+        le=3600,
+    )
+    AI_ATTEMPT_RECONCILE_BATCH_LIMIT: int = Field(default=50, ge=1, le=500)
+    AI_ATTEMPT_RECONCILE_POLICY_VERSION: str = "ai-attempt-reconcile.v1"
+    AI_ATTEMPT_RECONCILE_MAX_COUNT: int = Field(default=3, ge=1, le=100)
+    AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS: int = Field(
+        default=10_800,
+        ge=300,
+        le=604_800,
+    )
     AI_ATTEMPT_RECONCILE_LEASE_SECONDS: int = Field(default=120, ge=30, le=900)
     AI_ATTEMPT_RECONCILE_RETRY_SECONDS: int = Field(default=300, ge=30, le=86400)
 
@@ -263,6 +283,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AI_PLATFORM_OPENAI_BASE_URL 与 AI_PLATFORM_API_KEY 必须成组配置"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_ai_attempt_reconcile_policy(self):
+        if self.AI_ATTEMPT_RECONCILE_POLICY_VERSION != "ai-attempt-reconcile.v1":
+            raise ValueError("ai_attempt_reconcile_policy_version_invalid")
+        if (
+            self.AI_ATTEMPT_RECONCILE_MAX_COUNT != 3
+            or self.AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS != 10_800
+        ):
+            raise ValueError("ai_attempt_reconcile_policy_v1_values_invalid")
         return self
 
     @property

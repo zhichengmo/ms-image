@@ -3,7 +3,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from apps.backend.schemas.base import GenericResponse
 from apps.backend.core.config import settings
-from apps.backend.core.readiness import build_readiness
+from apps.backend.core.readiness import build_runtime_readiness
 from datetime import datetime
 
 router = APIRouter()
@@ -53,7 +53,7 @@ async def readiness_check(request: Request):
             "error": "Redis manager is not initialized",
         }
     else:
-        data = await build_readiness(manager)
+        data = await build_runtime_readiness(manager)
     status_code = 200 if data.get("ready") else 503
     return JSONResponse(
         status_code=status_code,

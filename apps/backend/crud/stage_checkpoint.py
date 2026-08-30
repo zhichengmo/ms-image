@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,11 @@ class StageCheckpointDal(DalBase):
         claimed = await self.conditional_update(v_where=[self.model.id == checkpoint_id, self.model.status == "queued", self.model.state_version == expected_version, or_(self.model.lease_expires_at.is_(None), self.model.lease_expires_at <= now)], data={"status": "running", "lease_owner_id": owner_id, "lease_generation": self.model.lease_generation + 1, "lease_expires_at": lease_expires_at, "heartbeat_at": now, "started_at": now})
         if not claimed:
             return None
-        return await self.get_data(data_id=checkpoint_id, v_return_none=True, v_expire_all=True)
+        return await self.get_data(
+            data_id=checkpoint_id,
+            v_start_sql=select(self.model).execution_options(populate_existing=True),
+            v_return_none=True,
+        )
 
     async def heartbeat(self, *, checkpoint_id: str, owner_id: str, lease_generation: int, now: datetime, lease_expires_at: datetime) -> bool:
         return await self.conditional_update(v_where=[self.model.id == checkpoint_id, self.model.status == "running", self.model.lease_owner_id == owner_id, self.model.lease_generation == lease_generation, self.model.lease_expires_at > now], data={"heartbeat_at": now, "lease_expires_at": lease_expires_at})

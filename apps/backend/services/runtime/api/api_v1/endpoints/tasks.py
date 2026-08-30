@@ -1,3 +1,6 @@
+from math import ceil
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -5,8 +8,14 @@ from apps.backend.services.runtime.api.api_v1.endpoints.imaging_errors import ro
 from apps.backend.core.dependencies import get_async_session, require_caller_scope
 from apps.backend.core.config import settings
 from apps.backend.core.contexts import CallerContext
-from apps.backend.schemas.base import GenericResponse
-from apps.backend.schemas.task import TaskCancelRequest, TaskCreate, TaskResponse
+from apps.backend.schemas.base import GenericResponse, PageInfo, PagedResponse
+from apps.backend.schemas.task import (
+    TaskCancelRequest,
+    TaskCreate,
+    TaskPageQuery,
+    TaskResponse,
+    TaskStatusResponse,
+)
 from apps.backend.services.runtime.service.task_service import TaskService
 
 router = APIRouter(prefix="/tasks", tags=["Imaging tasks"])
@@ -30,6 +39,29 @@ async def get_task(task_id: str = Query(..., alias="id", min_length=1, max_lengt
     except Exception as exc:
         return await rollback_and_map(db, exc)
     return GenericResponse(message="Task 查询成功", data=data)
+
+
+@router.get("/page", response_model=PagedResponse[TaskStatusResponse])
+async def page_tasks(
+    query: Annotated[TaskPageQuery, Query()],
+    context: CallerContext = Depends(caller),
+    service: TaskService = Depends(get_task_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        result = await service.page_tasks(query=query, caller=context)
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return PagedResponse(
+        message="Task 分页查询成功",
+        data=result.data,
+        page_info=PageInfo(
+            total=result.total,
+            page=result.page,
+            limit=result.limit,
+            total_pages=ceil(result.total / result.limit) if result.total else 0,
+        ),
+    )
 
 
 @router.post("/cancel", response_model=GenericResponse[TaskResponse])

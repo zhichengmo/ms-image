@@ -7,7 +7,7 @@ column has a version marker and forbids arbitrary provider or template fields.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -19,6 +19,31 @@ T = TypeVar("T")
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class AIControlHealthResponse(_StrictModel):
+    status: Literal["healthy"]
+    service: Literal["ai_control"]
+    timestamp: datetime
+
+
+class AIControlReadinessComponent(_StrictModel):
+    required: bool
+    ready: bool | None
+    state: str = Field(min_length=1, max_length=32)
+    error: str | None = Field(default=None, max_length=80)
+
+
+class AIControlReadinessComponents(_StrictModel):
+    database: AIControlReadinessComponent
+    control_plane_jwt: AIControlReadinessComponent
+    nacos: AIControlReadinessComponent
+
+
+class AIControlReadinessResponse(_StrictModel):
+    ready: bool
+    readiness_scope: Literal["ai_control"]
+    components: AIControlReadinessComponents
 
 
 class PromptVariablesContract(_StrictModel):
@@ -279,6 +304,7 @@ class PromptImportRequest(CommandRequest):
     nacos_release_or_version: str | None = Field(default=None, max_length=64)
     nacos_label: str | None = Field(default=None, max_length=64)
     namespace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    variables_json: PromptVariablesContract | None = None
     message_contract_json: PromptMessageContract | None = None
 
     @field_validator(
@@ -323,11 +349,10 @@ class ConnectionCreate(CommandRequest):
     provider_type: str = Field(min_length=1, max_length=64)
     api_format: str = Field(min_length=1, max_length=64)
     base_url: str = Field(min_length=1, max_length=500)
-    secret_ref: str = Field(min_length=1, max_length=500)
     region: str | None = Field(default=None, max_length=64)
     capability_json: ConnectionCapabilityContract
 
-    @field_validator("connection_key", "version", "name", "provider_type", "api_format", "base_url", "secret_ref")
+    @field_validator("connection_key", "version", "name", "provider_type", "api_format", "base_url")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return normalize_required_text(value)
@@ -338,11 +363,10 @@ class ConnectionUpdate(StateCommandRequest):
     provider_type: str = Field(min_length=1, max_length=64)
     api_format: str = Field(min_length=1, max_length=64)
     base_url: str = Field(min_length=1, max_length=500)
-    secret_ref: str = Field(min_length=1, max_length=500)
     region: str | None = Field(default=None, max_length=64)
     capability_json: ConnectionCapabilityContract
 
-    @field_validator("name", "provider_type", "api_format", "base_url", "secret_ref")
+    @field_validator("name", "provider_type", "api_format", "base_url")
     @classmethod
     def normalize_text(cls, value: str) -> str:
         return normalize_required_text(value)
@@ -359,8 +383,6 @@ class ConnectionResponse(_StrictModel):
     region: str | None = None
     capability_json: ConnectionCapabilityContract
     connection_sha256: str
-    secret_ref_type: str
-    secret_ref_fingerprint: str
     status: str
     state_version: int
     validated_at: datetime | None = None

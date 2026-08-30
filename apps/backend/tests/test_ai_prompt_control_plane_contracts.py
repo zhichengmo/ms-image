@@ -24,7 +24,6 @@ from apps.backend.core.ai.connection_contract import (
     ConnectionContractError,
     canonical_connection_metadata_sha256,
     canonicalize_connection_base_url,
-    validate_secret_ref_structure,
 )
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
@@ -33,24 +32,30 @@ from apps.backend.core.ai.gateway.contracts import (
 from apps.backend.core.ai.prompting.message_contract import (
     PROMPT_MESSAGE_CONTRACT_V1,
     PromptMessageAssembler,
+    validate_prompt_message_template,
 )
 from apps.backend.core.ai.prompting import PromptContractError
 from apps.backend.core.ai.prompting.contracts import sha256_json, sha256_text
 from apps.backend.core.ai.prompting.renderer import PromptRenderError, PromptRenderer
 from apps.backend.core.pipeline import build_default_registry
 from apps.backend.core.config import Settings
-from apps.backend.schemas.ai_config import AIConfigResponse
+from apps.backend.schemas.ai_config import AIConfigCreate, AIConfigResponse
 from apps.backend.schemas.ai_control import (
     BudgetPolicyContract,
+    ConnectionCreate,
     ConnectionResponse,
     GatewayProfileContract,
     GenerationParams,
     ModelPoolLanePlanContract,
+    PromptImportRequest,
     PromptVariablesContract,
 )
 from apps.backend.services.ai_control.service.ai_config_service import AIConfigService
 from apps.backend.services.ai_control.service.config_compiler import AIConfigCompiler
 from apps.backend.services.ai_control.service.errors import AIControlValidationError
+from apps.backend.services.ai_control.service.prompt_import_service import (
+    PromptImportService,
+)
 from apps.backend.services.ai_control.service.prompt_template_service import (
     PromptTemplateService,
 )
@@ -92,6 +97,11 @@ VALID_LANE = {
 }
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 def _connection_metadata(*, base_url: str) -> dict[str, Any]:
     return {
         "connection_key": "xray_provider",
@@ -99,7 +109,6 @@ def _connection_metadata(*, base_url: str) -> dict[str, Any]:
         "provider_type": "openai_compatible",
         "api_format": "responses",
         "base_url": base_url,
-        "secret_ref": "secret-manager://ai/xray/provider",
         "region": "provider-region",
         "capability_json": {
             "contract_version": "connection-capability.v1",
@@ -109,14 +118,181 @@ def _connection_metadata(*, base_url: str) -> dict[str, Any]:
 
 
 def _assert_no_sensitive_keys(value: Any) -> None:
-    forbidden = ("secret", "token", "authorization", "password", "api_key", "credential")
+    forbidden = (
+        "secret",
+        "token",
+        "authorization",
+        "password",
+        "api_key",
+        "credential",
+    )
     if isinstance(value, dict):
-        assert not any(marker in key.casefold() for key in value for marker in forbidden)
+        assert not any(
+            marker in key.casefold() for key in value for marker in forbidden
+        )
         for nested in value.values():
             _assert_no_sensitive_keys(nested)
     elif isinstance(value, list):
         for nested in value:
             _assert_no_sensitive_keys(nested)
+
+
+def test_control_plane_jwt_readiness_rejects_placeholder_secret(monkeypatch) -> None:
+    from apps.backend.core import dependencies
+
+    monkeypatch.setattr(dependencies.settings, "ADMIN_ALGORITHM", "HS256")
+    monkeypatch.setattr(dependencies.settings, "ADMIN_SECRET_KEY", "change-me")
+
+    assert dependencies.control_plane_jwt_readiness() == (
+        False,
+        "control_plane_jwt_key_unavailable",
+    )
+
+
+@pytest.mark.anyio
+async def test_ai_control_readiness_uses_only_required_dependencies(
+    monkeypatch,
+) -> None:
+    from apps.backend.services.ai_control import readiness
+
+    async def database_ready() -> tuple[bool, str | None]:
+        return True, None
+
+    monkeypatch.setattr(readiness.settings, "NACOS_SERVER_ADDR", "")
+    monkeypatch.setattr(readiness, "_database_ready", database_ready)
+    monkeypatch.setattr(
+        readiness,
+        "control_plane_jwt_readiness",
+        lambda: (True, None),
+    )
+
+    result = await readiness.build_ai_control_readiness()
+
+    assert result.ready is True
+    assert result.readiness_scope == "ai_control"
+    assert result.components.database.ready is True
+    assert result.components.control_plane_jwt.ready is True
+    assert result.components.nacos.required is False
+    assert result.components.nacos.ready is None
+    assert set(result.components.model_dump()) == {
+        "database",
+        "control_plane_jwt",
+        "nacos",
+    }
+
+
+@pytest.mark.anyio
+async def test_nacos_readiness_uses_prompt_client_capability_probe() -> None:
+    from apps.backend.services.ai_control.service.prompt_source import (
+        NacosPromptSourceClient,
+    )
+
+    calls: list[tuple[str, str, dict[str, str], str]] = []
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"allow": "GET,HEAD,OPTIONS"}
+
+    class FakeNacosClient:
+        async def request(
+            self,
+            method: str,
+            path: str,
+            *,
+            params: dict[str, str],
+            response_mode: str,
+        ) -> FakeResponse:
+            calls.append((method, path, params, response_mode))
+            return FakeResponse()
+
+    source = NacosPromptSourceClient(
+        server_addr="https://nacos.example",
+        namespace_id="prompt-namespace",
+        client=FakeNacosClient(),
+    )
+
+    await source.check_prompt_api_readiness()
+
+    assert calls == [
+        (
+            "OPTIONS",
+            "/v3/client/ai/prompt",
+            {"namespaceId": "prompt-namespace"},
+            "response",
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_nacos_readiness_rejects_route_without_prompt_get() -> None:
+    from apps.backend.services.ai_control.service.prompt_source import (
+        NacosPromptSourceClient,
+        PromptSourceError,
+    )
+
+    class FakeResponse:
+        status_code = 200
+        headers = {"allow": "HEAD,OPTIONS"}
+
+    class FakeNacosClient:
+        async def request(self, *_args, **_kwargs) -> FakeResponse:
+            return FakeResponse()
+
+    source = NacosPromptSourceClient(
+        server_addr="https://nacos.example",
+        namespace_id="prompt-namespace",
+        client=FakeNacosClient(),
+    )
+
+    with pytest.raises(
+        PromptSourceError,
+        match="prompt_source_nacos_prompt_api_unavailable",
+    ):
+        await source.check_prompt_api_readiness()
+
+
+@pytest.mark.anyio
+async def test_ai_control_readiness_endpoint_returns_503(monkeypatch) -> None:
+    from apps.backend.schemas.ai_control import (
+        AIControlReadinessComponent,
+        AIControlReadinessComponents,
+        AIControlReadinessResponse,
+    )
+    from apps.backend.services.ai_control.api.api_v1.endpoints import health
+
+    unavailable = AIControlReadinessResponse(
+        ready=False,
+        readiness_scope="ai_control",
+        components=AIControlReadinessComponents(
+            database=AIControlReadinessComponent(
+                required=True,
+                ready=False,
+                state="unavailable",
+                error="database_unavailable",
+            ),
+            control_plane_jwt=AIControlReadinessComponent(
+                required=True,
+                ready=True,
+                state="ready",
+            ),
+            nacos=AIControlReadinessComponent(
+                required=False,
+                ready=None,
+                state="disabled",
+            ),
+        ),
+    )
+
+    async def build_unavailable() -> AIControlReadinessResponse:
+        return unavailable
+
+    monkeypatch.setattr(health, "build_ai_control_readiness", build_unavailable)
+
+    response = await health.readiness_check()
+
+    assert response.status_code == 503
+    assert b'"success":false' in response.body
+    assert b'"readiness_scope":"ai_control"' in response.body
 
 
 def test_connection_url_is_canonical_and_metadata_hash_is_stable() -> None:
@@ -154,18 +330,16 @@ def test_connection_url_rejects_unsafe_shapes(base_url: str) -> None:
         canonicalize_connection_base_url(base_url)
 
 
-@pytest.mark.parametrize(
-    "secret_ref",
-    [
-        "secret-manager://ai/xray\nAuthorization: Bearer unsafe",
-        "secret-manager://ai/xray\runsafe",
-        "Authorization: secret-manager://ai/xray",
-        "bearer opaque-value",
-    ],
-)
-def test_secret_reference_rejects_header_or_newline_shapes(secret_ref: str) -> None:
-    with pytest.raises(ConnectionContractError, match="ai_connection_secret_ref_invalid"):
-        validate_secret_ref_structure(secret_ref)
+def test_connection_create_rejects_legacy_secret_reference_input() -> None:
+    with pytest.raises(ValidationError):
+        ConnectionCreate.model_validate(
+            {
+                "request_id": "request-1",
+                **_connection_metadata(base_url="https://provider.example/v1"),
+                "name": "XRay Platform",
+                "secret_ref": "secret-manager://legacy/provider",
+            }
+        )
 
 
 def test_renderer_is_deterministic_for_frozen_content_and_safe_context() -> None:
@@ -198,17 +372,23 @@ def test_renderer_is_deterministic_for_frozen_content_and_safe_context() -> None
 
     assert first == second
     assert "\r" not in first.rendered_text
-    assert '{{' not in first.rendered_text
-    assert first.rendered_prompt_sha256 == PromptRenderer.render(
-        content=content,
-        variables_json=VALID_VARIABLES,
-        safe_variables={
-            "SAFE_STUDY_CONTEXT_JSON": {"study_id": "study_1", "views": ["VD", "LL"]},
-            "OUTPUT_SCHEMA_JSON": {"required": ["result"], "type": "object"},
-            "PRIMARY_RESULT_JSON": {"summary": "stable"},
-        },
-        max_prompt_chars=10_000,
-    ).rendered_prompt_sha256
+    assert "{{" not in first.rendered_text
+    assert (
+        first.rendered_prompt_sha256
+        == PromptRenderer.render(
+            content=content,
+            variables_json=VALID_VARIABLES,
+            safe_variables={
+                "SAFE_STUDY_CONTEXT_JSON": {
+                    "study_id": "study_1",
+                    "views": ["VD", "LL"],
+                },
+                "OUTPUT_SCHEMA_JSON": {"required": ["result"], "type": "object"},
+                "PRIMARY_RESULT_JSON": {"summary": "stable"},
+            },
+            max_prompt_chars=10_000,
+        ).rendered_prompt_sha256
+    )
 
 
 def test_renderer_preserves_literal_dollars_in_jinja_injected_json() -> None:
@@ -329,9 +509,7 @@ def test_renderer_allows_nested_json_context_that_ends_in_double_brace() -> None
 
 
 def test_renderer_supports_dollar_placeholder_as_alias() -> None:
-    content = (
-        "检查上下文：$SAFE_STUDY_CONTEXT_JSON，Schema：$OUTPUT_SCHEMA_JSON"
-    )
+    content = "检查上下文：$SAFE_STUDY_CONTEXT_JSON，Schema：$OUTPUT_SCHEMA_JSON"
     rendered = PromptRenderer.render(
         content=content,
         variables_json=VALID_VARIABLES,
@@ -346,7 +524,9 @@ def test_renderer_supports_dollar_placeholder_as_alias() -> None:
     assert "$" not in rendered.rendered_text
 
 
-def test_renderer_supports_declared_business_dollar_variable_and_rejects_undeclared() -> None:
+def test_renderer_supports_declared_business_dollar_variable_and_rejects_undeclared() -> (
+    None
+):
     rendered = PromptRenderer.render(
         content="$base_info",
         variables_json={
@@ -370,7 +550,7 @@ def test_renderer_supports_declared_business_dollar_variable_and_rejects_undecla
 
 def test_renderer_allows_literal_json_example_in_template_body() -> None:
     content = (
-        "输出示例：{\"recg\": {\"photo\": \"皮肤图\"}}\n"
+        '输出示例：{"recg": {"photo": "皮肤图"}}\n'
         "上下文：{{ SAFE_STUDY_CONTEXT_JSON }}"
     )
     rendered = PromptRenderer.render(
@@ -399,17 +579,23 @@ def test_activation_slot_is_fixed_and_distinct_from_v1_legacy_slot() -> None:
     assert len(slot) == 64
     assert slot != activation_slot_sha256(**{**common, "task_type": "review"})
     assert slot != legacy_activation_slot(**common)
-    assert legacy_activation_slot(**common) == "xray.primary:global:global:xray:analysis"
+    assert (
+        legacy_activation_slot(**common) == "xray.primary:global:global:xray:analysis"
+    )
 
 
-def test_control_plane_json_contracts_accept_prompt_variables_and_reject_unsupported_lanes() -> None:
+def test_control_plane_json_contracts_accept_prompt_variables_and_reject_unsupported_lanes() -> (
+    None
+):
     variables = PromptVariablesContract(required=["base_info", "ARBITRARY"])
     assert variables.required == ["base_info", "ARBITRARY"]
 
     with pytest.raises(ValidationError, match="prompt_variables_contract_invalid"):
         PromptVariablesContract(required=["invalid-name"])
 
-    with pytest.raises(ValidationError, match="model_pool_single_primary_lane_required"):
+    with pytest.raises(
+        ValidationError, match="model_pool_single_primary_lane_required"
+    ):
         ModelPoolLanePlanContract(lanes=[{**VALID_LANE, "lane_key": "secondary"}])
 
     with pytest.raises(ValidationError):
@@ -444,8 +630,12 @@ def test_control_plane_json_contracts_accept_prompt_variables_and_reject_unsuppo
         )
 
 
-def test_control_plane_responses_do_not_expose_raw_snapshots_or_secret_references() -> None:
-    assert "secret_ref" not in ConnectionResponse.model_fields
+def test_control_plane_responses_do_not_expose_raw_snapshots_or_secret_references() -> (
+    None
+):
+    assert not any(
+        "secret" in field.casefold() for field in ConnectionResponse.model_fields
+    )
     assert {
         "prompt_content",
         "prompt_variables_json",
@@ -473,7 +663,9 @@ def test_gateway_profile_disabled_default_and_qualification_contract() -> None:
     assert default["provider_enabled"] is False
     assert default["qualification_status"] == "disabled"
     assert default["streaming_mode"] == "json"
-    with pytest.raises(GatewayContractError, match="gateway_profile_qualification_required"):
+    with pytest.raises(
+        GatewayContractError, match="gateway_profile_qualification_required"
+    ):
         normalize_gateway_profile(
             {
                 "contract_version": "ai-gateway-profile.v1",
@@ -496,7 +688,10 @@ def test_gateway_profile_disabled_default_and_qualification_contract() -> None:
             "allowed_actual_models": ["provider-model-b", "provider-model-a"],
         }
     )
-    assert qualified["allowed_actual_models"] == ["provider-model-a", "provider-model-b"]
+    assert qualified["allowed_actual_models"] == [
+        "provider-model-a",
+        "provider-model-b",
+    ]
     assert qualified["streaming_mode"] == "aggregate_sse"
     with pytest.raises(
         GatewayContractError, match="gateway_profile_actual_models_required"
@@ -512,9 +707,7 @@ def test_gateway_profile_disabled_default_and_qualification_contract() -> None:
                 "allowed_actual_models": [],
             }
         )
-    with pytest.raises(
-        ValidationError, match="gateway_profile_actual_models_required"
-    ):
+    with pytest.raises(ValidationError, match="gateway_profile_actual_models_required"):
         GatewayProfileContract(
             provider_enabled=True,
             qualification_status="qualified",
@@ -550,9 +743,7 @@ def test_prompt_message_assembler_legacy_and_v1_contracts() -> None:
         },
         safe_variables={},
     )
-    assert without_context.messages_json == [
-        {"role": "user", "content": "角色与边界"}
-    ]
+    assert without_context.messages_json == [{"role": "user", "content": "角色与边界"}]
 
 
 def test_prompt_source_data_id_and_variant_fallback_order() -> None:
@@ -570,41 +761,236 @@ def test_prompt_source_data_id_and_variant_fallback_order() -> None:
     assert variant_candidates("default") == ["default"]
 
 
-def test_prompt_source_xray_uses_canonical_common_primary_coordinate() -> None:
-    assert (
-        nacos_data_id(
+def test_prompt_source_xray_uses_exact_primary_coordinates() -> None:
+    coordinates = (
+        ("xray_primary", "common"),
+        ("xray_cat_primary", "cat"),
+        ("xray_dog_primary", "dog"),
+    )
+    for prompt_key, variant in coordinates:
+        assert nacos_data_id(
             service_code="ms-image",
             module_code="xray",
-            prompt_key="xray_primary",
-            variant="common",
+            prompt_key=prompt_key,
+            variant=variant,
             locale="zh-CN",
-        )
-        == "ms-image.x-ray.primary.common.zh-CN"
-    )
-    assert variant_candidates("common", module_code="xray") == ["common"]
+        ) == f"ms-image.x-ray.primary.{variant}.zh-CN"
+        assert variant_candidates(variant, module_code="xray") == [variant]
 
-    for invalid_variant in ("cat", "dog", "default"):
+    for invalid_variant in ("default", "rabbit"):
         with pytest.raises(
             PromptSourceError, match="prompt_source_xray_variant_invalid"
         ):
             variant_candidates(invalid_variant, module_code="xray")
 
-    with pytest.raises(PromptSourceError, match="prompt_source_xray_variant_mismatch"):
+    for prompt_key, wrong_variant in (
+        ("xray_primary", "cat"),
+        ("xray_cat_primary", "dog"),
+        ("xray_dog_primary", "common"),
+    ):
+        with pytest.raises(
+            PromptSourceError, match="prompt_source_xray_variant_mismatch"
+        ):
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=wrong_variant,
+                locale="zh-CN",
+            )
+    with pytest.raises(
+        PromptSourceError, match="prompt_source_xray_prompt_key_invalid"
+    ):
         nacos_data_id(
             service_code="ms-image",
             module_code="xray",
-            prompt_key="xray_primary",
-            variant="cat",
-            locale="zh-CN",
-        )
-    with pytest.raises(PromptSourceError, match="prompt_source_xray_prompt_key_invalid"):
-        nacos_data_id(
-            service_code="ms-image",
-            module_code="xray",
-            prompt_key="xray_cat_primary",
+            prompt_key="xray_rabbit_primary",
             variant="common",
             locale="zh-CN",
         )
+
+
+def test_species_primary_prompt_assets_preserve_v2_rendering_contract() -> None:
+    prompt_root = Path(__file__).resolve().parents[3] / "prompts/xray/nacos/primary"
+    common = (
+        prompt_root
+        / "common/zh-CN/ms-image.x-ray.primary.common.zh-CN.v2.0.0.txt"
+    ).read_text()
+    common_normalized, common_variables = normalize_imported_prompt(common)
+    message_contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": ["SAFE_STUDY_CONTEXT_JSON"],
+    }
+    rendered_sha256: set[str] = set()
+
+    for species in ("cat", "dog"):
+        content = (
+            prompt_root
+            / species
+            / "zh-CN"
+            / f"ms-image.x-ray.primary.{species}.zh-CN.v3.0.0.md"
+        ).read_text()
+        normalized, variables = normalize_imported_prompt(content)
+        assert variables == common_variables
+        assert set(variables["required"]) == {
+            "SAFE_STUDY_CONTEXT_JSON",
+            "OUTPUT_SCHEMA_JSON",
+        }
+        assert "PRIMARY_RESULT_JSON" not in variables["required"]
+        validate_prompt_message_template(
+            content=normalized,
+            message_contract_json=message_contract,
+        )
+        safe_variables = {
+            "SAFE_STUDY_CONTEXT_JSON": {"species": species},
+            "OUTPUT_SCHEMA_JSON": {"type": "object"},
+        }
+        rendered = PromptRenderer.render(
+            content=normalized,
+            variables_json=variables,
+            safe_variables=safe_variables,
+            max_prompt_chars=100_000,
+        )
+        messages = PromptMessageAssembler.assemble(
+            rendered_text=rendered.rendered_text,
+            message_contract_json=message_contract,
+            safe_variables=safe_variables,
+        )
+        assert messages.messages_json == [
+            {"role": "user", "content": rendered.rendered_text}
+        ]
+        rendered_sha256.add(rendered.rendered_prompt_sha256)
+
+    assert common_normalized
+    assert len(rendered_sha256) == 2
+
+
+def test_species_full_chain_prompt_assets_render_primary_and_targeted_modes() -> None:
+    prompt_root = Path(__file__).resolve().parents[3] / "prompts/xray/nacos/primary"
+    declared_variables = PromptVariablesContract(
+        required=["SAFE_STUDY_CONTEXT_JSON", "OUTPUT_SCHEMA_JSON"],
+        optional=["PRIMARY_RESULT_JSON"],
+    ).model_dump(mode="json")
+    message_contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "PRIMARY_RESULT_JSON",
+        ],
+    }
+    rendered_sha256: set[str] = set()
+
+    for species in ("cat", "dog"):
+        content = (
+            prompt_root
+            / species
+            / "zh-CN"
+            / f"ms-image.x-ray.primary.{species}.zh-CN.v4.0.0.md"
+        ).read_text()
+        normalized, inferred_variables = normalize_imported_prompt(content)
+        variables = PromptImportService._resolve_variables(
+            inferred_variables=inferred_variables,
+            declared_variables=declared_variables,
+        )
+        assert set(inferred_variables["required"]) == {
+            "SAFE_STUDY_CONTEXT_JSON",
+            "OUTPUT_SCHEMA_JSON",
+            "PRIMARY_RESULT_JSON",
+        }
+        validate_prompt_message_template(
+            content=normalized,
+            message_contract_json=message_contract,
+        )
+
+        primary = PromptRenderer.render(
+            content=normalized,
+            variables_json=variables,
+            safe_variables={
+                "SAFE_STUDY_CONTEXT_JSON": {
+                    "prompt_mode": "primary",
+                    "species": species,
+                },
+                "OUTPUT_SCHEMA_JSON": {"type": "object"},
+            },
+            max_prompt_chars=120_000,
+        )
+        targeted = PromptRenderer.render(
+            content=normalized,
+            variables_json=variables,
+            safe_variables={
+                "SAFE_STUDY_CONTEXT_JSON": {
+                    "prompt_mode": "targeted",
+                    "species": species,
+                    "selected_family_key": "thoracic",
+                    "selected_focus_key": "pulmonary_pattern",
+                },
+                "OUTPUT_SCHEMA_JSON": {"type": "object"},
+                "PRIMARY_RESULT_JSON": {"summary": "待复核结果"},
+            },
+            max_prompt_chars=120_000,
+        )
+
+        assert "联合主读完整结果——仅作为待复核输入" not in primary.rendered_text
+        assert "联合主读完整结果——仅作为待复核输入" in targeted.rendered_text
+        assert "待复核结果" in targeted.rendered_text
+        assert "PRIMARY_RESULT_JSON" not in targeted.rendered_text
+        rendered_sha256.update(
+            {primary.rendered_prompt_sha256, targeted.rendered_prompt_sha256}
+        )
+
+    assert len(rendered_sha256) == 4
+
+
+def test_prompt_import_explicit_variables_only_change_required_optional_split() -> None:
+    inferred = {
+        "contract_version": "prompt-variables.v1",
+        "required": [
+            "OUTPUT_SCHEMA_JSON",
+            "PRIMARY_RESULT_JSON",
+            "SAFE_STUDY_CONTEXT_JSON",
+        ],
+        "optional": [],
+    }
+    declared = {
+        "contract_version": "prompt-variables.v1",
+        "required": ["SAFE_STUDY_CONTEXT_JSON", "OUTPUT_SCHEMA_JSON"],
+        "optional": ["PRIMARY_RESULT_JSON"],
+    }
+
+    assert PromptImportService._resolve_variables(
+        inferred_variables=inferred,
+        declared_variables=declared,
+    ) == declared
+    with pytest.raises(
+        AIControlValidationError, match="prompt_import_variables_mismatch"
+    ):
+        PromptImportService._resolve_variables(
+            inferred_variables=inferred,
+            declared_variables={
+                **declared,
+                "optional": [],
+            },
+        )
+
+    payload = PromptImportRequest(
+        request_id="request_1",
+        prompt_key="xray_cat_primary",
+        version="4.0.0",
+        name="Cat XRay full-chain Prompt",
+        service_code="ms-image",
+        module_code="xray",
+        variant="cat",
+        variables_json=declared,
+        message_contract_json={
+            "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+            "user_context_keys": [
+                "SAFE_STUDY_CONTEXT_JSON",
+                "PRIMARY_RESULT_JSON",
+            ],
+        },
+    )
+    assert payload.variables_json is not None
+    assert payload.variables_json.optional == ["PRIMARY_RESULT_JSON"]
 
 
 def test_prompt_source_preserves_ms_ai_fast_template_semantics() -> None:
@@ -682,7 +1068,9 @@ def test_prompt_source_receipt_sha_binds_namespace_and_content() -> None:
 def test_runtime_gate_requires_ms_ai_fast_platform_configuration(monkeypatch) -> None:
     from apps.backend.core.config import settings
 
-    monkeypatch.setattr(settings, "AI_PLATFORM_OPENAI_BASE_URL", "https://platform.example/v1")
+    monkeypatch.setattr(
+        settings, "AI_PLATFORM_OPENAI_BASE_URL", "https://platform.example/v1"
+    )
     monkeypatch.setattr(settings, "AI_PLATFORM_API_KEY", "provider-key")
     monkeypatch.setattr(settings, "PROJECT_ENV", "production")
     assert AIRequestService._runtime_gate_allows() is True
@@ -690,7 +1078,9 @@ def test_runtime_gate_requires_ms_ai_fast_platform_configuration(monkeypatch) ->
     assert AIRequestService._runtime_gate_allows() is False
 
 
-def test_default_environment_file_and_template_match_ms_ai_fast_platform_contract() -> None:
+def test_default_environment_file_and_template_match_ms_ai_fast_platform_contract() -> (
+    None
+):
     assert Settings.Config.env_file == ".env"
 
     env_example = (Path(__file__).resolve().parents[3] / ".env.example").read_text(
@@ -787,7 +1177,6 @@ def test_config_compiler_rejects_message_contract_with_undeclared_context_key() 
         )
 
 
-
 def _targeted_v2_facts(*, include_selection: bool = True) -> tuple[Any, Any]:
     task = SimpleNamespace(
         id="task_1",
@@ -829,7 +1218,10 @@ def test_targeted_v2_command_preserves_unique_route_evidence() -> None:
     assert command.strategy_key == "focused_recheck"
     assert command.safe_context["selected_family_key"] == "thoracic"
     assert command.safe_context["selected_focus_key"] == "cardiac_silhouette"
-    assert command.safe_context["primary_complete_result"] is command.primary_complete_result
+    assert (
+        command.safe_context["primary_complete_result"]
+        is command.primary_complete_result
+    )
 
     captured: dict[str, Any] = {}
 
@@ -856,6 +1248,7 @@ def test_targeted_v2_command_rejects_missing_route_selection() -> None:
     ):
         build_targeted_ai_request_command(task=task, stage=stage)
 
+
 def test_v2_runtime_uses_renderer_and_does_not_import_mutable_source_dals() -> None:
     runtime_path = (
         Path(__file__).resolve().parents[1]
@@ -877,6 +1270,7 @@ def test_v2_runtime_uses_renderer_and_does_not_import_mutable_source_dals() -> N
     assert "PromptRenderer" in source
     assert "PromptMessageAssembler" in source
     assert '"provider_disabled"' in source
+
 
 def test_targeted_profile_requires_primary_result_message_context() -> None:
     with pytest.raises(
@@ -914,6 +1308,58 @@ def test_targeted_profile_requires_primary_result_message_context() -> None:
         },
     )
 
+    with pytest.raises(
+        AIControlValidationError,
+        match="config_targeted_prompt_message_contract_required",
+    ):
+        AIConfigCompiler._validate_profile_prompt_contract(
+            profile_key="xray_targeted_review_v2",
+            variables_json=VALID_VARIABLES,
+            message_contract=None,
+        )
+
+
+def test_config_compiler_selects_versioned_complete_result_schema_by_profile() -> None:
+    v1 = AIConfigCompiler._output_schema(profile_key="xray_primary_v1")
+    v2 = AIConfigCompiler._output_schema(profile_key="xray_primary_v2")
+
+    assert v1["x-ms-image-contract-version"] == "complete-medical-result.v1"
+    assert v2["x-ms-image-contract-version"] == "complete-medical-result.v2"
+    assert v2["properties"]["result_schema_version"]["const"] == (
+        "xray-complete-medical-result.v2"
+    )
+    assert sha256_json(v1) != sha256_json(v2)
+
+
+def test_targeted_v2_profile_remains_experiment_scoped() -> None:
+    base = {
+        "request_id": "request_1",
+        "config_key": "xray_diagnose",
+        "version": "v2",
+        "name": "XRay Targeted v2",
+        "modality_type": "xray",
+        "task_type": "diagnose",
+        "profile_key": "xray_targeted_review_v2",
+        "scope_key": "global",
+        "prompt_template_id": "prompt_1",
+        "model_pool_id": "pool_1",
+        "budget_policy_json": {
+            "contract_version": "ai-budget-policy.v1",
+            "max_prompt_chars": 10_000,
+            "max_input_images": 10,
+            "max_total_calls": 2,
+            "max_total_attempts": 2,
+            "task_deadline_ms": 120_000,
+            "reserve_before_send": True,
+        },
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="targeted_profile_experiment_scope_required",
+    ):
+        AIConfigCreate(**base)
+
 
 def test_frozen_targeted_config_revalidates_primary_result_message_context() -> None:
     connection_capability = {
@@ -933,7 +1379,6 @@ def test_frozen_targeted_config_revalidates_primary_result_message_context() -> 
         "provider_type": "openai_compatible",
         "api_format": "responses",
         "base_url": "https://provider.example/v1",
-        "secret_ref": "secret-manager://ai/xray/provider",
         "region": None,
         "capability_json": connection_capability,
     }
@@ -1020,6 +1465,13 @@ def test_frozen_targeted_config_revalidates_primary_result_message_context() -> 
         connections=[connection],
         require_validated_sources=True,
     )
+    frozen_lane = compiled.values["model_snapshot_json"]["lanes"][0]
+    assert "secret_ref" not in frozen_lane
+    assert not any(
+        marker in key.casefold()
+        for key in frozen_lane
+        for marker in ("secret", "authorization", "password", "api_key", "credential")
+    )
     frozen = SimpleNamespace(**compiled.values)
     frozen.prompt_message_contract_json = {
         "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
@@ -1035,17 +1487,92 @@ def test_frozen_targeted_config_revalidates_primary_result_message_context() -> 
 
 def test_xray_prompt_commands_expose_stable_prompt_mode() -> None:
     task, targeted_stage = _targeted_v2_facts()
-    primary_stage = SimpleNamespace(
-        input_json={"study_revision_id": "revision_1"}
-    )
+    primary_stage = SimpleNamespace(input_json={"study_revision_id": "revision_1"})
 
     primary = build_primary_ai_request_command(task=task, stage=primary_stage)
     targeted = build_targeted_ai_request_command(task=task, stage=targeted_stage)
 
     assert primary.safe_context["prompt_mode"] == "primary"
     assert primary.safe_context["species"] == "dog"
+    assert primary.safe_context["clinical_context_allowlist"] == {}
     assert targeted.safe_context["prompt_mode"] == "targeted"
     assert targeted.safe_context["species"] == "dog"
+    assert targeted.safe_context["clinical_context_allowlist"] == {}
+
+
+def test_xray_prompt_commands_consume_only_frozen_clinical_context() -> None:
+    from apps.backend.core.ai.clinical_context import freeze_clinical_context
+
+    task, targeted_stage = _targeted_v2_facts()
+    frozen = freeze_clinical_context(
+        {
+            "contract_version": "xray-clinical-context.v1",
+            "source": {
+                "system": "ms-ai-fast",
+                "recorded_at": "2026-08-28T02:30:00Z",
+                "temporal_scope": "available_at_request",
+            },
+            "chief_complaint": "间歇性咳嗽三天",
+            "study_reason": "评估胸部影像",
+        }
+    )
+    task.request_snapshot_json.update(frozen.snapshot_fields())
+    primary_stage = SimpleNamespace(input_json={"study_revision_id": "revision_1"})
+
+    primary = build_primary_ai_request_command(task=task, stage=primary_stage)
+    targeted = build_targeted_ai_request_command(task=task, stage=targeted_stage)
+
+    assert primary.safe_context["clinical_context_allowlist"] == frozen.payload
+    assert targeted.safe_context["clinical_context_allowlist"] == frozen.payload
+
+
+def test_xray_prompt_commands_fail_closed_on_clinical_context_hash_drift() -> None:
+    from apps.backend.core.ai.clinical_context import freeze_clinical_context
+
+    task, targeted_stage = _targeted_v2_facts()
+    frozen = freeze_clinical_context(
+        {
+            "contract_version": "xray-clinical-context.v1",
+            "source": {
+                "system": "ms-ai-fast",
+                "recorded_at": "2026-08-28T02:30:00Z",
+                "temporal_scope": "available_at_request",
+            },
+            "chief_complaint": "间歇性咳嗽三天",
+        }
+    )
+    task.request_snapshot_json.update(frozen.snapshot_fields())
+    task.request_snapshot_json["clinical_context_sha256"] = "0" * 64
+    primary_stage = SimpleNamespace(input_json={"study_revision_id": "revision_1"})
+
+    with pytest.raises(
+        PromptContractError,
+        match="task_clinical_context_snapshot_mismatch",
+    ):
+        build_primary_ai_request_command(task=task, stage=primary_stage)
+    with pytest.raises(
+        PromptContractError,
+        match="task_clinical_context_snapshot_mismatch",
+    ):
+        build_targeted_ai_request_command(task=task, stage=targeted_stage)
+
+
+def test_legacy_prompt_leakage_allowlist_accepts_existing_prompt_mode() -> None:
+    from apps.backend.core.ai.prompting.leakage import validate_primary_context
+
+    task, _ = _targeted_v2_facts()
+    primary_stage = SimpleNamespace(input_json={"study_revision_id": "revision_1"})
+    context = build_primary_ai_request_command(
+        task=task,
+        stage=primary_stage,
+    ).safe_context
+    context = {
+        key: value
+        for key, value in context.items()
+        if key != "technical_evidence_available"
+    }
+
+    validate_primary_context(context)
 
 
 def test_xray_prompt_commands_reject_missing_species_in_v2_snapshot() -> None:

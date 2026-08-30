@@ -39,16 +39,20 @@ NACOS_MODULE_CODE_MAP = {
     "audio_recognition": "audio-recognition",
 }
 
-# XRay uses one canonical Primary Prompt. Cat/dog is a frozen Task input in
-# SAFE_STUDY_CONTEXT_JSON, not part of the Prompt source identity.
+# XRay keeps the historical common Primary coordinate for frozen Task replay
+# and uses exact species-specific coordinates for all new diagnostic releases.
 NACOS_PROMPT_KEY_MAP = {
     ("xray", "xray_primary"): "primary",
+    ("xray", "xray_cat_primary"): "primary",
+    ("xray", "xray_dog_primary"): "primary",
 }
 
-# ``common`` is exact-only for XRay. It is not a generic fallback target:
-# an invalid internal key or variant fails before any Nacos read.
+# Every XRay coordinate is exact-only. ``common`` is historical compatibility,
+# never a fallback for cat/dog, and the species coordinates cannot cross-fallback.
 NACOS_XRAY_PROMPT_VARIANT_MAP = {
     "xray_primary": "common",
+    "xray_cat_primary": "cat",
+    "xray_dog_primary": "dog",
 }
 XRAY_PROMPT_VARIANTS = frozenset(NACOS_XRAY_PROMPT_VARIANT_MAP.values())
 
@@ -124,8 +128,8 @@ def variant_candidates(
     """Resolve Nacos variants, fail-closing XRay before generic fallback.
 
     Existing modules retain the ms-ai-fast lookup order ``requested`` then
-    ``default``. XRay uses one exact ``common`` Primary coordinate and never
-    falls back from cat, dog, default, or any other variant.
+    ``default``. XRay uses exact ``common``/``cat``/``dog`` Primary coordinates
+    and never falls back between them or to ``default``.
     """
     if not isinstance(requested_variant, str):
         raise PromptSourceError("prompt_source_variant_invalid")
@@ -358,6 +362,45 @@ class NacosPromptSourceClient:
         if not isinstance(payload, Mapping):
             raise PromptSourceError("prompt_source_nacos_payload_invalid")
         return payload
+
+    async def check_prompt_api_readiness(self) -> None:
+        """Verify the Prompt Client route without reading business Prompt data.
+
+        Nacos deployments do not expose one stable Console health route across
+        versions and gateways.  AI Control depends on the Prompt Client API, so
+        probe that exact route with ``OPTIONS`` and require GET support.  Client
+        startup still performs the configured login first, which also validates
+        reachability and credentials without coupling readiness to one mutable
+        Prompt key.
+        """
+
+        client = await self._get_client()
+        try:
+            response = await client.request(
+                "OPTIONS",
+                "/v3/client/ai/prompt",
+                params={"namespaceId": self.namespace_id},
+                response_mode="response",
+            )
+        except Exception as exc:
+            raise PromptSourceError("prompt_source_nacos_unavailable") from exc
+
+        status_code = getattr(response, "status_code", None)
+        headers = getattr(response, "headers", None)
+        if (
+            not isinstance(status_code, int)
+            or status_code < 200
+            or status_code >= 300
+            or not isinstance(headers, Mapping)
+        ):
+            raise PromptSourceError("prompt_source_nacos_readiness_invalid")
+        allowed_methods = {
+            item.strip().upper()
+            for item in str(headers.get("allow") or "").split(",")
+            if item.strip()
+        }
+        if "GET" not in allowed_methods:
+            raise PromptSourceError("prompt_source_nacos_prompt_api_unavailable")
 
     @staticmethod
     def _is_nacos_not_found(exc: Exception) -> bool:

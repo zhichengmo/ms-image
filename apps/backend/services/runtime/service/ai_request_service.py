@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.core.ai.config_contract import (
     TASK_REQUEST_SNAPSHOT_V2,
+    TASK_REQUEST_SNAPSHOT_V3,
     is_v2_config,
 )
 from apps.backend.core.ai.prompting import (
@@ -29,9 +30,15 @@ from apps.backend.core.ai.prompting import (
     validate_prompt_message_template,
 )
 from apps.backend.core.ai.prompting.contracts import sha256_json
+from apps.backend.core.ai.xray_result_contract import (
+    XRayResultContractError,
+    validate_xray_result_contract,
+)
 from apps.backend.core.ai.gateway.contracts import (
     AI_IMAGE_RECEIPT_V1,
+    AI_IMAGE_RECEIPT_V2,
     GatewayContractError,
+    GatewayDefiniteResponseError,
     GatewayExecutionResult,
     GatewayImageInput,
     GatewayRejectedError,
@@ -45,7 +52,7 @@ from apps.backend.core.ai.gateway.image_signer import (
     AttemptImageSigner,
     build_oss_attempt_image_signer,
 )
-from apps.backend.core.ai.gateway_client import GatewayClient
+from apps.backend.core.ai.gateway_client import GatewayClient, GatewayResponseParseError
 from apps.backend.core.pipeline import build_default_registry
 from apps.backend.crud.ai_call import AICallDal
 from apps.backend.crud.ai_call_attempt import AICallAttemptDal
@@ -55,7 +62,8 @@ from apps.backend.crud.stage_checkpoint import StageCheckpointDal
 from apps.backend.crud.task import TaskDal
 from apps.backend.core.imaging.manifest import (
     ManifestContractError,
-    build_series_manifest,
+    build_series_manifest_legacy,
+    validate_frozen_study_series,
 )
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.services.ai_control.service.config_compiler import AIConfigCompiler
@@ -520,16 +528,22 @@ class AIRequestService:
         rejection_code = self._task_attempt_rejection_code(task)
         if rejection_code is None:
             return call
-        if call.winner_attempt_id is not None or call.status in {
-            "succeeded",
-            "failed",
-            "cancelled",
-        } or call.result_disposition in {
-            "accepted",
-            "rejected",
-            "failed",
-            "cancelled",
-        }:
+        if (
+            call.winner_attempt_id is not None
+            or call.status
+            in {
+                "succeeded",
+                "failed",
+                "cancelled",
+            }
+            or call.result_disposition
+            in {
+                "accepted",
+                "rejected",
+                "failed",
+                "cancelled",
+            }
+        ):
             return call
         updated = await self.call_dal.cas_update(
             call_id=call.id,
@@ -578,7 +592,46 @@ class AIRequestService:
         return dict(lane)
 
     @staticmethod
-    def _image_receipt(*, images: Sequence[GatewayImageInput]) -> dict[str, Any]:
+    def _image_receipt(
+        *,
+        images: Sequence[GatewayImageInput],
+        image_inputs: Any = None,
+        snapshot_contract_version: Any = None,
+    ) -> dict[str, Any]:
+        if snapshot_contract_version == TASK_REQUEST_SNAPSHOT_V3:
+            if not isinstance(image_inputs, (tuple, list)) or len(image_inputs) != len(
+                images
+            ):
+                raise GatewayContractError("ai_image_receipt_input_mismatch")
+            receipt_items: list[dict[str, Any]] = []
+            for image, frozen in zip(images, image_inputs, strict=True):
+                if (
+                    not isinstance(frozen, Mapping)
+                    or frozen.get("sequence_no") != image.sequence_no
+                    or frozen.get("mime_type") != image.mime_type
+                ):
+                    raise GatewayContractError("ai_image_receipt_input_mismatch")
+                receipt_items.append(
+                    {
+                        "sequence_no": image.sequence_no,
+                        "series_id": frozen.get("series_id"),
+                        "series_manifest_sha256": frozen.get("series_manifest_sha256"),
+                        "series_sequence_no": frozen.get("series_sequence_no"),
+                        "image_id": frozen.get("image_id"),
+                        "logical_image_key": frozen.get("logical_image_key"),
+                        "image_version_no": frozen.get("image_version_no"),
+                        "projection": frozen.get("projection"),
+                        "projection_provenance": frozen.get("projection_provenance"),
+                        "sha256": frozen.get("sha256"),
+                        "size_bytes": frozen.get("size_bytes"),
+                        "mime_type": image.mime_type,
+                    }
+                )
+            return {
+                "contract_version": AI_IMAGE_RECEIPT_V2,
+                "image_count": len(images),
+                "images": receipt_items,
+            }
         return {
             "contract_version": AI_IMAGE_RECEIPT_V1,
             "image_count": len(images),
@@ -644,13 +697,10 @@ class AIRequestService:
         if reserved.intersection(generation):
             raise GatewayContractError("gateway_generation_params_invalid")
         max_output_tokens = generation.pop("max_output_tokens", None)
-        if (
-            max_output_tokens is not None
-            and (
-                not isinstance(max_output_tokens, int)
-                or isinstance(max_output_tokens, bool)
-                or max_output_tokens < 1
-            )
+        if max_output_tokens is not None and (
+            not isinstance(max_output_tokens, int)
+            or isinstance(max_output_tokens, bool)
+            or max_output_tokens < 1
         ):
             raise GatewayContractError("gateway_generation_params_invalid")
         temperature = generation.pop("temperature", 0.2)
@@ -658,7 +708,10 @@ class AIRequestService:
             raise GatewayContractError("gateway_generation_params_invalid")
         payload: dict[str, Any] = {
             "model": request.requested_model,
-            "strategy": "single",
+            # Keep ms-image's frozen single-lane execution separate from the
+            # ms-ai-platform scheduling contract.  The Platform only accepts
+            # ``round_robin`` or ``race``; ms-ai-fast uses ``race`` by default.
+            "strategy": "race",
             "messages": cls._messages_with_images(request=request),
             "temperature": temperature,
             "metadata": {
@@ -1171,6 +1224,9 @@ class AIRequestService:
             "image_manifest_sha256": call.requested_image_manifest_sha256,
             "image_count_requested": call.image_count_requested,
             "image_inputs": image_inputs,
+            "snapshot_contract_version": (task.request_snapshot_json or {}).get(
+                "snapshot_contract_version"
+            ),
             "image_url_ttl_seconds": gateway_profile["image_url_ttl_seconds"],
         }
 
@@ -1207,6 +1263,13 @@ class AIRequestService:
             image_manifest_sha256=network_plan.get("image_manifest_sha256"),
         )
         payload = AIRequestService._build_gateway_payload(request=gateway_request)
+        image_receipt = AIRequestService._image_receipt(
+            images=images,
+            image_inputs=network_plan.get("image_inputs"),
+            snapshot_contract_version=network_plan.get("snapshot_contract_version"),
+        )
+        image_manifest_sha256 = network_plan.get("image_manifest_sha256")
+        image_count_sent = len(images)
         gateway = gateway_client or GatewayClient()
         started = monotonic()
         try:
@@ -1216,7 +1279,10 @@ class AIRequestService:
             )
         except httpx.HTTPStatusError as exc:
             raise GatewayRejectedError(
-                AIRequestService._provider_http_error_code(exc.response)
+                AIRequestService._provider_http_error_code(exc.response),
+                image_receipt=image_receipt,
+                image_manifest_sha256=image_manifest_sha256,
+                image_count_sent=image_count_sent,
             ) from exc
         except (
             httpx.TimeoutException,
@@ -1225,45 +1291,76 @@ class AIRequestService:
             httpx.RequestError,
         ) as exc:
             raise GatewayUnknownDeliveryError("provider_delivery_unknown") from exc
-        except (json.JSONDecodeError, RuntimeError) as exc:
+        except GatewayResponseParseError as exc:
+            raise GatewayDefiniteResponseError(
+                str(exc),
+                image_receipt=image_receipt,
+                image_manifest_sha256=image_manifest_sha256,
+                image_count_sent=image_count_sent,
+            ) from exc
+        except RuntimeError as exc:
             raise GatewayContractError("provider_response_payload_invalid") from exc
 
-        body = gateway_result.get("body")
-        provider_request_id = gateway_result.get("request_id")
-        if not isinstance(body, Mapping):
-            raise GatewayContractError("provider_response_payload_invalid")
-        if not isinstance(provider_request_id, str) or not provider_request_id.strip():
-            raise GatewayContractError("provider_request_id_missing")
-        content = AIRequestService._provider_message_content(body)
-        actual_model = body.get("model") or gateway_request.requested_model
-        if not isinstance(actual_model, str) or not actual_model.strip():
-            raise GatewayContractError("provider_actual_model_missing")
-        actual_model = actual_model.strip()
-        allowed_models = set(gateway_request.allowed_actual_models) or {
-            gateway_request.requested_model
-        }
-        if actual_model not in allowed_models:
-            raise GatewayContractError("provider_actual_model_mismatch")
-        usage = body.get("usage")
-        if usage is not None and not isinstance(usage, Mapping):
-            raise GatewayContractError("provider_usage_invalid")
-        execution = GatewayExecutionResult(
-            provider_request_id=provider_request_id.strip(),
-            actual_model=actual_model,
-            usage_json=dict(usage) if isinstance(usage, Mapping) else None,
-            parsed_result_json=schema_validate_result(
+        try:
+            if not isinstance(gateway_result, Mapping):
+                raise GatewayContractError("provider_response_payload_invalid")
+            body = gateway_result.get("body")
+            provider_request_id = gateway_result.get("request_id")
+            if not isinstance(body, Mapping):
+                raise GatewayContractError("provider_response_payload_invalid")
+            if (
+                not isinstance(provider_request_id, str)
+                or not provider_request_id.strip()
+            ):
+                raise GatewayContractError("provider_request_id_missing")
+            content = AIRequestService._provider_message_content(body)
+            actual_model = body.get("model") or gateway_request.requested_model
+            if not isinstance(actual_model, str) or not actual_model.strip():
+                raise GatewayContractError("provider_actual_model_missing")
+            actual_model = actual_model.strip()
+            allowed_models = set(gateway_request.allowed_actual_models) or {
+                gateway_request.requested_model
+            }
+            if actual_model not in allowed_models:
+                raise GatewayContractError("provider_actual_model_mismatch")
+            usage = body.get("usage")
+            if usage is not None and not isinstance(usage, Mapping):
+                raise GatewayContractError("provider_usage_invalid")
+            parsed_result = schema_validate_result(
                 value=content,
                 schema=gateway_request.response_schema,
-            ),
-            response_sha256=response_sha256(body),
-            duration_ms=max(0, round((monotonic() - started) * 1000)),
-            transport_mode="json",
-        )
+            )
+            try:
+                parsed_result = validate_xray_result_contract(
+                    result=parsed_result,
+                    schema_contract_version=gateway_request.response_schema.get(
+                        "x-ms-image-contract-version"
+                    ),
+                    image_receipt=image_receipt,
+                )
+            except XRayResultContractError as exc:
+                raise GatewayContractError(str(exc)) from exc
+            execution = GatewayExecutionResult(
+                provider_request_id=provider_request_id.strip(),
+                actual_model=actual_model,
+                usage_json=dict(usage) if isinstance(usage, Mapping) else None,
+                parsed_result_json=parsed_result,
+                response_sha256=response_sha256(body),
+                duration_ms=max(0, round((monotonic() - started) * 1000)),
+                transport_mode="json",
+            )
+        except GatewayContractError as exc:
+            raise GatewayDefiniteResponseError(
+                str(exc),
+                image_receipt=image_receipt,
+                image_manifest_sha256=image_manifest_sha256,
+                image_count_sent=image_count_sent,
+            ) from exc
         return {
             "execution": execution,
-            "image_receipt": AIRequestService._image_receipt(images=images),
-            "image_manifest_sha256": network_plan.get("image_manifest_sha256"),
-            "image_count_sent": len(images),
+            "image_receipt": image_receipt,
+            "image_manifest_sha256": image_manifest_sha256,
+            "image_count_sent": image_count_sent,
         }
 
     async def finalize_attempt(
@@ -1304,8 +1401,10 @@ class AIRequestService:
                 "sent_image_manifest_sha256": image_manifest_sha256,
                 "image_count_sent": image_count_sent,
                 "image_receipt_json": dict(image_receipt),
+                "error_code": None,
                 "status": "succeeded",
                 "finished_at": now,
+                "next_reconcile_at": None,
             },
         )
         if updated_attempt is None:
@@ -1320,16 +1419,22 @@ class AIRequestService:
             task=task,
             now=now,
         )
-        if call.winner_attempt_id is not None or call.status in {
-            "succeeded",
-            "failed",
-            "cancelled",
-        } or call.result_disposition in {
-            "accepted",
-            "rejected",
-            "failed",
-            "cancelled",
-        }:
+        if (
+            call.winner_attempt_id is not None
+            or call.status
+            in {
+                "succeeded",
+                "failed",
+                "cancelled",
+            }
+            or call.result_disposition
+            in {
+                "accepted",
+                "rejected",
+                "failed",
+                "cancelled",
+            }
+        ):
             return self._structured_call_response(
                 call=call,
                 attempt=updated_attempt,
@@ -1367,8 +1472,34 @@ class AIRequestService:
         error_code: str,
         unknown: bool,
         reconcile_after_seconds: int = 300,
+        image_receipt: Mapping[str, Any] | None = None,
+        image_manifest_sha256: str | None = None,
+        image_count_sent: int | None = None,
     ) -> dict[str, Any]:
         """Boundary C: persist a definite failure or an uncertain delivery."""
+        delivery_values: dict[str, Any] = {}
+        delivery_facts = (
+            image_receipt,
+            image_manifest_sha256,
+            image_count_sent,
+        )
+        if any(value is not None for value in delivery_facts):
+            if (
+                unknown
+                or not isinstance(image_receipt, Mapping)
+                or not isinstance(image_manifest_sha256, str)
+                or len(image_manifest_sha256) != 64
+                or not isinstance(image_count_sent, int)
+                or isinstance(image_count_sent, bool)
+                or image_count_sent < 0
+                or image_receipt.get("image_count") != image_count_sent
+            ):
+                raise AIRequestStateConflict("ai_call_attempt_delivery_audit_invalid")
+            delivery_values = {
+                "sent_image_manifest_sha256": image_manifest_sha256,
+                "image_count_sent": image_count_sent,
+                "image_receipt_json": dict(image_receipt),
+            }
         attempt = await self.attempt_dal.get_by_id_for_update(attempt_id)
         if attempt is None:
             raise AIRequestStateConflict("ai_call_attempt_not_found")
@@ -1390,14 +1521,18 @@ class AIRequestService:
         values: dict[str, Any] = {
             "error_code": (error_code or "provider_unknown")[:80],
             "finished_at": now,
+            **delivery_values,
         }
         if unknown:
             values["status"] = "unknown"
+            if attempt.first_unknown_at is None:
+                values["first_unknown_at"] = now
             values["next_reconcile_at"] = now + timedelta(
                 seconds=max(30, reconcile_after_seconds)
             )
         else:
             values["status"] = "failed"
+            values["next_reconcile_at"] = None
         updated_attempt = await self.attempt_dal.cas_update(
             attempt_id=attempt.id,
             expected_version=attempt.state_version,
@@ -1415,21 +1550,28 @@ class AIRequestService:
             task=task,
             now=now,
         )
+        call_values: dict[str, Any] = {}
+        if delivery_values and call.winner_attempt_id is None:
+            call_values.update(delivery_values)
         if (
             not unknown
             and call.winner_attempt_id is None
             and call.status in {"prepared", "running"}
             and call.result_disposition == "pending"
         ):
-            updated_call = await self.call_dal.cas_update(
-                call_id=call.id,
-                expected_version=call.state_version,
-                values={
+            call_values.update(
+                {
                     "status": "failed",
                     "result_disposition": "failed",
                     "error_code": values["error_code"],
                     "finished_at": now,
-                },
+                }
+            )
+        if call_values:
+            updated_call = await self.call_dal.cas_update(
+                call_id=call.id,
+                expected_version=call.state_version,
+                values=call_values,
             )
             if updated_call is None:
                 raise AIRequestStateConflict("ai_call_failure_cas_conflict")
@@ -1556,6 +1698,39 @@ class AIRequestService:
         snapshot = task.request_snapshot_json or {}
         if snapshot.get("resolved_manifest_sha256") != expected_manifest_sha256:
             raise AIRequestStateConflict("ai_call_image_manifest_mismatch")
+        if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V3:
+            try:
+                frozen_series = validate_frozen_study_series(
+                    snapshot.get("series"),
+                    resolved_manifest_sha256=expected_manifest_sha256,
+                )
+            except ManifestContractError as exc:
+                raise AIRequestStateConflict(str(exc)) from exc
+            image_inputs: list[dict[str, Any]] = []
+            for series_item in frozen_series:
+                for item in series_item["ordered_images"]:
+                    image_inputs.append(
+                        {
+                            "sequence_no": len(image_inputs) + 1,
+                            "series_id": series_item["series_id"],
+                            "series_manifest_sha256": series_item["manifest_sha256"],
+                            "series_sequence_no": item["sequence_no"],
+                            "image_id": item["image_id"],
+                            "logical_image_key": item["logical_image_key"],
+                            "image_version_no": item["image_version_no"],
+                            "projection": item["projection"],
+                            "projection_provenance": item["projection_provenance"],
+                            "storage_profile": item["storage_profile"],
+                            "object_key": item["object_key"],
+                            "object_version_id": item["object_version_id"],
+                            "mime_type": item["content_type"],
+                            "sha256": item["sha256"],
+                            "size_bytes": item["size_bytes"],
+                        }
+                    )
+            if len(image_inputs) != expected_image_count:
+                raise AIRequestStateConflict("ai_call_image_count_mismatch")
+            return tuple(image_inputs)
         series_snapshot = snapshot.get("series")
         if not isinstance(series_snapshot, list):
             raise AIRequestStateConflict("ai_call_image_manifest_invalid")
@@ -1580,7 +1755,7 @@ class AIRequestService:
                 raise AIRequestStateConflict("ai_call_image_manifest_invalid")
             images = await self.image_dal.list_ready_for_series(series_id)
             try:
-                manifest = build_series_manifest(images)
+                manifest = build_series_manifest_legacy(images)
             except ManifestContractError as exc:
                 raise AIRequestStateConflict(str(exc)) from exc
             if (
@@ -1675,8 +1850,12 @@ class AIRequestService:
     @staticmethod
     def _validate_v2_task_config_snapshot(*, task: Any, config: Any) -> None:
         snapshot = task.request_snapshot_json or {}
+        if snapshot.get("snapshot_contract_version") not in {
+            TASK_REQUEST_SNAPSHOT_V2,
+            TASK_REQUEST_SNAPSHOT_V3,
+        }:
+            raise AIRequestStateConflict("task_config_snapshot_mismatch")
         expected = {
-            "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V2,
             "ai_config_id": config.id,
             "config_key": config.config_key,
             "config_version": config.version,

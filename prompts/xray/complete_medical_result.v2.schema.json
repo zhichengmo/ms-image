@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CompleteMedicalResultV2",
+  "x-ms-image-contract-version": "complete-medical-result.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "medical_status",
+    "summary",
+    "impression",
+    "findings",
+    "normal_basis",
+    "coverage",
+    "families_not_assessed",
+    "limitations",
+    "review_reason",
+    "source_refs",
+    "targeted_candidate"
+  ],
+  "properties": {
+    "result_schema_version": {
+      "type": "string",
+      "const": "xray-complete-medical-result.v2"
+    },
+    "medical_status": {
+      "type": "string",
+      "enum": ["normal", "abnormal", "review_required", "non_diagnostic"]
+    },
+    "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "impression": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "findings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "label",
+          "description",
+          "anatomy_region",
+          "laterality",
+          "source_ref_ids"
+        ],
+        "properties": {
+          "finding_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "label": {"type": "string", "minLength": 1, "maxLength": 256},
+          "description": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "anatomy_region": {"type": "string", "minLength": 1, "maxLength": 128},
+          "laterality": {"type": "string", "minLength": 1, "maxLength": 64},
+          "source_ref_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 64}
+          }
+        }
+      }
+    },
+    "normal_basis": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "assessed_regions", "missing_or_limited_views"],
+      "properties": {
+        "status": {"type": "string", "minLength": 1, "maxLength": 64},
+        "assessed_regions": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 256}
+        },
+        "missing_or_limited_views": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      }
+    },
+    "families_not_assessed": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 128}
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+    },
+    "review_reason": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "source_refs": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_ref_id",
+          "image_id",
+          "series_id",
+          "projection",
+          "manifest_sha256"
+        ],
+        "properties": {
+          "source_ref_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "image_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "series_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "projection": {"type": "string", "minLength": 1, "maxLength": 64},
+          "manifest_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "targeted_candidate": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["family_key", "focus_key", "reason", "source_finding_ids"],
+      "properties": {
+        "family_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        "focus_key": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "source_finding_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 64}
+        }
+      }
+    }
+  }
+}

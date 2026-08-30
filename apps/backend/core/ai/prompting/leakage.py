@@ -30,6 +30,7 @@ PRIMARY_ALLOWED_KEYS = frozenset(
         "task_id",
         "study_revision_id",
         "ordered_image_refs",
+        "prompt_mode",
         "species",
         "anatomy_regions",
         "view_positions",

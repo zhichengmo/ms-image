@@ -1,8 +1,9 @@
-"""Pure, provider-disabled contracts for non-sensitive AI connection metadata.
+"""Pure contracts for non-sensitive AI Platform connection metadata.
 
-This module deliberately validates only persisted connection metadata.  It never
-resolves ``secret_ref`` or contacts a Provider, so it is safe to reuse from the
-control plane compiler and Runtime integrity checks.
+The Worker authenticates to ``ms-ai-platform`` exclusively through its
+``AI_PLATFORM_OPENAI_BASE_URL`` and ``AI_PLATFORM_API_KEY`` process settings.
+Connection rows therefore describe only non-sensitive routing and capability
+metadata; this module never resolves credentials or contacts a Provider.
 """
 
 from __future__ import annotations
@@ -59,35 +60,16 @@ def canonicalize_connection_base_url(base_url: str) -> str:
     return urlunsplit((scheme, authority, path, "", ""))
 
 
-def validate_secret_ref_structure(secret_ref: str) -> None:
-    """Reject only clearly unsafe reference shapes without resolving a Secret."""
-    if not isinstance(secret_ref, str) or not secret_ref:
-        raise ConnectionContractError("ai_connection_secret_ref_invalid")
-    if any(
-        token in secret_ref.casefold()
-        for token in ("\n", "\r", "authorization:", "bearer ")
-    ):
-        raise ConnectionContractError("ai_connection_secret_ref_invalid")
-
-
 def canonical_connection_metadata_sha256(values: Mapping[str, Any]) -> str:
-    """Hash canonical, non-sensitive connection metadata.
-
-    ``secret_ref`` itself remains an external reference, not a credential.  The
-    resulting hash is deliberately internal-only; API responses expose only a
-    fingerprint of the reference and never its value.
-    """
+    """Hash canonical, non-sensitive Platform connection metadata."""
     try:
         base_url = canonicalize_connection_base_url(values["base_url"])
-        secret_ref = values["secret_ref"]
-        validate_secret_ref_structure(secret_ref)
         payload = {
             "connection_key": values["connection_key"],
             "version": values["version"],
             "provider_type": values["provider_type"],
             "api_format": values["api_format"],
             "base_url": base_url,
-            "secret_ref": secret_ref,
             "region": values.get("region"),
             "capability_json": values["capability_json"],
         }
@@ -100,5 +82,4 @@ __all__ = [
     "ConnectionContractError",
     "canonical_connection_metadata_sha256",
     "canonicalize_connection_base_url",
-    "validate_secret_ref_structure",
 ]

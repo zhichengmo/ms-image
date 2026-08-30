@@ -127,7 +127,7 @@ services:
       retries: 5
 
   imaging-worker:
-    profiles: ["broker"]
+    profiles: ["broker", "scheduler"]
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
@@ -146,12 +146,40 @@ services:
       <<: *runtime-environment
       BROKER_ENABLED: true
       IMAGING_WORKER_CONCURRENCY: ${IMAGING_WORKER_CONCURRENCY:-1}
+      AI_ATTEMPT_RECONCILE_POLICY_VERSION: ${AI_ATTEMPT_RECONCILE_POLICY_VERSION:-ai-attempt-reconcile.v1}
+      AI_ATTEMPT_RECONCILE_MAX_COUNT: ${AI_ATTEMPT_RECONCILE_MAX_COUNT:-3}
+      AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS: ${AI_ATTEMPT_RECONCILE_MAX_UNKNOWN_AGE_SECONDS:-10800}
       AI_RECEIPT_SIGNING_KEY: ${AI_RECEIPT_SIGNING_KEY:-}
       AI_EGRESS_PROOF_SIGNING_KEY: ${AI_EGRESS_PROOF_SIGNING_KEY:-}
       AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
     env_file: *runtime-env-files
     depends_on:
       mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # This is the repository-owned scheduler for imaging Attempt reconciliation.
+  # Run exactly one replica and do not enable this profile when an external
+  # CronJob/platform scheduler already owns the same periodic task.
+  imaging-scheduler:
+    profiles: ["scheduler"]
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["celery", "-A", "apps.backend.workers.imaging_worker.celery_app:celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/ms-image-ai-attempt-reconcile-celerybeat"]
+    stop_grace_period: 30s
+    deploy:
+      replicas: 1
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: true
+      AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED: true
+      AI_ATTEMPT_RECONCILE_INTERVAL_SECONDS: ${AI_ATTEMPT_RECONCILE_INTERVAL_SECONDS:-60}
+      AI_ATTEMPT_RECONCILE_BATCH_LIMIT: ${AI_ATTEMPT_RECONCILE_BATCH_LIMIT:-50}
+    env_file: *runtime-env-files
+    depends_on:
+      imaging-worker:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -273,7 +301,7 @@ services:
       retries: 10
 
   rabbitmq:
-    profiles: ["broker"]
+    profiles: ["broker", "scheduler"]
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: ${COMPOSE_RABBITMQ_USERNAME:-admin}

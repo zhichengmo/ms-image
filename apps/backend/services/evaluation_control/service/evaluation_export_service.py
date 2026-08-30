@@ -8,9 +8,16 @@ from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.backend.core.ai.clinical_context import (
+    ClinicalContextContractError,
+    read_frozen_clinical_context,
+)
 from apps.backend.core.contexts import ControlPlaneContext
 from apps.backend.core.evaluation import JsonArtifactStore
-from apps.backend.core.imaging.object_store import ObjectStorageGateway, ObjectStoreError
+from apps.backend.core.imaging.object_store import (
+    ObjectStorageGateway,
+    ObjectStoreError,
+)
 from apps.backend.crud.ai_call import AICallDal
 from apps.backend.crud.ai_config_record import AIConfigRecordDal
 from apps.backend.crud.report import ReportDal
@@ -73,17 +80,18 @@ class EvaluationExportService:
                 await self._build_case_row(spec=spec, payload=payload)
                 for spec in payload.cases
             ]
+            self._validate_context_arm_consistency(case_rows)
         manifest = EvaluationInputManifest(
-            schema_version="evaluation-input.v1",
+            schema_version="evaluation-input.v2",
             cases=case_rows,
         )
         manifest_payload = manifest.model_dump(mode="json")
         manifest_sha256 = self._sha_json(manifest_payload)
         sanitization_payload = {
-            "schema_version": "evaluation-sanitization.v1",
+            "schema_version": "evaluation-sanitization.v2",
             "sanitized": True,
             "policy_version": payload.sanitization_policy_version,
-            "exporter_version": "evaluation-export.v1",
+            "exporter_version": "evaluation-export.v2",
             "case_count": len({row.case_id for row in case_rows}),
             "source_manifest_sha256": manifest_sha256,
             "source_identity_sha256": self._sha_json(
@@ -126,7 +134,7 @@ class EvaluationExportService:
         provenance = {
             "sanitized": True,
             "producer": "evaluation_exporter",
-            "producer_version": "evaluation-export.v1",
+            "producer_version": "evaluation-export.v2",
             "sanitization_policy_version": payload.sanitization_policy_version,
             "source_manifest_sha256": manifest_sha256,
         }
@@ -223,6 +231,15 @@ class EvaluationExportService:
             raise EvaluationExportValidationError(
                 "evaluation_export_study_manifest_missing"
             )
+        try:
+            frozen_clinical_context = read_frozen_clinical_context(
+                task.request_snapshot_json or {}
+            )
+        except ClinicalContextContractError as exc:
+            raise EvaluationExportValidationError(
+                "evaluation_export_clinical_context_invalid"
+            ) from exc
+        clinical_source = frozen_clinical_context.payload.get("source") or {}
         profile_key = config.compiled_pipeline_json.get("profile_key")
         if not isinstance(profile_key, str) or not profile_key:
             raise EvaluationExportValidationError("evaluation_export_profile_missing")
@@ -292,9 +309,31 @@ class EvaluationExportService:
             source_stage_id=source_stage_id,
             source_call_id=(call.id if call else None),
             receipt_status=self._receipt_status(call),
+            clinical_context_policy_version=(frozen_clinical_context.policy_version),
+            clinical_context_sha256=frozen_clinical_context.payload_sha256,
+            clinical_context_source_system=clinical_source.get("system"),
+            clinical_context_recorded_at=clinical_source.get("recorded_at"),
+            clinical_context_temporal_scope=clinical_source.get("temporal_scope"),
             cost=self._extract_cost(task.budget_consumed_json),
             latency_ms=self._latency_ms(task.started_at, task.finished_at),
         )
+
+    @staticmethod
+    def _validate_context_arm_consistency(
+        case_rows: list[EvaluationCaseInput],
+    ) -> None:
+        by_case: dict[str, set[tuple[str, str]]] = {}
+        for row in case_rows:
+            by_case.setdefault(row.case_id, set()).add(
+                (
+                    row.clinical_context_policy_version,
+                    row.clinical_context_sha256,
+                )
+            )
+        if any(len(fingerprints) > 1 for fingerprints in by_case.values()):
+            raise EvaluationExportValidationError(
+                "evaluation_export_clinical_context_arm_mismatch"
+            )
 
     @staticmethod
     def _technical_status(

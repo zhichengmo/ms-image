@@ -4,11 +4,17 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from apps.backend.core.async_db import async_engine
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    """Reserve a service-local lifecycle boundary without opening unused pools."""
-    yield
+    """Release the AI Control database pool during application shutdown."""
+
+    try:
+        yield
+    finally:
+        await async_engine.dispose()
 
 
 __all__ = ["lifespan"]

@@ -137,6 +137,7 @@ class StudyService:
             self._assert_study_match(existing, values)
             created = existing
 
+        created_id = created.id
         if session.status == "open":
             updated_session = await self.session_dal.cas_update(
                 session_id=session.id,
@@ -145,12 +146,15 @@ class StudyService:
             )
             if updated_session is None:
                 raise SessionStateConflictError("session_state_conflict")
+            created = await self.study_dal.get_by_id(created_id)
+            if created is None:
+                raise StudyStateConflictError("study_create_race")
         return self._study_response(created)
 
     async def create_series(
         self, *, payload: SeriesCreate, requester_id: str
     ) -> SeriesResponse:
-        study = await self._owned_study(
+        study = await self._owned_study_for_update(
             study_id=payload.study_id, requester_id=requester_id
         )
         session = await self._owned_session(
@@ -172,7 +176,7 @@ class StudyService:
             "technical_metadata_json": payload.technical_metadata,
             "acquired_at": payload.acquired_at,
         }
-        existing = await self.series_dal.get_by_key(
+        existing = await self.series_dal.get_by_key_for_update(
             study_id=study.id, series_key=payload.series_key
         )
         if existing is not None:
@@ -180,13 +184,19 @@ class StudyService:
             return self._series_response(existing)
         created = await self.series_dal.create_idempotent(values)
         if created is None:
-            existing = await self.series_dal.get_by_key(
+            existing = await self.series_dal.get_by_key_for_update(
                 study_id=study.id, series_key=payload.series_key
             )
             if existing is None:
                 raise StudyStateConflictError("series_create_race")
             self._assert_series_match(existing, values)
-            created = existing
+            return self._series_response(existing)
+
+        await self._advance_study_revision(
+            study=study,
+            revision_reason="add",
+            changed_at=datetime.utcnow(),
+        )
         return self._series_response(created)
 
     async def get_study(
@@ -303,6 +313,7 @@ class StudyService:
             series_status = "ready"
         else:
             series_status = "invalid"
+        study_id = study.id
         updated_series = await self.series_dal.cas_update(
             series_id=series.id,
             expected_version=series.state_version,
@@ -316,6 +327,26 @@ class StudyService:
         if updated_series is None:
             raise StudyStateConflictError("series_manifest_conflict")
 
+        study = await self.study_dal.get_by_id(study_id)
+        if study is None:
+            raise StudyNotFoundError("study_not_found")
+        updated_study = await self._advance_study_revision(
+            study=study,
+            revision_reason=revision_reason,
+            changed_at=changed_at,
+        )
+        refreshed_series = await self.series_dal.get_by_id(series_id.strip())
+        if refreshed_series is None:
+            raise SeriesNotFoundError("series_not_found")
+        return StudyRevisionResult(series=refreshed_series, study=updated_study)
+
+    async def _advance_study_revision(
+        self,
+        *,
+        study: Study,
+        revision_reason: str,
+        changed_at: datetime,
+    ) -> Study:
         series_rows = await self.series_dal.list_for_study(study.id)
         try:
             study_manifest = build_study_manifest(series_rows)
@@ -362,7 +393,7 @@ class StudyService:
         )
         if updated_study is None:
             raise StudyStateConflictError("study_revision_conflict")
-        return StudyRevisionResult(series=updated_series, study=updated_study)
+        return updated_study
 
     async def _owned_session(self, *, session_id: str, requester_id: str):
         session = await self.session_dal.get_by_id(session_id.strip())
@@ -374,6 +405,17 @@ class StudyService:
 
     async def _owned_study(self, *, study_id: str, requester_id: str) -> Study:
         study = await self.study_dal.get_by_id(study_id.strip())
+        if study is None:
+            raise StudyNotFoundError("study_not_found")
+        await self._owned_session(
+            session_id=study.session_id, requester_id=requester_id
+        )
+        return study
+
+    async def _owned_study_for_update(
+        self, *, study_id: str, requester_id: str
+    ) -> Study:
+        study = await self.study_dal.get_by_id_for_update(study_id.strip())
         if study is None:
             raise StudyNotFoundError("study_not_found")
         await self._owned_session(

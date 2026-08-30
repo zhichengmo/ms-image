@@ -36,6 +36,21 @@ _PLACEHOLDER_JWT_SECRETS = frozenset(
 )
 
 
+def control_plane_jwt_readiness() -> tuple[bool, str | None]:
+    """Validate the static verifier contract without accepting a token."""
+
+    secret = settings.ADMIN_SECRET_KEY.strip()
+    if settings.ADMIN_ALGORITHM != "HS256":
+        return False, "control_plane_jwt_algorithm_invalid"
+    if not secret or secret in _PLACEHOLDER_JWT_SECRETS:
+        return False, "control_plane_jwt_key_unavailable"
+    if not settings.ADMIN_JWT_ISSUER.strip() or not settings.ADMIN_JWT_AUDIENCE.strip():
+        return False, "control_plane_jwt_claim_contract_invalid"
+    if not settings.ADMIN_REQUIRED_WRITE_SCOPE.strip():
+        return False, "control_plane_jwt_scope_contract_invalid"
+    return True, None
+
+
 def _unauthorized(detail: str = "Invalid bearer token") -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

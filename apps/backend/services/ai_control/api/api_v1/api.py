@@ -9,9 +9,11 @@ from apps.backend.services.ai_control.api.api_v1.endpoints import (
     ai_model_pool,
     ai_prompt,
     ai_prompt_import,
+    health,
 )
 
 api_router = APIRouter()
+api_router.include_router(health.router)
 api_router.include_router(ai_prompt.router)
 api_router.include_router(ai_prompt_import.router)
 api_router.include_router(ai_connection.router)

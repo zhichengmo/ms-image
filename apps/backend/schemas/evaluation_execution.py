@@ -6,6 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from apps.backend.core.ai.clinical_context import (
+    CLINICAL_CONTEXT_LEGACY_NONE,
+    CLINICAL_CONTEXT_V1,
+    EMPTY_CLINICAL_CONTEXT_SHA256,
+)
+
 
 MedicalStatus = Literal[
     "normal",
@@ -70,6 +76,19 @@ class EvaluationCaseInput(BaseModel):
     source_call_id: str | None = Field(default=None, max_length=64)
     receipt_status: ReceiptStatus
 
+    clinical_context_policy_version: Literal[
+        "legacy-none", "xray-clinical-context.v1"
+    ] = Field(
+        default=CLINICAL_CONTEXT_LEGACY_NONE,
+    )
+    clinical_context_sha256: str = Field(
+        default=EMPTY_CLINICAL_CONTEXT_SHA256,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    clinical_context_source_system: str | None = Field(default=None, max_length=64)
+    clinical_context_recorded_at: str | None = Field(default=None, max_length=64)
+    clinical_context_temporal_scope: Literal["available_at_request"] | None = None
+
     cost: float = Field(ge=0)
     latency_ms: int = Field(ge=0)
 
@@ -85,13 +104,29 @@ class EvaluationCaseInput(BaseModel):
                 raise ValueError("failed_case_missing_reason_required")
             if self.predicted_status != "not_produced":
                 raise ValueError("technical_failure_medical_status_invalid")
+        source_values = (
+            self.clinical_context_source_system,
+            self.clinical_context_recorded_at,
+            self.clinical_context_temporal_scope,
+        )
+        if self.clinical_context_policy_version == CLINICAL_CONTEXT_LEGACY_NONE:
+            if self.clinical_context_sha256 != EMPTY_CLINICAL_CONTEXT_SHA256 or any(
+                value is not None for value in source_values
+            ):
+                raise ValueError("evaluation_clinical_context_legacy_invalid")
+        elif self.clinical_context_policy_version == CLINICAL_CONTEXT_V1:
+            if self.clinical_context_sha256 == EMPTY_CLINICAL_CONTEXT_SHA256:
+                if any(value is not None for value in source_values):
+                    raise ValueError("evaluation_clinical_context_empty_invalid")
+            elif any(value is None for value in source_values):
+                raise ValueError("evaluation_clinical_context_source_required")
         return self
 
 
 class EvaluationInputManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["evaluation-input.v1"]
+    schema_version: Literal["evaluation-input.v1", "evaluation-input.v2"]
     cases: list[EvaluationCaseInput] = Field(min_length=1)
 
 

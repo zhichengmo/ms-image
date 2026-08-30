@@ -11,7 +11,13 @@ from apps.backend.core.imaging.object_store import (
     ObjectStorageGateway,
     ObjectValidation,
 )
-from apps.backend.core.imaging.manifest import canonical_json_bytes
+from apps.backend.core.imaging.manifest import (
+    PROJECTION_SOURCE_CALLER,
+    ManifestContractError,
+    build_projection_metadata,
+    canonical_json_bytes,
+    projection_fact_from_image,
+)
 from apps.backend.crud.image import ImageDal
 from apps.backend.crud.object_reconcile_cursor import ObjectReconcileCursorDal
 from apps.backend.crud.outbox import OutboxDal
@@ -29,6 +35,10 @@ from apps.backend.schemas.image import (
     ImageMultipartPartReceipt,
     ImageMultipartPartsResponse,
     ImageMultipartUploadTicket,
+    ImagePageItemResponse,
+    ImagePageQuery,
+    ImagePageResult,
+    ImageProjectionProvenance,
     ImagePrepareMultipartRequest,
     ImagePreparePartsRequest,
     ImagePrepareUploadRequest,
@@ -147,7 +157,33 @@ class ImageService:
 
     @staticmethod
     def _response(image: Image) -> ImageResponse:
-        return ImageResponse.model_validate(image)
+        try:
+            projection, provenance = projection_fact_from_image(image)
+        except ManifestContractError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        return ImageResponse.model_validate(image).model_copy(
+            update={
+                "projection": projection,
+                "projection_provenance": ImageProjectionProvenance.model_validate(
+                    provenance
+                ),
+            }
+        )
+
+    @staticmethod
+    def _page_response(image: Image) -> ImagePageItemResponse:
+        try:
+            projection, provenance = projection_fact_from_image(image)
+        except ManifestContractError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        return ImagePageItemResponse.model_validate(image).model_copy(
+            update={
+                "projection": projection,
+                "projection_provenance": ImageProjectionProvenance.model_validate(
+                    provenance
+                ),
+            }
+        )
 
     async def create_uploading_image(
         self, *, payload: ImageCreate, requester_id: str
@@ -197,7 +233,11 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": payload.projection,
+            "technical_metadata_json": build_projection_metadata(
+                payload.technical_metadata,
+                source=PROJECTION_SOURCE_CALLER,
+            ),
             "status": "uploading",
             "state_version": 0,
             "validation_lease_generation": 0,
@@ -221,6 +261,34 @@ class ImageService:
     ) -> ImageResponse:
         return self._response(
             await self._owned_image(image_id=image_id, requester_id=requester_id)
+        )
+
+    async def page_images(
+        self, *, query: ImagePageQuery, requester_id: str
+    ) -> ImagePageResult:
+        series = await self.series_dal.get_by_id(query.series_id)
+        if series is None:
+            raise ImageNotFoundError("series_not_found")
+        study = await self.study_dal.get_by_id(series.study_id)
+        if study is None:
+            raise ImageNotFoundError("study_not_found")
+        await self._owned_session(
+            session_id=study.session_id,
+            requester_id=requester_id,
+        )
+        rows, total = await self.image_dal.page_for_series(
+            series_id=series.id,
+            status=query.status,
+            image_role=query.image_role,
+            current_only=query.resolved_current_only,
+            page=query.page,
+            limit=query.page_size,
+        )
+        return ImagePageResult(
+            data=[self._page_response(item) for item in rows],
+            total=total,
+            page=query.page,
+            limit=query.page_size,
         )
 
     async def issue_direct_upload(
@@ -404,7 +472,11 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": payload.projection,
+            "technical_metadata_json": build_projection_metadata(
+                payload.technical_metadata,
+                source=PROJECTION_SOURCE_CALLER,
+            ),
             "status": "uploading",
             "state_version": 0,
             "validation_lease_generation": 0,
@@ -499,7 +571,11 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": payload.projection,
+            "technical_metadata_json": build_projection_metadata(
+                payload.technical_metadata,
+                source=PROJECTION_SOURCE_CALLER,
+            ),
             "status": "uploading",
             "state_version": 0,
             "validation_lease_generation": 0,
@@ -561,6 +637,11 @@ class ImageService:
             latest.image_version_no if latest is not None else old.image_version_no,
         ) + 1
         image_id = new_opaque_id()
+        projection, projection_metadata = self._replacement_projection_values(
+            old=old,
+            projection=payload.projection,
+            technical_metadata=payload.technical_metadata,
+        )
         values: dict[str, Any] = {
             "id": image_id,
             "series_id": old.series_id,
@@ -584,7 +665,8 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": projection,
+            "technical_metadata_json": projection_metadata,
             "status": "uploading",
             "state_version": 0,
             "validation_lease_generation": 0,
@@ -653,6 +735,11 @@ class ImageService:
             latest.image_version_no if latest is not None else old.image_version_no,
         ) + 1
         image_id = new_opaque_id()
+        projection, projection_metadata = self._replacement_projection_values(
+            old=old,
+            projection=payload.projection,
+            technical_metadata=payload.technical_metadata,
+        )
         values: dict[str, Any] = {
             "id": image_id,
             "series_id": old.series_id,
@@ -678,7 +765,8 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": projection,
+            "technical_metadata_json": projection_metadata,
             "status": "uploading",
             "state_version": 0,
             "validation_lease_generation": 0,
@@ -1243,6 +1331,7 @@ class ImageService:
             or image.state_version != expected_state_version
         ):
             return False
+        series_id = image.series_id
         updated = await self.image_dal.cas_update(
             image_id=image.id,
             expected_version=expected_state_version,
@@ -1256,7 +1345,7 @@ class ImageService:
             return False
         try:
             await self.study_service.recompute_after_image_change(
-                series_id=image.series_id,
+                series_id=series_id,
                 revision_reason="delete",
                 changed_at=changed_at,
             )
@@ -1321,8 +1410,11 @@ class ImageService:
             or image.state_version != received.expected_state_version
         ):
             raise ImageStateConflictError("image_validation_state_conflict")
+        claimed_event_id = event.id
+        claimed_image_id = image.id
+        claimed_trace_id = received.trace_id
         claimed = await self.image_dal.claim_validation_lease(
-            image_id=image.id,
+            image_id=claimed_image_id,
             expected_version=received.expected_state_version,
             owner_id=owner_id,
             claimed_at=claimed_at,
@@ -1332,17 +1424,17 @@ class ImageService:
         if claimed is None:
             return ImageValidationClaim(
                 outcome="lease_unavailable",
-                event_id=event.id,
-                image_id=image.id,
+                event_id=claimed_event_id,
+                image_id=claimed_image_id,
                 expected_state_version=received.expected_state_version,
-                trace_id=received.trace_id,
+                trace_id=claimed_trace_id,
             )
         return ImageValidationClaim(
             outcome="claimed",
-            event_id=event.id,
+            event_id=claimed_event_id,
             image_id=claimed.id,
             expected_state_version=received.expected_state_version,
-            trace_id=received.trace_id,
+            trace_id=claimed_trace_id,
             series_id=claimed.series_id,
             storage_profile=claimed.storage_profile,
             object_key=claimed.object_key,
@@ -1458,6 +1550,9 @@ class ImageService:
                 "orientation": validation.inspection.orientation,
             }
         )
+        old_image_identity = (
+            (old_image.id, old_image.state_version) if old_image is not None else None
+        )
         updated = await self.image_dal.finalize_validation(
             image_id=claim.image_id,
             expected_version=claim.expected_state_version,
@@ -1478,10 +1573,13 @@ class ImageService:
         )
         if updated is None:
             raise ImageStateConflictError("image_validation_lease_lost")
-        if old_image is not None:
+        updated_image_id = updated.id
+        revision_reason = "replace" if updated.supersedes_image_id else "add"
+        if old_image_identity is not None:
+            old_image_id, old_image_state_version = old_image_identity
             superseded = await self.image_dal.cas_update(
-                image_id=old_image.id,
-                expected_version=old_image.state_version,
+                image_id=old_image_id,
+                expected_version=old_image_state_version,
                 values={"status": "superseded"},
             )
             if superseded is None:
@@ -1489,12 +1587,15 @@ class ImageService:
         try:
             await self.study_service.recompute_after_image_change(
                 series_id=claim.series_id,
-                revision_reason="replace" if updated.supersedes_image_id else "add",
+                revision_reason=revision_reason,
                 changed_at=finished_at,
             )
         except StudyStateConflictError as exc:
             raise ImageStateConflictError(str(exc)) from exc
-        return self._response(updated)
+        refreshed = await self.image_dal.get_by_id(updated_image_id)
+        if refreshed is None:
+            raise ImageStateConflictError("image_validation_result_missing")
+        return self._response(refreshed)
 
     async def _owned_image(self, *, image_id: str, requester_id: str) -> Image:
         image = await self.image_dal.get_by_id(image_id.strip())
@@ -1538,7 +1639,11 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": payload.projection,
+            "technical_metadata_json": build_projection_metadata(
+                payload.technical_metadata,
+                source=PROJECTION_SOURCE_CALLER,
+            ),
         }
         if any(getattr(image, field) != value for field, value in expected.items()):
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
@@ -1565,7 +1670,11 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": payload.projection,
+            "technical_metadata_json": build_projection_metadata(
+                payload.technical_metadata,
+                source=PROJECTION_SOURCE_CALLER,
+            ),
         }
         if any(getattr(image, field) != value for field, value in expected.items()):
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
@@ -1594,6 +1703,11 @@ class ImageService:
         upload_mode: str = "direct_put",
         expected_part_count: int | None = None,
     ) -> None:
+        projection, projection_metadata = ImageService._replacement_projection_values(
+            old=old,
+            projection=payload.projection,
+            technical_metadata=payload.technical_metadata,
+        )
         expected = {
             "series_id": old.series_id,
             "source_image_id": payload.source_image_id or old.source_image_id,
@@ -1609,12 +1723,38 @@ class ImageService:
             "expected_sha256": payload.expected_sha256,
             "expected_size_bytes": payload.expected_size_bytes,
             "declared_content_type": payload.declared_content_type,
-            "technical_metadata_json": payload.technical_metadata,
+            "projection": projection,
+            "technical_metadata_json": projection_metadata,
         }
         if any(getattr(image, field) != value for field, value in expected.items()):
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
         if image.expected_part_count != expected_part_count:
             raise ImageIdempotencyConflictError("image_idempotency_conflict")
+
+    @staticmethod
+    def _replacement_projection_values(
+        *,
+        old: Image,
+        projection: str | None,
+        technical_metadata: dict[str, Any] | None,
+    ) -> tuple[str, dict[str, Any]]:
+        if projection is not None:
+            source = PROJECTION_SOURCE_CALLER
+            resolved_projection = projection
+        else:
+            try:
+                resolved_projection, inherited = projection_fact_from_image(old)
+            except ManifestContractError as exc:
+                raise ImageStateConflictError(str(exc)) from exc
+            source = inherited["source"]
+        try:
+            metadata = build_projection_metadata(
+                technical_metadata,
+                source=source,
+            )
+        except ManifestContractError as exc:
+            raise ImageStateConflictError(str(exc)) from exc
+        return resolved_projection, metadata
 
     @staticmethod
     def _validate_upload_operation(

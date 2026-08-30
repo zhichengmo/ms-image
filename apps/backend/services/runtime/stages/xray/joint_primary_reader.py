@@ -66,4 +66,13 @@ class XRayJointPrimaryReaderStageHandler:
         return StageResult(status="failed", output=output, error_code=error_code)
 
 
-__all__ = ["XRayJointPrimaryReaderStageHandler"]
+class XRayJointPrimaryReaderV2StageHandler(XRayJointPrimaryReaderStageHandler):
+    """Version-isolated v2 result handler; accepted model JSON remains opaque."""
+
+    handler_version = "v2"
+
+
+__all__ = [
+    "XRayJointPrimaryReaderStageHandler",
+    "XRayJointPrimaryReaderV2StageHandler",
+]

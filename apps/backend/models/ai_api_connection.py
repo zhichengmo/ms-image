@@ -8,7 +8,7 @@ from apps.backend.models.imaging_base import ImagingRecordBase
 
 
 class AIAPIConnection(ImagingRecordBase):
-    """Non-sensitive Provider connection metadata and an external Secret reference."""
+    """Non-sensitive AI Platform routing and capability metadata."""
 
     __tablename__ = "ai_api_connection"
     __table_args__ = (
@@ -23,7 +23,7 @@ class AIAPIConnection(ImagingRecordBase):
     provider_type: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): Provider adapter 类型")
     api_format: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): 请求协议格式")
     base_url: Mapped[str] = mapped_column(String(500), nullable=False, comment="VARCHAR(500): Provider 基础地址，不含 Secret")
-    secret_ref: Mapped[str] = mapped_column(String(500), nullable=False, comment="VARCHAR(500): 外部 Secret Manager 引用，不是 Secret 值")
+    secret_ref: Mapped[str] = mapped_column(String(500), nullable=False, comment="VARCHAR(500): 遗留非空列兼容占位，当前业务合同固定为空且不参与鉴权")
     region: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="VARCHAR(64)|NULL: Provider 区域标识")
     capability_json: Mapped[dict] = mapped_column(JSON, nullable=False, comment="JSON: connection-capability.v1 非敏感能力声明")
     connection_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False, comment="CHAR(64): 规范化连接元数据 SHA256，不对 Secret 值计算")

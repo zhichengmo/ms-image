@@ -1,5 +1,6 @@
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,15 @@ class StudyDal(DalBase):
 
     async def get_by_id(self, study_id: str) -> Study | None:
         return await self.get_data(data_id=study_id, v_return_none=True)
+
+    async def get_by_id_for_update(self, study_id: str) -> Study | None:
+        return await self.get_data(
+            data_id=study_id,
+            v_start_sql=select(self.model).with_for_update().execution_options(
+                populate_existing=True
+            ),
+            v_return_none=True,
+        )
 
     async def get_by_source(
         self, *, session_id: str, source_study_id: str

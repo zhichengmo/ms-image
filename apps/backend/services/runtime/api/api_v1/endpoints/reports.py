@@ -23,6 +23,27 @@ async def get_report(report_id: str = Query(..., alias="id", min_length=1, max_l
         return await rollback_and_map(db, exc)
     return GenericResponse(message="Report 查询成功", data=data)
 
+
+@router.get(
+    "/current",
+    response_model=GenericResponse[ReportResponse | None],
+)
+async def current_report(
+    task_id: str = Query(..., min_length=1, max_length=64),
+    context: CallerContext = Depends(caller),
+    service: ReportService = Depends(get_report_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await service.get_current_for_requester(
+            task_id=task_id,
+            requester_id=context.subject_id,
+        )
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return GenericResponse(message="Report 当前版本查询成功", data=data)
+
+
 @router.get("/history", response_model=GenericResponse[list[ReportResponse]])
 async def report_history(task_id: str = Query(..., min_length=1, max_length=64), context: CallerContext = Depends(caller), service: ReportService = Depends(get_report_service), db: AsyncSession = Depends(get_async_session)):
     try:
