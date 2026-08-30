@@ -166,3 +166,6 @@ docs/artifacts/*-before-schema-change.sql
 .env.dev
 .env.prod
 /待开发接口
+
+# Local dev-only keys and tokens (never commit)
+scripts/dev/keys/

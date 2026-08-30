@@ -87,6 +87,23 @@ BROKER_ENABLED=true docker compose --profile broker up --build
 
 这里的 imaging/evaluation Worker 和 Relay 使用 `broker` Profile；它们仍是当前 Runtime 代码域的一部分，不代表 AI Control 或 Evaluation Control 已独立部署。
 
+若本部署由仓库内 Celery Beat 独占 AI Attempt reconcile 调度，再显式增加
+`scheduler` Profile：
+
+```bash
+BROKER_ENABLED=true docker compose --profile broker --profile scheduler up --build
+```
+
+`imaging-scheduler` 必须保持一个副本。若生产平台已经使用 CronJob 或其他平台调度器投递
+`imaging.reconcile_ai_attempts`，不要启用 `scheduler` Profile，并保持
+`AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED=false`；两种 owner 不能同时启用。Worker 可以水平扩展，
+重叠投递仍由数据库 CAS/lease 防止重复 claim。
+
+本地非 Docker 全链路启动器 `scripts/dev/run_local_chain.sh` 永远不取得 scheduler
+ownership，也不会启动 Celery Beat；若检测到
+`AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED=true` 会直接拒绝启动。自动 reconcile 只能由上面的
+Compose `scheduler` Profile 或外部唯一调度器拥有，两者不能同时启用。
+
 ## 4. 本地地址
 
 | 用途 | 地址 | 说明 |
