@@ -1,5 +1,24 @@
 # 验证历史
 
+## 2026-08-30 — X-Ray 2–5 图 Runtime 静态与动态 Gate
+
+| Check | Result | Evidence |
+|---|---|---|
+| Pre-change backend baseline | PASS | `192 passed, 38 warnings` |
+| Final backend full suite | PASS | `234 passed, 41 warnings` |
+| Ruff | PASS | `python3.12 -m ruff check apps/backend scripts/dev/run_e2e_local.py` |
+| Compileall | PASS | `PYTHONPATH=. python3.12 -m compileall -q apps/backend scripts/dev` |
+| E2E CLI help/invalid args | PASS | 新 3 个参数可见；非法 species 与缺 qualification Config 参数均在业务请求前失败 |
+| Manifest readback | PASS | 8/8 文件存在，SHA256/bytes/format/content-type/projection 与 JSON 一致 |
+| Launcher syntax/Compose/diff | PASS | `bash -n`、`docker compose config --quiet`、`git diff --check` |
+| Unique local topology | PASS | API=1、Relay=1、Worker parent=1、child=1、Beat=0、broker consumer=1 |
+| Runtime readiness | PASS | database/Redis/imaging broker/worker ready，HTTP 200 |
+| Launcher cleanup | PASS | API/Relay/Worker/Beat=0、8010 free、owner lock absent |
+| Cat global Primary Config | BLOCKED | `xray_diagnose_cat@3.0.0`, profile primary v2, active, budget=20, expected=5 |
+| Dog global Primary Config | BLOCKED | `xray_diagnose_dog@3.0.0`, profile primary v2, active, budget=20, expected=5 |
+| Connection capability | PASS | validated, max_input_images=20, frozen Connection SHA matches both Config lanes |
+| Cat/dog 8-case real Provider matrix | NOT RUN | stopped before Task creation because Config budget Gate failed |
+
 ## 记录规则
 
 - 主文件只保留当前资格状态和下一阶段仍有决策价值的证据。
@@ -276,3 +295,13 @@ MEDICAL_RELEASE_NO_GO
 | Secret/path boundary | PASS | cached diff 未发现 Private Key、常见 Token、AWS signed signature；`.env`、`scripts/dev/keys/`、旧根目录 Postman 和 handoff archive 均未暂存。 |
 | Git push | PASS | `c8478e0`、`21f103f`、`52edcde` 已推送到 `origin/codex/prompt-runtime-ai-gateway`。 |
 | Runtime E2E | NOT RUN | 本轮目标是检查、提交和推送；没有启动业务进程或重新运行真实 Provider 全链。 |
+
+## 2026-08-30 — 2–5 图资格化分支与计划核验
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| Branch base | PASS | `codex/xray-2to5-runtime-qualification` 从 `d4a216a` 创建。 |
+| Roadmap reading | PASS | 完整阅读 3660 行 v3.3 路线图；下一阶段与 E0–E8 顺序一致。 |
+| Source anchors | PASS | 点验 Study/Series 数量 schema、Study/Image Service、AIRequest/Config 门禁和单图 E2E 写死位置。 |
+| Tests | NOT RUN | 本轮只创建分支和整理计划，没有业务代码变化。 |
+| Runtime E2E | NOT RUN | 未启动 Runtime、Relay、Worker、OSS、RabbitMQ 或真实 Provider。 |

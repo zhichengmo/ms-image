@@ -1,13 +1,5 @@
 # 当前工作日志
 
-## 2026-08-28 — AI Control health/readiness
-
-- 新增 AI Control `/api/v1/health` 与 `/api/v1/readiness`，注册到独立 AI Control app；使用严格响应 Schema，并在 OpenAPI 声明 200/503。
-- health 只返回 UTC liveness；readiness 检查主库、Control-plane HS256 JWT 静态合同，并在 `NACOS_SERVER_ADDR` 配置时探测 Nacos `/v1/console/health/readiness`。
-- Nacos 未配置时明确返回 `required=false/ready=null/state=disabled`，不阻断手工 Prompt/Connection/ModelPool/Config 管理；不检查 Runtime Redis/Broker、Evaluation DB/Worker 或 Provider。
-- AI Control lifespan 在关闭时 dispose 主库 engine，避免 readiness 建立的连接池在应用退出时遗留。
-- 扩展既有控制面测试文件；未新增表、字段、迁移、测试脚本或医学规则。
-
 ## 2026-08-28 — AI Control Nacos readiness 真实配置复核与修正
 
 - 确认用户更新后的 `.env` 已被新 `Settings` 读取：Nacos 地址、Prompt namespace、通用 namespace 和凭据均非空；此前“optional disabled”是配置更新前的旧事实。
@@ -287,3 +279,10 @@
 - 全量后端测试为 `192 passed, 38 warnings`；Ruff、compileall、shell、CLI、Postman JSON、Compose profile 和 whitespace 检查全部通过。
 - 显式分组提交并推送：核心 Runtime/Prompt/reconcile 为 `c8478e0`，本地确定性启动/E2E/Postman 为 `21f103f`，路线图/接口文档/durable handoff 为 `52edcde`。
 - 未使用 `git add -A`；未提交 `.env`、`scripts/dev/keys/`、旧根目录 Postman、`.agent-handoff/archive/` 或运行产物。
+
+## 2026-08-30 — 创建 2–5 图 Runtime 资格化分支与首批计划
+
+- 从已推送基线 `d4a216a` 创建 `codex/xray-2to5-runtime-qualification`；没有改动业务代码、数据库、Prompt、迁移或测试脚本。
+- 完整阅读 v3.3 路线图并点验 `StudyCreate/SeriesCreate`、`StudyService`、`ImageService`、`AIRequestService`、`AIConfigCompiler` 与现有 `run_e2e_local.py`。
+- 确认首批顺序为：E0 病例 manifest → E1 服务端 2–5 图门禁 → E3 现有 Harness 多图化 → E2 唯一 owner 真实环境资格化；E4–E8 在这些基础上执行矩阵。
+- 本计划不包含新 REST 接口、数据库字段/迁移、医学 Prompt 优化、Evaluation/M1、Report CAS 或器官分割。

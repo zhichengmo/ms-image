@@ -2,109 +2,82 @@
 
 ## Current State
 
-- Last updated: 2026-08-30（代码审查、分组提交与首轮远端推送完成）
+- Last updated: 2026-08-30（猫狗 2–5 图 Runtime 代码与静态资格化完成，真实 8 病例被 Config budget Gate 阻断）
 - Workspace root: `/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- Current objective: 以 `docs/ms-image-xray-complete-development-architecture-roadmap.md` 为唯一开发入口，先完成猫/狗真实 X-Ray 2–5 图 Runtime E2E；通过后默认建设 R4A–R4D、M1 并开始 Primary/Targeted 单变量医学优化。器官分割只作为用户明确选择后的独立可选展示支线。
-- Current status: 路线图与 Postman Collection 已按四套 FastAPI App 的源码/OpenAPI 完成静态资格化。项目总账为 79 个 HTTP 路由：75 个版本化接口（Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9）和 4 个非版本化 `GET /` 根探针；Runtime 病例工程链直接支撑子集仍为 66 个版本化接口。另列 5 个 `PROPOSED_NOT_IMPLEMENTED` 分割目标接口，但不计入 79。
-- Postman artifact: `/Users/mozhicheng/workspace/code/cy-code/ms-image/docs/postman/ms-image-xray-complete.postman_collection.json`，Postman v2.1，96 个 Request；覆盖 79/79 项目路由、5 个 OSS `noauth` PUT 和 12 个多影像槽重复请求。Evaluation Folder 默认跳过，5 个未实现分割接口只作为说明，不创建虚构 Request。
-- Current architecture decision: `existing-entry internal modular correction`。继续复用 `API -> Service -> CRUD(DalBase) -> Model/MySQL` 与 `Task -> Outbox -> Relay -> RabbitMQ -> Worker -> Stage Registry -> Gateway/Provider -> Report`；禁止创建第二套 Runtime、Repository、CRUDBase、DatabaseService、Pipeline 或医学事实源。
-- Current Git evidence: branch `codex/prompt-runtime-ai-gateway`；核心合同 `c8478e0`、本地验收工具 `21f103f`、路线图与文档 `52edcde` 均已推送到 `origin/codex/prompt-runtime-ai-gateway`。剩余工作树只保留明确排除的旧 Postman、tracked archive index 和 handoff archive；继续禁止 reset/clean/restore。
-- Current local processes: 本轮未启动或动态核验 Runtime、AI Control、Relay、RabbitMQ、Worker、OSS、Provider 或数据库。
+- Branch: `codex/xray-2to5-runtime-qualification`
+- Base/HEAD before this slice: `d4a216a899f2f8937e5a7039e9c4cee9b30fc45b`
+- Objective: 在不新增 REST、表字段、迁移、医学 Prompt、Evaluation、Report CAS 或分割能力的前提下，把新 X-Ray diagnose Runtime 收紧为 2–5 张诊断原图，并以猫/狗各 2/3/4/5 图完成真实工程资格化。
+- Current status: 代码、8 个 engineering candidate manifest、多图 Harness 和静态回归已完成；唯一运行拓扑已动态合格。猫狗 global Primary active Config 的冻结 `max_input_images=20`，不满足新合同要求的 `5`，因此真实 8 病例未启动并记录为 `BLOCKED`。
+- Current local processes: 资格化 topology smoke 后已正常停止；API/Relay/Worker/Beat 均为 0，8010 未监听，`/tmp/ms-image-local-chain-8010.lock` 已释放。
 
 ## Completed In This Slice
 
-- 逐文件审查当前代码、Prompt、迁移、脚本、Postman 与敏感信息边界；确认本地 `.env`、`scripts/dev/keys/`、旧根目录 Postman 和 `.agent-handoff/archive/` 不进入提交。
-- 修复 `ImageReconciler` 未传 P1-B `max_reconcile_count/max_unknown_age_seconds` 的运行时 `TypeError` 风险。
-- 修复 Compose 单独启用 `scheduler` Profile 时未启用 imaging worker/RabbitMQ 依赖的问题；本地 launcher 保持不拥有 Beat，唯一 owner 为 Compose scheduler 或外部调度器。
-- 后端全量测试 `192 passed, 38 warnings`；Ruff、compileall、reconcile CLI、launcher shell、E2E CLI help、Postman JSON、四种 Compose profile 和 diff check 全部通过。
-- 已生成并推送 `c8478e0 feat(xray): complete runtime prompt and reconciliation contracts`、`21f103f feat(dev): add deterministic local xray chain tooling` 与 `52edcde docs(xray): finalize runtime and medical optimization roadmap`。
+- 新增统一合同 `apps/backend/core/imaging/xray_contract.py`：X-Ray Study 2–5、Series 1–5、诊断输入固定为 `original + instance`，上传占位状态为 `uploading|validating|ready`。
+- Study/Series：StudyCreate 与 Service 复核 2–5；Series 在 Study 行锁内先识别幂等，再校验单 Series 1–5 和聚合 declared budget；finalize 重新核验诊断原图、Series manifest 与 Study 聚合。
+- Image：direct/multipart prepare 均锁 Study；新 logical slot 在已有 5 个占位时以 `xray_study_image_capacity_exceeded` fail-closed；同 key uploading replay 在 admission 前返回；derived 不占诊断名额。
+- Manifest/Task：新 X-Ray manifest、Snapshot 与 Task input 只使用 ready `original + instance`；Task Snapshot 前再次强制 2–5；legacy manifest builder 未修改。
+- AIRequest：Logical Call 准备、network plan 和 Provider 网络调用前均检查新 v3 X-Ray Task 的 2–5 与展开数量一致；历史 v2 frozen Task 不被重新解释。
+- Config Compiler：仅 X-Ray diagnose `xray_primary_v2` 新 Config 要求 `max_input_images=5`、Connection capability `>=5`；Targeted 与历史 Config 不被本阶段额外改写。
+- E2E Harness：现有 `scripts/dev/run_e2e_local.py` 支持 `--case-manifest`、`--evidence-dir`、`--verify-runtime-receipt`，支持多 Series/N 图上传、Snapshot/Report/receipt 只读核验和脱敏 evidence。
+- E0 manifest：`scripts/dev/manifests/xray-2to5/` 已建立 cat/dog × 2/3/4/5 共 8 个 `xray-e2e-case.v1`；路径相对 `MS_IMAGE_XRAY_DATA_ROOT`，全部 projection 为 `UNKNOWN`，不保存 Disease/annotation，不把 NOR/ABN 当 Gold。
+- 自动测试只扩展既有测试文件；覆盖 Study N=0..6、Series 1+1/1+2/2+3、超预算、幂等、direct/multipart 第 6 图、derived、Task/AI gate、Provider 前门禁、历史 v2/non-XRay 兼容和 Config capability。
 
-- 将路线图更新为 v3.3，新增一页最终执行摘要，明确唯一下一阶段为 `RUNTIME_2_TO_5_IMAGE_DETERMINISTIC_QUALIFICATION`；E0–E8 完成前禁止先做医学 Prompt 优化、Targeted 效果实验、Evaluation M1 或器官分割。
-- 纠正 Prompt 事实：当前 v2 Worker 每个 Logical Call 直接渲染 immutable `AIConfigRecord.prompt_content`；Catalog 20 个模块只是本地资产库存与 v1 provider-disabled 兼容输入，不是 v2 单病例逐个执行的 20 份 Prompt。
-- 纠正冻结边界：完整 Prompt identity/content/variables/message/schema/model/pipeline 位于 immutable Config 行；Task Snapshot 只保存 Config identity 与 config/release/prompt/model/schema/pipeline SHA 等绑定事实，不复制完整 Prompt 正文。
-- 明确 cat/dog v4 是同一物种的双模式正文：`PRIMARY_RESULT_JSON` 缺失时是 Primary，存在时是 Targeted；确定性 Stage 不创建 Prompt，`targeted-review/common` 本地文件当前也不是 Prompt Source importer 可达身份。
-- 将 E0–E8 后默认路线改为 R4A Evaluation DB → R4B Dataset → R4C Gold/Scorer → R4D Runtime 等价 Runner → M1 → Primary → Targeted → Holdout；S0–S6 分割降为用户显式选择后的可选产品支线。
+## Dynamic Gate Evidence
 
-- 将路线图更新为 v3.2，并建立“79 个项目路由 / 75 个版本化接口 / 66 个 Runtime 主链直接支撑接口”的分层口径，避免把主链子集误报为项目全部接口。
-- 为 Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9 和 4 个根探针逐项明确用途、同步/异步医学 Prompt 数及 LLM Provider Logical Call 数。
-- 明确所有 REST handler 同步病例医学 Prompt 均为 0；只有 `POST /api/v1/tasks` 成功后由 Worker 异步触发病例模型链。Primary 为 1 Prompt/1 Call，Targeted 有合法 candidate 时为 2/2，replay 与当前 Evaluation Fake scorer 均为 0/0；N 张影像仍在一次 Logical Call 中联合发送。
-- 将 Evaluation Control 纳入项目接口总账与独立 Postman Folder，同时明确当前 Worker 使用 `FakeEvaluationScorer`，不执行 Runtime Prompt、Config、Gateway 或 Provider，不能用于 M1 或医学准确率结论。
-- 修正 `/images/page` 为 `series_id` query；修复 Task/current/history 三方 Report ID 一致性证据；增加 `task_current_report_id` 独立变量。
-- Collection 固定四套 `/api/v1` base URL 与四套 root origin；AI Control、Admin、损坏 Report mutation 和 Evaluation 请求分别通过实际 `enable_*` 变量默认跳过。
-- 5 个 OSS signed URL PUT 均为 `noauth`；Collection 未发现真实 JWT、API key、Private Key、密码、影像、Prompt 正文、Provider 原文或报告正文。
+- 唯一 launcher topology：API 1、Relay 1、Worker parent 1、Worker child 1、Beat 0、broker consumer 1。
+- Runtime readiness：database/Redis/imaging broker/worker 均 ready，HTTP 200；launcher 正常退出后仅清理自有进程和 lock。
+- 猫 global Primary：`xray_diagnose_cat@3.0.0`，active，`xray_primary_v2`，Config SHA `392558b06ada121bdb943bf9ae053f821bf48ee8f11c432ad35dd4a8db366e94`，budget=20。
+- 狗 global Primary：`xray_diagnose_dog@3.0.0`，active，`xray_primary_v2`，Config SHA `c19dea28f13b62dc0bbd23315bd9800a466aeb510b1f5a17c62db00ac167325c`，budget=20。
+- 两者使用的 Connection 均为 validated、frozen SHA 对账一致、capability max_input_images=20；阻塞事实只在 Config budget 不等于 5。
+- 未创建 Task、未调用 Provider、未写控制面、未修改或覆盖 3.0.0。
 
 ## Current Qualification
 
 ```text
-XRAY_DOCUMENT_V3_3_STATIC_QUALIFIED
-PROJECT_HTTP_ROUTE_MATRIX_79_OF_79
-RUNTIME_INTERFACE_MATRIX_29_OF_29
-RUNTIME_ADMIN_INTERFACE_MATRIX_6_OF_6
-AI_CONTROL_INTERFACE_MATRIX_31_OF_31
-EVALUATION_CONTROL_INTERFACE_MATRIX_9_OF_9
-POSTMAN_COLLECTION_96_REQUESTS_STATIC_QUALIFIED
-POSTMAN_JSON_BODY_SCHEMA_50_OF_50
-POSTMAN_REQUIRED_QUERY_22_OF_22
-POSTMAN_OSS_NOAUTH_5_OF_5
-PROMPT_PROVIDER_COUNT_CONTRACT_FROZEN
-SEGMENTATION_5_INTERFACES_PROPOSED_ONLY
-EXISTING_ENTRY_INTERNAL_MODULAR_CORRECTION_SELECTED
-BACKEND_TESTS_192_PASSED
-CORE_AND_LOCAL_TOOLING_PUSHED
+XRAY_2TO5_RUNTIME_CONTRACT_STATIC_QUALIFIED
+XRAY_2TO5_MANIFEST_MATRIX_8_OF_8_STATIC_QUALIFIED
+XRAY_2TO5_E2E_HARNESS_STATIC_QUALIFIED
+UNIQUE_LOCAL_RUNTIME_TOPOLOGY_QUALIFIED
+BACKEND_TESTS_234_PASSED
 
-RUNTIME_E2E_NOT_RUN_IN_THIS_SLICE
-RUNTIME_2_TO_5_IMAGE_E2E_NOT_RUN
-MAX_5_IMAGE_SERVER_GUARD_NOT_IMPLEMENTED
-MULTI_IMAGE_E2E_HARNESS_NOT_IMPLEMENTED
-IMAGE_ASSESSMENTS_COVERAGE_NOT_IMPLEMENTED
-SEGMENTATION_RUNTIME_NOT_IMPLEMENTED
-CURRENT_RUNTIME_ENVIRONMENT_UNKNOWN
+XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_BLOCKED
+BLOCKER=GLOBAL_PRIMARY_CONFIG_MAX_INPUT_IMAGES_20_NOT_5
+REAL_8_CASE_MATRIX_NOT_RUN
 MEDICAL_ACCURACY_UNKNOWN
 MEDICAL_RELEASE_NO_GO
 ```
 
+不得记录 `XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED`，直到 8 格全部通过。
+
 ## Immediate Next Actions
 
-1. E0：准备猫/狗 × 2/3/4/5 的真实病例 manifest；每张图显式记录路径、SHA256、大小、content type、projection、sequence_no。
-2. E1：在现有 Schema/Service/AIRequest/Config 路径补齐 `2 <= N <= 5` 门禁；多 Series 总数也不得超过 5，第 6 张必须由服务端拒绝。
-3. E2：启动并核验 Runtime、MySQL、Redis、RabbitMQ、Relay、Worker、OSS 与真实 Provider；Compose 使用 `broker` profile。
-4. E3：只扩展现有 `scripts/dev/run_e2e_local.py`，把单图硬编码参数化为同一 Study 的 2–5 图；不要新增第二套测试框架。
-5. 导入已交付 Collection，填写 Runtime/Admin/AI Control Token、2–5 张真实影像路径、SHA256、bytes、projection 后，以 Runner/Newman 执行诊断主 Folder；不要启用控制面/Admin/Evaluation 写门禁。
-6. E4–E6：验证 N 次 OSS PUT、Image Validation、Study finalize、Task/Outbox/Relay/RabbitMQ/Worker、真实 Provider、Task completed、首份 final Report、current/history。
-7. E7–E8：执行 cat/dog × 2/3/4/5 验收矩阵并保存 evidence；完成前不得转入 Evaluation、Gold、Scorer 或医学优化。
-8. E0–E8 通过后默认推进 R4A–R4D、M1、Primary/Targeted 单变量优化；只有用户明确优先展示能力时才推进 S0–S6，迁移、测试脚本和分割实现仍需另行授权。
+1. 经用户确认后，通过现有 AI Control 创建不可变 `xray_diagnose_cat@3.0.1` 与 `xray_diagnose_dog@3.0.1`：复用各自 3.0.0 的 Prompt/ModelPool/Connection/Schema/Profile，只把 budget `max_input_images` 改为 5；compile/validate 后再 activate global/global。不得覆盖 3.0.0。
+2. 重新只读确认猫狗 active global Primary 的 profile、budget=5、Connection capability>=5、Config SHA，并在 8 轮期间冻结这两个 SHA。
+3. 用唯一 launcher 启动 `1 API + 1 Relay + 1 Worker parent/child + 0 Beat + consumer=1`。
+4. 依次执行 cat 2/3/4/5、dog 2/3/4/5，命令必须带 `--expected-config-key`、`--expected-prompt-sha256`、`--verify-runtime-receipt`、`--evidence-dir`；任一格失败立即停止，不静默重试。
+5. 8 格全部 PASS 后才记录 `XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED`，然后进入 R4A–R4D/M1，而不是直接宣称医学准确。
 
 ## Active Files
 
-- `docs/ms-image-xray-complete-development-architecture-roadmap.md`
-- `docs/postman/ms-image-xray-complete.postman_collection.json`
-- `AGENT_HANDOFF.md`
-- `.agent-handoff/snapshot.md`
-- `.agent-handoff/work-log.md`
-- `.agent-handoff/validation.md`
-- `.agent-handoff/decisions.md`
-- `.agent-handoff/backlog.md`
-- `.agent-handoff/risks.md`
-
-## Blockers / Open Questions
-
-- 当前 `StudyCreate.expected_image_count` 与 `SeriesCreate.expected_image_count` 尚未证明具备 `le=5`，第 6 张上传服务端门禁未资格化。
-- `scripts/dev/run_e2e_local.py` 仍固定单图；`--repeat` 是重复病例，不是同一 Study 多图。
-- projection 当前来自调用方声明，不是 AI 自动识别；DICOM `ViewPosition` 与 projection QC 尚未实现。
-- receipt 证明一个 Logical Call 发送全部 N 张图，但结果 Schema 尚无 `image_assessments` 全输入覆盖合同。
-- cat/dog active Config 的实际 `max_input_images=5` 和当前环境服务就绪状态均未动态确认。
-- 分割 API、表、Worker、Provider 和 Artifact 当前均未实现；5 个 Postman 请求只是默认跳过的目标合同。
-- Report revision 1 final/current/history 是 P0 终点；publish/void/第二 revision 因 CAS 风险仍不应启用。
+- `apps/backend/core/imaging/xray_contract.py`
+- `apps/backend/core/imaging/manifest.py`
+- `apps/backend/crud/image.py`
+- `apps/backend/crud/ai_call.py`
+- `apps/backend/schemas/study.py`
+- `apps/backend/services/runtime/service/study_service.py`
+- `apps/backend/services/runtime/service/image_service.py`
+- `apps/backend/services/runtime/service/task_service.py`
+- `apps/backend/services/runtime/service/ai_request_service.py`
+- `apps/backend/services/ai_control/service/config_compiler.py`
+- `scripts/dev/run_e2e_local.py`
+- `scripts/dev/manifests/xray-2to5/*.json`
+- `apps/backend/tests/test_ai_gateway_attempt_contracts.py`
+- `apps/backend/tests/test_ai_prompt_control_plane_contracts.py`
 
 ## Validation Summary
 
-- 文档：3660 行、151896 bytes、SHA256 `71a1c98a3f1a542ffb3f25685d40d845b5a0248ce0bd097f215f87fa7e531556`。
-- Postman：5167 行、206425 bytes、SHA256 `f5f8cfcadc2db872546078ea37296d6bc48615c56aa2b8cc29b15e2846a27f3e`。
-- OpenAPI 对照：Runtime 30/30（含根探针）、Runtime Admin 7/7（含根探针）、AI Control 32/32（含根探针）、Evaluation Control 10/10（含根探针）；Collection 79/79 项目路由无 missing/extra，另有 5 个外部 OSS PUT。
-- 文档矩阵：Runtime 29/29、Runtime Admin 6/6、AI Control 31/31、Evaluation Control 9/9；四个根探针另表列出；5 个分割目标接口保持未实现。
-- Prompt：v2 Runtime 每个 Config 冻结并渲染 1 份完整正文；Catalog 20 个模块是本地/v1 兼容资产库存。单病例实际医学调用固定为 1 或 2，不是 20。
-- Postman：96 个 Request；50/50 JSON request body 通过对应 OpenAPI Schema，22/22 required query 请求无缺失，91/91 项目请求鉴权与 OpenAPI 一致，5/5 OSS PUT 为 `noauth`；每个项目请求说明均包含用途和 Prompt/Provider 数。
-- Markdown：228 个代码围栏且数量为偶数；`python -m json.tool`、四 App 路由计数和 `git diff --check` 均通过。
-- 提交前动态验证：`PYTHONPATH=. pytest -q apps/backend/tests` 为 `192 passed, 38 warnings`；Ruff、compileall、launcher/E2E CLI、reconcile CLI、Postman JSON 与 Compose default/broker/scheduler/broker+scheduler 均 PASS。
-- Git：`c8478e0`、`21f103f`、`52edcde` 已成功推送到 `origin/codex/prompt-runtime-ai-gateway`；私钥、`.env`、旧 Postman 与 archive 未进入这些提交。
-- 真实 E2E：NOT RUN / UNKNOWN；不得把静态资格化写成 Runtime 全链 PASS。
+- Pre-change baseline: `192 passed, 38 warnings`。
+- Final backend: `234 passed, 41 warnings`。
+- Ruff、compileall、E2E `--help`/非法参数、`bash -n`、`docker compose config --quiet`、`git diff --check` 全部 PASS。
+- 8 manifests 已按真实数据根回读文件、SHA256、大小、格式、content type 和 projection。
+- Docker Desktop daemon 当前未运行，但本机 MySQL/RabbitMQ/Redis 与 launcher topology/readiness 均动态合格；这不是当前阻塞原因。

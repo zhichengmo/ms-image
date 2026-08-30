@@ -871,3 +871,14 @@
 | 仓库 scheduler owner 是独立 Compose `scheduler` Profile，或由外部调度器拥有，二者不可同时启用 | 自动 reconcile 必须有唯一 owner；Compose profile 需要自包含 worker/RabbitMQ 依赖 | default/broker/scheduler/broker+scheduler 四种 Compose 解析均通过 |
 | 当前大工作树按核心、工具、文档/handoff 三组显式提交 | 共享文件高度重叠，按文件职责分组可审阅且避免 `git add -A` 混入私钥、旧资产或归档 | cached path/secret 扫描；提交 `c8478e0`、`21f103f` |
 | canonical Postman 只提交 `docs/postman/ms-image-xray-complete.postman_collection.json` | 根目录旧 Collection 是 91 Request/v3.1 资产，已被 96 Request/v3.3 canonical 文件取代 | v3.3 路线图与 79/79 路由静态对账 |
+
+## 2026-08-30 — 猫狗 2–5 图 Runtime 数量合同决策
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 新 X-Ray Study 诊断原图严格为 2–5，单 Series 为 1–5 | 用户要求资格化 2/3/4/5 图并对第 6 图 fail-closed；Series 可为单图但 Study 聚合不得小于 2 | `xray_contract.py`；Study/Series/Task/AIRequest tests |
+| diagnostic input 唯一 predicate 为 `image_role=original && image_kind=instance` | derived 可以持久化但不应占诊断名额、进入新 Snapshot 或发给 Provider | ImageDal diagnostic queries；manifest/Task tests |
+| direct/multipart admission 在同一 Study 行锁内串行化 | 两个并发 prepare 在只剩一个名额时必须最多一个成功；锁不能跨 OSS 网络调用 | `prepare_direct_upload`、`prepare_multipart_upload`；现有 workflow 短事务边界 |
+| 固定 2–5 Provider gate 只解释新 v3 X-Ray diagnose Snapshot | 历史 v2 Task 的冻结含义不可被新部署改写；新 Task 已由 v3 Snapshot 与 Task gate 保证 | `AIRequestService._xray_image_contract_required`；historical v2 compatibility test |
+| Config Compiler 的 exact-5 budget 只约束 `xray_primary_v2` | 本阶段资格化 global Primary；Targeted 效果实验明确 Out，不顺带改变其历史 Config 合同 | Config compiler source gate；control-plane contract test |
+| active 3.0.0 budget=20 时停止 8 病例，不自动改控制面 | 计划要求 Config 不合格时输出 BLOCKED，并以新不可变版本修正；原地覆盖会破坏历史审计与重放 | 2026-08-30 DB readback；cat/dog Config SHA evidence |
