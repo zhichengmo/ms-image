@@ -1,1385 +1,956 @@
-# MS-Image XRay（X 光）完整核心架构与专项设计
+# MS-Image（影像服务）XRay（X 光）架构选择与专项设计
 
-状态：`CURRENT_CONSOLIDATED_ARCHITECTURE / PROVIDER_DISABLED_FULL_CHAIN_PASSED / RUNTIME_NOT_VALIDATED / MEDICAL_RELEASE_NO_GO`（当前统一架构/Provider 关闭模式全链已通过/真实运行未验证/医学发布禁止放行）
+状态：`MINIMUM_IMAGE_TO_FINAL_REPORT_CHAIN_PROVEN（最小影像到最终报告链已实证）` / `C2_ENGINEERING_QUALIFIED（C2 工程资格已通过）` / `DETERMINISTIC_LOCAL_REPLAY_NOT_QUALIFIED（本地确定性复跑未资格化）` / `MEDICAL_ACCURACY_UNKNOWN（医学准确性未知）` / `MEDICAL_RELEASE_NO-GO（医学发布禁止放行）`
 
-更新日期：2026-08-20
+更新日期：2026-08-28
 
-适用范围：MS-Image 总体边界、数据库事实、业务模块、XRay 完整链路、逐层责任、专项体系、医学主链、条件专项复核、控制面、评测面、报告边界和架构取舍。
+适用读者：第一次接触本项目的产品、研发、测试、算法和医学同事。
 
-本文是一份自包含的 XRay 架构交付文档。读者不需要跳转其他设计文档即可理解总体架构、完整流程、逐层输入输出和专项设计。本文不展开类、函数、字段清单或实现代码。
+标注规则：正文中的英文术语统一写成 `English（中文含义）`；为了能在代码中精确检索，文件路径和代码标识保留原样，但会在首次出现处或相邻说明中给出中文含义。
 
-术语标注规则：所有业务英文概念按“英文（中文）”标注；表名、状态键、配置键等代码标识保留英文，但在同一行的中文用途、状态说明或表格列中标明含义。
+本文只回答三件事：
 
-### 0.0 核心术语中英对照
+1. 现在四种 XRay（X 光）方案中哪个更合适；
+2. 当前项目到底已经完成了什么、还缺什么；
+3. 未来怎样用证据决定是否增加 TargetedReview（专项复核），而不是凭感觉增加模型调用。
 
-| 英文术语 | 中文含义 |
-|---|---|
-| Session | 影像诊疗会话 |
-| Study | 影像检查 |
-| Series | 影像序列 |
-| Image | 影像对象 |
-| Task | 诊断或分析任务 |
-| Stage | 执行阶段 |
-| Outbox | 事务发件箱 |
-| AI Config | AI 配置 |
-| AI Call | AI 调用 |
-| Report | 报告 |
-| Evaluation | 离线评测 |
-| Job | 评测任务 |
-| Run | 评测运行 |
-| Artifact | 评测产物 |
-| Prompt | 提示词 |
-| Schema | 结构合同 |
-| Profile | 流程配置 |
-| Provider | AI 服务提供方 |
-| Model | AI 模型 |
-| Finding | 影像发现 |
-| Family | 临床专项家族 |
-| Focus | 专项关注点 |
-| Strategy | 复核策略 |
-| Owner | 医学结果所有者 |
-| Prepared Study | 已准备检查 |
-| Complete Medical Result | 完整医学结果 |
-| Primary | 主读结果或主读阶段 |
-| Targeted Review | 专项复核 |
-| Control Plane | 控制面 |
-| Imaging Ingress | 影像接入面 |
-| Reliable Execution | 可靠执行面 |
-| Medical Pipeline | 医学判读流水线 |
-| Report Plane | 报告与结果发布面 |
-| Evaluation Plane | 离线评测与发布证据面 |
-| CAS | 比较并设置 |
-| lease | 租约 |
-| deadline | 截止时间 |
-| unknown | 调用结果未知、等待对账 |
-| review_required | AI 无法确定 |
-| non_diagnostic | 医学上不可判读 |
-| not_produced | 未产生医学结论 |
+> 一句话结论：当前采用 `Primary-only（仅主读）` 作为运行和医学评测基线；`Primary + Conditional Targeted（主读 + 条件专项复核）` 只作为未来实验候选，必须证明整体净收益后才能启用。
 
-## 0. 总体集成架构
+---
 
-### 0.1 当前实施状态
+## 1. 给小白的 30 秒结论
 
-截至 2026-08-19，当前代码已经完成 Provider（AI 服务提供方）关闭模式下从在线影像链、Task（任务）/Stage（阶段）、报告到 Evaluation（离线评测）的组合验收，证明主要工程合同可以在不调用真实医学模型的情况下闭环。
+把一次 X 光检查想成“一位医生完整看完这一套片子”。
 
-当前可以确认：
+- `Primary（主读）`：第一次完整阅读整套片子，是每个病例都要走的基础步骤。
+- `TargetedReview（专项复核）`：发现一个明确、值得复查的问题后，再围绕这个问题完整看一次整套片子。
+- 当前项目已经真实跑通一条单图 `Primary-only（仅主读）` 工程链：选择并上传已有 X 光影像、调用 AI（人工智能）、生成第一份 `final Report（最终报告）`，再通过 `current/history（当前/历史）` 接口读取。
+- `C2 CompleteMedicalResult v2（C2 完整医学结果第二版）` 已完成工程资格化；`summary（摘要）`、`impression（印象）`、`findings（影像发现）`、`limitations（局限）` 等结果保存在 `Report.content_json.complete_medical_result（报告内容中的完整医学结果）`，不是报告表的顶层列。
+- 项目虽然已经有 `TargetedReview（专项复核）` 相关的流程骨架，但当前路由固定走 `primary_final（主读直接定稿）`，所以专项复核实际上不会被触发。
+- 真实单图和两视图工程验收都已有成功证据，但它们只说明“图片送对了、模型调用成功、结果存下来了”，不说明“诊断正确”。
+- 当前本地同时存在 2 个 `Outbox Relay（事务发件箱转发进程）` 和 3 个 `Celery Worker（Celery 工作进程）`；因此只能说“链路曾跑通”，不能说“当前环境可安全、确定性地随时复跑”。
+- 当前没有可信 `M1 Medical Baseline（M1 医学基线）`，不能声称医学准确率已经验证，也不能医学发布。
 
-- 影像接入、任务执行、报告和评测代码链已经形成；
-- Provider（AI 服务提供方）关闭模式的完整工程链已经通过组合验收；
-- Evaluation（离线评测）与在线 Task（任务）、Report（报告）、Config（配置）保持隔离；
-- 重复消息、取消、迟到写回、Artifact（评测产物）漂移、Stage（阶段）/Evaluation（离线评测） lease（租约）和动态 Targeted（专项复核）上限已经进行 fake（模拟）验收；
-- 实际数据库结构尚未应用到真实环境；
-- 真实 MySQL、OSS、RabbitMQ 和 Provider 尚未演练；
-- 真实模型资格和 AI 测试尚未开始；
-- 医学准确率仍为 UNKNOWN；
-- 医学发布仍为 NO-GO。
+因此，当前最好的方案不是重写架构或增加更多调用，而是做 `local correction（局部修正）`：先消除重复进程、增强已有一键验收工具、补齐报告状态版本，再把一次完整主读变成可信、可复现、可评测的基线。只有某一类真实医学失败被证据证明后，才实验一次受控的专项复核。
 
-因此，本文中的医学链和专项设计仍是待真实模型、真实数据和医学评测验证的架构合同，不能因工程链通过而写成医学能力已经完成。
+---
 
-### 0.2 系统目标和边界
+## 2. 四种方案哪个更好
 
-MS-Image 负责兽医影像从业务会话开始，到影像检查接入、对象存储、AI 执行、结果定稿、报告查询和离线评测的闭环。
+这里的“更好”要分成两个时间点：现在能稳定落地的方案，以及未来可能提高医学效果的方案。
 
-MS-Image 自己拥有：
+| 方案 | 人话解释 | 可能优点 | 主要问题 | 当前结论 |
+|---|---|---|---|---|
+| `Primary-only（仅主读）` | 每例只进行一次完整检查主读 | 成本、延迟、结果来源和失败原因最清楚 | 单次主读可能存在稳定盲点 | **当前最佳基线，立即保留** |
+| `Organ-by-organ Calls（按器官默认多次调用）` | 胸腔、腹腔、骨骼等分别调用，再拼结果 | 每次提示词看起来更聚焦 | 容易冲突、重复、误报；成本和延迟线性增加；谁负责最终结论不清楚 | **当前不采用** |
+| `Primary + Conditional Targeted（主读 + 条件专项复核）` | 先完整主读，只有满足严格条件时最多再复核一次 | 可能修复某个已经证实的主读盲点 | 路由本身可能漏掉问题；复核也可能制造新误报 | **未来唯一保留的实验候选** |
+| `Multi-reader Debate（多读者辩论）` | 多个模型结果互相讨论或投票 | 理论上可能暴露分歧 | 调用最多、逻辑最复杂；同源模型不等于独立医学证据；结果所有者模糊 | **当前不采用** |
 
-- Session（影像诊疗会话）；
-- Study（影像检查）；
-- Series（影像序列）；
-- Image（影像对象）；
-- Task（诊断或分析任务）；
-- Stage（执行阶段）；
-- Outbox（事务发件箱）；
-- AI Config（AI 配置）；
-- AI Call（AI 调用）；
-- Report（报告）；
-- Evaluation Job、Run 和 Artifact（评测任务、运行和产物）。
+### 2.1 为什么当前选 `Primary-only（仅主读）`
 
-MS-Image 不拥有用户、宠物、病历正文、订单、支付、额度和组织等公共业务主数据，只保存完成影像任务所需的不透明业务引用和受信身份。
+当前项目需要先回答最基本的问题：同一套冻结影像、同一套 `Prompt（提示词）`、同一模型和同一 `Schema（结构合同）`，能否稳定得到可追溯结果。
 
-### 0.3 总体责任面
+`Primary-only（仅主读）` 的优势是：
 
-讲解和文档统一使用以下中文名称：
+- 每例只有一个医学结果来源，容易审计；
+- 不需要解决多结果投票、合并或覆盖规则；
+- 延迟和费用最低，也最容易计算；
+- 出现错误时，可以明确归因到输入、提示词、模型、结构合同或运行链；
+- 最适合作为之后所有 `Paired A/B（同病例配对 A/B 实验）` 的对照组。
 
-| 英文名称 | 统一中文名称 | 一句话职责 |
-|---|---|---|
-| Control Plane | 控制面 | 决定新任务允许使用哪套配置、模型和发布版本 |
-| Imaging Ingress | 影像接入面 | 将上传对象变成可信、可版本化的 Study 输入 |
-| Reliable Execution | 可靠执行面 | 保证异步任务、调用、重试、恢复和终态事实可靠 |
-| Medical Pipeline | 医学判读流水线 | 产生并选择唯一完整医学结果 |
-| Report Plane | 报告与结果发布面 | 固化、发布和授权查询被选医学结果 |
-| Evaluation Plane | 离线评测与发布证据面 | 用冻结数据判断候选是否值得进入发布配置 |
+### 2.2 为什么未来只保留“条件专项复核”
+
+如果 `M1 Medical Baseline（M1 医学基线）` 证明主读在某个明确问题上反复失败，例如某类肺野模式容易漏掉，那么可以只针对这个问题实验一次 `TargetedReview（专项复核）`。
+
+它不是默认多调用，也不是把所有器官再看一遍。它必须满足：
+
+- 只有一个 `Family（专项家族）`；
+- 只有一个 `Focus（专项关注点）`；
+- 最多一个 `Strategy（复核策略）`；
+- 有清楚的来源 `Finding（影像发现）` 和影像覆盖证据；
+- 模型、提示词、结构合同、预算和截止时间已经冻结；
+- 最多追加一次模型调用；
+- 在同病例实验和独立 `Holdout（留出集）` 上证明整体净收益。
+
+### 2.3 方案选型图
+
+这张图适合在讲解开头使用：先建立主读基线，再由证据决定要不要实验专项复核。
 
 ```mermaid
 flowchart TD
-    C["控制面（Control Plane）<br/>配置、模型资格、Profile、发布"]
-    I["影像接入面（Imaging Ingress）<br/>Session、Study、Series、Image、OSS"]
-    E["可靠执行面（Reliable Execution）<br/>Task、Stage、Outbox、AI Call、恢复"]
-    M["医学判读流水线（Medical Pipeline）<br/>Preparation、Primary、Router、Targeted、Finalization"]
-    R["报告与结果发布面（Report Plane）<br/>不可变结果、发布、授权查询"]
-    V["离线评测与发布证据面（Evaluation Plane）<br/>Gold、Failure Bank、配对实验、留出集"]
+    current["当前采用<br/>Primary-only（仅主读）"]
+    baseline["建立 M1 Medical Baseline<br/>（M1 医学基线）"]
+    blind_spot{"是否发现重复、重要、<br/>可度量的主读盲点？"}
+    keep["继续 Primary-only<br/>（仅主读）"]
+    experiment["只实验 1 个 Family（专项家族）<br/>+ 1 个 Focus（关注点）<br/>+ 最多 1 次 TargetedReview（专项复核）"]
+    paired["Paired A/B（配对 A/B）<br/>+ Holdout（留出集）"]
+    net_gain{"整体净收益成立，<br/>且安全护栏没有退化？"}
+    enable["申请启用<br/>Conditional Targeted（条件专项复核）"]
+    rollback["停止实验<br/>回到 Primary-only（仅主读）"]
 
-    C --> E
-    I --> E
-    E --> M --> R
-    R -. "脱敏冻结运行产物" .-> V
-    V -. "候选证据和审批" .-> C
+    current --> baseline --> blind_spot
+    blind_spot -->|否| keep
+    blind_spot -->|是| experiment --> paired --> net_gain
+    net_gain -->|是| enable
+    net_gain -->|否| rollback
+
+    classDef currentState fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef futureState fill:#fff8e1,stroke:#f9a825,color:#5d4037;
+    classDef stopState fill:#ffebee,stroke:#c62828,color:#b71c1c;
+    class current,baseline,blind_spot,keep currentState;
+    class experiment,paired,net_gain,enable futureState;
+    class rollback stopState;
 ```
 
-| 责任面 | 核心职责 | 明确不负责 |
-|---|---|---|
-| 控制面（Control Plane） | 冻结模型、Prompt、Schema、专项目录、预算和发布配置 | 不运行病例诊断，不直接修改报告 |
-| 影像接入面（Imaging Ingress） | 保证图像、顺序、版本、投照和检查修订可信 | 不判断医学正常或异常 |
-| 可靠执行面（Reliable Execution） | 保证幂等、恢复、租约、超时和唯一调用事实 | 不根据医学结果好坏重试 |
-| 医学判读流水线（Medical Pipeline） | 产生和选择唯一完整医学结果 | 不管理上传、对象存储或发布权限 |
-| 报告与结果发布面（Report Plane） | 持久化、展示和授权查询被选医学结果 | 不补充、删除或改写 Finding |
-| 离线评测与发布证据面（Evaluation Plane） | 判断候选是否真正改善准确率和安全护栏 | 不直接激活配置，不参与在线医学判断 |
+---
 
-### 0.4 数据库事实架构
+## 3. 先分清三种“成功”
 
-目标在线数据库以十类核心事实组成：
+这是整份文档最重要的认知边界。
 
-| 表 | 中文用途 | 唯一事实所有权 |
-|---|---|---|
-| `session_record` | 会话记录 | 一次影像业务生命周期、幂等和关闭/取消 |
-| `study_record` | 检查记录 | 检查修订、完整性、当前影像集合和就绪状态 |
-| `series_record` | 序列记录 | 检查内影像分组和序列清单 |
-| `image_record` | 影像记录 | 对象存储引用、版本、校验、替换和隔离 |
-| `task_record` | 任务记录 | 一次冻结的业务执行请求和双状态终点 |
-| `stage_checkpoint_record` | 阶段检查点 | 单个 Stage 的状态、租约、输入输出和恢复 |
-| `outbox_record` | 事务发件箱 | 数据库事实提交后的可靠事件发布 |
-| `ai_config_record` | AI 配置 | Pipeline、Prompt、Schema、模型、Provider、预算和发布版本 |
-| `ai_call_record` | AI 调用 | 每个逻辑 Provider 请求、发送清单、回执、结果和处置 |
-| `report_record` | 报告记录 | 不可变医学结果、来源和发布/作废生命周期 |
-
-隔离评测数据库以四类事实组成：
-
-| 表 | 中文用途 | 唯一事实所有权 |
-|---|---|---|
-| `evaluation_job_record` | 评测任务 | 预注册输入、指标、审批、状态和租约 |
-| `evaluation_outbox_record` | 评测发件箱 | 评测任务的可靠发布 |
-| `evaluation_run_record` | 评测运行 | 冻结配置和单次执行结果 |
-| `evaluation_artifact_record` | 评测产物 | Dataset、Gold、病例结果、指标、失败分析和审批证据 |
-
-设计原则：
-
-- 不使用数据库 Foreign Key；逻辑关系由 Service 在事务中验证；
-- 不使用数据库 Enum；状态和类型使用可演进字符串；
-- 每张表使用独立、非空、服务端生成的单列主键；
-- 不建设公共文件资产表；OSS 保存字节，领域表保存完整 ObjectRef；
-- 同一事实只由一个表拥有，其他表只保存冻结引用；
-- Family、Focus、Strategy 和 Prompt 角色属于版本化 Config，不按专项拆表。
-
-### 0.5 模块和 Service（业务服务）架构
-
-在线核心业务 Service：
-
-| Service（业务服务） | 中文职责 | 主要事实 |
-|---|---|---|
-| SessionService（会话服务） | 会话生命周期和幂等 | Session（会话） |
-| StudyService（检查服务） | Study（检查）/Series（序列）、修订、清单和完整性 | Study（检查）、Series（序列） |
-| ImageService（影像服务） | 上传、校验、替换、隔离和对象对账 | Image（影像）、Image Outbox（影像发件箱） |
-| TaskService（任务服务） | 冻结 Study（检查）、Config（配置）、Profile（流程配置）、预算并启动任务 | Task（任务）、首 Stage（阶段）、Outbox（事务发件箱） |
-| ImagingExecutionService（影像执行服务） | Stage（阶段） claim（领取）、lease（租约）、CAS（比较并设置）、路由、恢复、取消和完成 | Task（任务）、Stage（阶段）、Outbox（事务发件箱）、Call（调用）、Report（报告）协调事务 |
-| AIConfigService（AI 配置服务） | 不可变配置、资格、激活和回滚 | AI Config（AI 配置） |
-| AIRequestService（AI 请求服务） | Prompt（提示词）/Schema（结构合同）组装、Provider（AI 服务提供方）调用、预算、回执和 unknown（未知结果）对账 | AI Call（AI 调用）、Call Outbox（调用发件箱） |
-| ReportService（报告服务） | 不可变报告、当前报告指针、发布、作废和查询 | Report（报告）、Task（任务）当前报告 |
-
-目标 Stage：
-
-| Stage（阶段） | 类型 | 是否调用模型 | 核心职责 |
-|---|---|---:|---|
-| StudyPreparation（检查准备阶段） | 公共阶段 | 否 | 组装冻结 Study（检查），校验输入、覆盖、能力和预算 |
-| JointPrimaryReader（完整检查联合主读阶段） | XRay 医学阶段 | 是 | 一次读取完整 Study（检查），输出完整病例结果 |
-| FamilyRouting（专项家族路由阶段） | XRay 实验阶段 | 否 | 验证是否满足一次专项复核门禁 |
-| TargetedReview（专项复核阶段） | XRay 实验医学阶段 | 是 | 围绕一个 Focus（关注点）重新读取完整 Study（检查）并输出完整病例结果 |
-| DecisionFinalization（结果定稿阶段） | 公共阶段 | 否 | 校验并选择唯一医学结果所有者 |
-
-公共组件：
-
-- ObjectStorageGateway（对象存储网关）：对象存储上传、读取和完整性校验；
-- StageRegistry（阶段注册表）：按精确版本解析 Stage（阶段）；
-- PipelineProfileValidator（流程配置校验器）：校验固定 Profile（流程配置）、顺序、调用上限和强制门禁；
-- OutboxRelay（事务发件箱中继）：数据库提交后可靠发布消息；
-- ProviderClientRegistry（AI 服务提供方客户端注册表）：解析已经资格化的 Provider（AI 服务提供方）客户端；
-- AuditSink（审计接收器）：承载仅追加审计事实。
-
-业务调用统一遵循 API（接口）/Worker（异步工作进程） -> Service（业务服务） -> DAL（数据访问层） -> Model（数据模型）/DB（数据库）。外部 I/O（输入输出）不在数据库事务中执行。
-
-### 0.6 XRay 完整主链
-
-```mermaid
-flowchart TD
-    U["Caller（调用方/接入端）"]
-    S["SessionService（会话服务）"]
-    ST["StudyService（检查服务：序列/修订）"]
-    IM["ImageService（影像服务：上传/校验/替换）"]
-    OSS["OSS（对象存储）"]
-    T["TaskService（任务服务：冻结任务）"]
-    OB["OutboxRelay（事务发件箱中继）+ Broker（消息代理）"]
-    EX["ImagingExecutionService（影像执行服务）"]
-    PREP["StudyPreparation（检查准备阶段）"]
-    PRI["JointPrimaryReader（完整检查联合主读阶段）"]
-    ROUTE["FamilyRouting（专项家族路由阶段：仅实验 Profile 流程配置）"]
-    TAR["TargetedReview（专项复核阶段：最多一次）"]
-    FINAL["DecisionFinalization（结果定稿阶段）"]
-    REP["ReportService（报告服务：不可变报告）"]
-    Q["Authorized Query（授权查询）"]
-    EV["离线评测与发布证据面（Evaluation Plane）"]
-    CP["控制面（Control Plane）<br/>配置与发布"]
-
-    U --> S --> ST --> IM
-    IM --> OSS
-    OSS --> IM --> ST
-    ST --> T --> OB --> EX --> PREP --> PRI
-    PRI -->|"Primary-only"| FINAL
-    PRI -->|"Targeted candidate"| ROUTE
-    ROUTE -->|"Primary 定稿"| FINAL
-    ROUTE -->|"满足门禁"| TAR --> FINAL
-    FINAL --> REP --> Q
-    REP -. "脱敏冻结产物" .-> EV
-    EV -. "评测证据和审批" .-> CP
-    CP -. "冻结配置" .-> T
-```
-
-### 0.7 影像上传到 Study 就绪
-
-1. 调用端创建 Session、Study 和 Series。
-2. ImageService（影像服务）创建上传中的影像事实并签发短期上传授权。
-3. 调用端在数据库事务外上传对象到 OSS。
-4. 上传完成后，ImageService（影像服务）在短事务中把影像推进到校验中，并创建校验 Outbox（事务发件箱）。
-5. Relay 在事务提交后发布校验消息。
-6. Worker 领取 Image 校验租约，在事务外读取对象并检查版本、大小、摘要、格式和安全边界。
-7. 校验成功后，Image、Series 清单和 Study 修订在同一终态事务中推进；失败进入隔离。
-8. 只有必需影像完整、身份一致且清单无冲突时，Study 才能就绪。
-
-上传成功不等于影像就绪；单次 HEAD、ETag 或调用端声明不能单独成为最终真相。
-
-### 0.8 Task 创建和可靠执行
-
-1. TaskService（任务服务）只接受就绪的 Study（检查）修订。
-2. Task 创建时冻结图像清单、AI Config、Profile、Prompt、Schema、模型计划、预算和截止时间。
-3. Task、首 Stage 和首执行 Outbox 在同一事务中创建。
-4. Relay 事务外发布消息，Worker 通过 Stage lease 和状态版本领取执行权。
-5. Stage 外部动作在事务外完成；结果在新短事务中写回并创建下一事件。
-6. 重复消息、租约过期和 Worker 崩溃由数据库状态、CAS 和 reconcile 吸收。
-7. Task 终态后返回的结果只能标记迟到或忽略，不能覆盖当前报告。
-
-### 0.9 Provider 调用边界
-
-1. 每个逻辑调用在发送前先持久化准备事实。
-2. 完整图像发送清单、Prompt、Schema、模型和配置摘要可追溯。
-3. Provider 调用在事务外执行。
-4. 明确未发送的传输失败可以在预算内重试。
-5. Provider 是否接收不可证明时进入 unknown，并使用原幂等身份对账。
-6. 医学结果不满意不能成为重试理由。
-7. actual model、Schema、回执或完整发送不满足时，结果不能成为医学所有者。
-
-### 0.10 结果定稿、报告与离线评测
-
-1. DecisionFinalization（结果定稿阶段）校验当前 Profile（流程配置）、路由和唯一 accepted（已接受）医学结果。
-2. 结果定稿 Stage（阶段）、不可变 Report（报告）、Task（任务）医学/工程状态和当前报告指针在同一事务中完成。
-3. ReportRenderer（报告渲染器）只能排序、翻译和格式化，不能修改 Finding（影像发现）。
-4. 报告发布和作废只推进 Report（报告）生命周期，不重写医学内容。
-5. 离线评测与发布证据面（Evaluation Plane）只读取脱敏冻结产物，不能修改在线 Task（任务）、Report（报告）或 Active Config（已激活配置）。
-6. 评测候选必须经过审批，控制面（Control Plane）才能激活新的配置修订。
-
-### 0.11 逐层责任、输入、输出和数据落点
-
-| 层 | 目的 | 主要输入 | 主要输出 | 失败语义 | 事实落点 |
-|---|---|---|---|---|---|
-| 控制面（Control Plane） | 决定新 Task（任务）可使用的配置 | 候选配置、资格和评测证据、审批 | 冻结 Active Config（已激活配置）/Profile（流程配置） | 拒绝激活，不影响运行中 Task（任务） | AI Config（AI 配置）、审计 |
-| SessionService（会话服务） | 建立业务生命周期根 | 受信身份、业务引用、幂等键 | Session（会话）状态与版本 | 越权、幂等或状态冲突 | Session（会话） |
-| StudyService（检查服务） | 组织检查、序列和修订 | Session（会话）、检查计划、已验证 Image（影像） | 就绪 Study（检查）修订和有序清单 | 不完整、身份或修订冲突 | Study（检查）、Series（序列） |
-| ImageService（影像服务） | 保证对象真实、完整且归属正确 | 上传命令、OSS（对象存储）对象和校验事件 | 已验证影像引用或隔离状态 | 对象、摘要、格式、归属错误 | Image（影像）、Outbox（事务发件箱） |
-| TaskService（任务服务） | 冻结一次可重放请求 | 就绪 Study（检查）、Active Config（已激活配置）、任务类型和预算 | Task（任务）、首 Stage（阶段）、Outbox（事务发件箱） | Study（检查）/配置/预算不满足则不启动 | Task（任务）、Stage（阶段）、Outbox（事务发件箱） |
-| ImagingExecutionService（影像执行服务） | 推进、恢复和结束 Stage（阶段） | 事件、Task（任务）/Stage（阶段）冻结事实、租约 | 下一 Stage（阶段）、重试、对账或终态 | 租约、CAS（比较并设置）、截止时间或恢复失败 | Task（任务）、Stage（阶段）、Outbox（事务发件箱）、Call（调用）、Report（报告） |
-| StudyPreparation（检查准备阶段） | 形成允许模型调用的规范输入 | Task（任务）快照、Study（检查）修订、图像、能力和预算 | Prepared Study（已准备检查）或调用前终止 | 输入不可信为工程失败；覆盖/能力不足为不产生医学结果 | Stage（阶段）输出 |
-| JointPrimaryReader（完整检查联合主读阶段） | 产生完整病例医学结果 | 完整 Study（检查）、最小临床上下文、冻结配置 | 完整医学结果和可选专项候选 | Provider（AI 服务提供方）、发送、Schema（结构合同）失败为工程失败 | Stage（阶段）输出、AI Call（AI 调用） |
-| FamilyRouting（专项家族路由阶段） | 判断是否允许一次专项复核 | Primary（主读）完整结果、覆盖、专项目录、预算 | Primary（主读）定稿或专项复核决定 | 配置合同破坏为工程失败；普通不满足则 Primary（主读）定稿 | Stage（阶段）输出 |
-| TargetedReview（专项复核阶段） | 对一个 Focus（关注点）进行完整病例复核 | 完整 Study（检查）、Primary（主读）结果、唯一 Family（专项家族）/Focus（关注点） | 新的完整医学结果 | 技术失败不静默回退 | Stage（阶段）输出、AI Call（AI 调用） |
-| DecisionFinalization（结果定稿阶段） | 选择唯一医学所有者 | Profile（流程配置）、路由、accepted（已接受）Stage（阶段）/Call（调用） | 最终结果选择 | 来源不一致或结果不完整为工程失败 | Stage（阶段）输出 |
-| ReportService（报告服务） | 持久化和发布不可变报告 | 最终结果和来源 | Report（报告）revision（修订）、当前指针和查询结果 | 最终事务失败整体回滚 | Report（报告）、Task（任务）当前报告 |
-| 离线评测与发布证据面（Evaluation Plane） | 评测候选并产生发布证据 | 冻结病例、Gold（可信金标准）、实验和 scorer（评分器） | 指标、失败分析和候选证据 | 比较变量或分母不一致则不可解释 | Evaluation Job/Run/Artifact（评测任务/运行/产物） |
-
-### 0.12 状态和失败语义
-
-Task 必须把工程状态和医学状态分开：
-
-| 场景 | 工程状态 | 医学状态 | 报告 |
+| 层次 | 它回答的问题 | 当前状态 | 它不能证明什么 |
 |---|---|---|---|
-| 模型判断正常 | 已完成 | normal | 医学报告 |
-| 模型判断异常 | 已完成 | abnormal | 医学报告 |
-| 模型无法确定 | 已完成 | review_required | 医学报告，明确不确定原因 |
-| 模型判断影像不可诊断 | 已完成 | non_diagnostic | 医学报告，明确不可判读原因 |
-| 调用前覆盖、能力或预算不足 | 已完成 | not_produced | 可生成无医学结论的技术说明 |
-| Provider、发送、Schema 或恢复失败 | 失败或死信 | not_produced | 不生成医学报告 |
-| 用户取消 | 已取消 | not_produced | 不生成新的医学报告 |
+| `Engineering Success（工程成功）` | 系统能否把正确图片送给模型，并可靠保存结果 | 真实单图与两视图主链均已有成功证据；本地确定性复跑仍未资格化 | 不能证明诊断正确 |
+| `Provider Success（模型提供方调用成功）` | 外部模型是否收到请求并返回合规内容 | 已有真实调用成功、严格 Schema v2（结构合同第二版）通过的证据 | 不能证明内容符合医学事实 |
+| `Medical Validation（医学验证）` | 与可信标注相比，诊断质量是否达到放行标准 | `UNKNOWN（未知）` | 尚不能医学发布 |
 
-必须牢记：消息发布成功不等于 Stage 完成，Stage 完成不等于模型成功，模型成功不等于 Schema 通过，Schema 通过不等于医学准确，工程完成也不等于医学正常。
+可以用一句话记住：
 
-## 1. 执行结论
+> 系统跑完，不等于 AI（人工智能）看懂了；AI（人工智能）有回答，也不等于回答在医学上正确。
 
-推荐采用“完整 Study 联合主读 + 条件专项复核”的分层架构，但分两个阶段放行：
+当前真实 `VD（腹背位）+ Lateral（侧位）` 两视图任务已经完成：
 
-1. 首期生产候选只使用完整 Study 联合主读。
-2. 专项首先用于报告结构、失败归因和评测分层。
-3. 专项复核只作为实验 Profile，不能默认进入所有病例。
-4. 每个病例最多触发一个专项复核，专项复核仍必须重新输出完整病例结果。
-5. Python、Router、报告渲染和多数票都不能修改医学结论。
-6. 是否启用专项复核，只能由同病例配对实验和独立留出集决定。
+- `Task（任务）`：`baef4d8619494a75aac7c2c7ef805c87`
+- `Report（报告）`：`dfeeb929e1e145fbb20466ca999d26e8`
+- 影像顺序、`SHA-256（哈希摘要）`、`projection（投照位）` 和 `provenance（来源信息）` 一致。
 
-首期主链：
+该任务得到 `abnormal（异常）`，这里只能说明模型返回了一个合法医学状态，不能把它当作 `Gold（可信金标准）`，也不能由此计算准确率。
 
-```mermaid
-flowchart LR
-    A["StudyPreparation（检查准备）"]
-    B["JointPrimaryReader（完整 Study 联合主读）"]
-    C["DecisionFinalization（唯一结果定稿）"]
-    D["Report（不可变报告）"]
+2026-08-28 又核对了一条更贴近“先把最小产品链跑通”目标的真实单图任务：
 
-    A --> B --> C --> D
-```
+- `Task（任务）`：`4b692c564eca4074a6113dbd92feb193`
+- `Report（报告）`：`efd9977002a84e839304843af3626f9c`
+- 工程终态：`Task.execution_status=completed（任务执行完成）`、3 个 `Stage（执行阶段）` 全部完成、`Attempt/Call=succeeded（尝试/调用成功）`、`Report.status=final（报告最终态）`。
+- 医学状态：`review_required（需要复核）`，不是工程错误。
+- 查询结果：`GET /reports/current?task_id=...（查询当前报告）` 返回成功，`history（历史报告）` 也已有成功证据。
+- C2 v2 结果位置：`Report.content_json.complete_medical_result（报告内容中的完整医学结果）`，其中有 `result_schema_version（结果结构版本）`、`summary（摘要）`、`impression（印象）`、`findings（影像发现）`、`source_refs（来源引用）` 和 `limitations（局限）`。
 
-实验候选链：
+这条证据支持的准确表述是：`minimum image-to-final-report chain proven（最小影像到最终报告链已实证）`。它不支持“医学准确率已通过”，也不支持“当前启动环境可以无条件重复运行”。
 
-```mermaid
-flowchart LR
-    A["StudyPreparation（检查准备）"]
-    B["JointPrimaryReader（完整 Study 联合主读）"]
-    C["FamilyRouting（确定性专项路由）"]
-    D["TargetedReview（最多一次专项复核）"]
-    E["DecisionFinalization（唯一结果定稿）"]
-    F["Report（不可变报告）"]
+---
 
-    A --> B --> C
-    C -->|"Primary 直接定稿"| E
-    C -->|"满足专项门禁"| D --> E
-    E --> F
-```
+## 4. 先认识系统里的基本对象
 
-## 2. 项目真正要解决的问题
-
-XRay 准确率问题不能简单归因于“模型不够强”或“调用次数不够多”。完整链路至少同时面对五类问题：
-
-| 问题 | 如果处理不好会发生什么 |
-|---|---|
-| 输入完整性 | 模型没有看到完整病例，却被当成医学判断失败 |
-| 影像覆盖 | 缺失投照或部位不完整，被错误解释为正常 |
-| 医学主读 | 模型遗漏异常、误报正常结构或过度输出不确定 |
-| 可靠执行 | 重复消息、超时和结果未知产生第二次调用或错误报告 |
-| 评测治理 | 不同图像、Prompt、模型和分母混在一起，无法证明哪项改动有效 |
-
-因此架构目标不是“把 XRay 拆成尽可能多的专项”，而是：
-
-- 保证模型看到可信且完整的 Study；
-- 保证医学结论只有一个所有者；
-- 保证每次改动都能被公平比较；
-- 保证失败不会被伪装成正常或医学不可诊断；
-- 保证专项增加的复杂度可以被单独证伪。
-
-## 3. 四种可选架构的辩证比较
-
-| 方案 | 优点 | 主要缺陷 | 结论 |
-|---|---|---|---|
-| 每个系统或器官默认独立调用 | 专项 Prompt 可以很细，便于定位局部失败 | 调用数高；输出高度相关；容易产生冲突、投票和报告拼接；正常误报可能累积 | 不作为默认链 |
-| 单次完整 Study 联合主读 | 最短、低成本、病例关系完整、医学所有者清晰 | Prompt 负载大；模型可能对局部专项关注不足；无法自动补救静默漏诊 | 首期生产基线 |
-| 联合主读 + 条件专项复核 | 保留完整病例上下文，同时对少数可解释问题增加一次复核 | Router 依赖 Primary 候选；配置和评测复杂；技术失败处理困难 | 推荐为实验候选 |
-| 多 Reader、多 Agent 辩论或多数票 | 表面上能增加不同视角 | 同源模型并非独立证据；成本、延迟和不可重复性高；最终医学所有者模糊 | 当前不采用 |
-
-推荐方案不是理论上最复杂的方案，而是最容易建立清晰对照、回滚和责任边界的方案。
-
-## 4. 专项链在六个责任面中的约束
-
-- 控制面只决定哪个专项目录、Prompt、模型和 Profile 可以被新 Task 使用。
-- 影像接入面只提供可信 Study、投照和覆盖事实，不根据图像内容决定专项医学结论。
-- 可靠执行面只保证 Targeted 最多一次、幂等、预算、超时和恢复，不根据结果好坏重问。
-- 医学流水线只允许 Primary 或成功的 Targeted 成为唯一结果所有者。
-- 报告面只展示被选完整结果，不能拼接 Primary 与 Targeted 的局部内容。
-- 评测面只验证专项策略的净收益，不能在在线请求中修改路由或结论。
-
-## 5. 专项是什么
-
-专项是完整 Study 上的临床评估包，需要同时满足：
-
-- 有明确的临床问题边界；
-- 有明确的影像覆盖和投照要求；
-- 有稳定的报告子域；
-- 有可以独立统计的评测分母；
-- 有可以被证伪的专项关注点；
-- 不依赖一张局部图或一个技术坐标直接产生医学结论。
-
-专项不是：
-
-- 模态；
-- 物种；
-- 解剖部位；
-- 器官名称；
-- 裁剪或分割任务；
-- Prompt 文件；
-- 一张数据库表；
-- 默认额外模型调用。
-
-## 6. 十个必须正交的轴
-
-| 轴 | 作用 | 示例 |
-|---|---|---|
-| 影像模态 | 定义技术输入合同 | XRay、CT、MRI |
-| 物种上下文 | 当前写入冻结 Prompt（提示词）上下文；未来可用于选择物种专用知识模块 | 犬、猫 |
-| 解剖区域 | 当前写入冻结 Prompt 上下文和覆盖事实；它是区域元数据，不是裁剪图；专项选择仍由独立专项家族键决定 | 胸腔、腹腔、脊柱、前肢 |
-| 投照与覆盖 | 判断某专项能否被评估 | 侧位、VD、单视图、覆盖充分 |
-| 临床专项 | 组织完整临床评估包 | 胸腔、腹腔、四肢骨关节 |
-| 报告子域 | 组织同一专项内的 Findings | 呼吸、心血管、泌尿生殖 |
-| 专项关注点 | 表达一次专项复核的唯一问题 | 肺野模式、泌尿矿化、骨折/脱位 |
-| 复核策略 | 表达如何复核一个关注点 | 高召回、正常闭环、冲突处理 |
-| 技术证据 | 提供定位、质量或派生图 | 分割、裁剪、标志点 |
-| 流水线配置 | 决定是否执行专项复核 | Primary-only、Targeted candidate |
-
-这些轴可以组合，但不能相互替代。例如犬和猫可以使用不同知识上下文，但不能变成两套专项服务；单视图可以成为覆盖限制，但不能成为一个医学专项。
-
-### 6.1 物种和解剖区域当前到底在哪里使用
-
-当前 Prompt（提示词）实现中，物种和解剖区域的作用是“冻结并传入模型上下文”，而不是直接决定医学结果：
-
-| 信息 | 当前已实现用途 | 当前未实现用途 |
-|---|---|---|
-| 物种（species） | 从 Task（任务）快照进入安全 Prompt 上下文，随编译后的 Prompt 摘要冻结和追溯 | 尚未按犬/猫自动选择不同 Prompt 资产；当前 Catalog（目录）资产仍使用通用物种范围 |
-| 解剖区域（anatomy regions） | 从 Task 快照进入安全 Prompt 上下文和覆盖事实，帮助模型理解完整 Study（检查）覆盖哪些区域；它不携带裁剪图或局部像素 | 尚未由解剖区域自动推导适用专项家族；当前专项模块选择依赖独立冻结的 `applicable_family_keys`（适用专项家族键） |
-| 适用专项家族（applicable family keys） | 决定哪些 Primary（主读）专项模块被编译进一次完整 Study Prompt | 尚未形成由投照、侧别、区域和覆盖自动计算的最终目录选择器 |
-
-因此，当前真实关系是：
+### 4.1 一套片子不是一张图片
 
 ```text
-物种 / 解剖区域
--> 进入冻结 Prompt 上下文
-
-裁剪 / 分割 / 标志点
--> 独立技术证据
--> 只能辅助完整原图
-
-适用专项家族
--> 决定哪些专项 Prompt 模块进入 Primary
+Session（影像诊疗会话）
+└── Study（影像检查）
+    └── Series（影像序列）
+        └── Image（影像对象）
 ```
 
-解剖区域只是一组结构化区域标签，例如“胸腔、腹腔、脊柱、前肢”。它不保存任何局部图像、裁剪坐标或像素内容；完整原图仍由 Study revision（检查修订）中的有序 Image（影像）集合提供。
+- `Session（影像诊疗会话）`：一次业务流程的外层容器。
+- `Study（影像检查）`：同一次诊断目的下要一起看的整套影像，不是一张片子。
+- `Series（影像序列）`：检查内按采集方式或投照方式组织的一组影像。
+- `Image（影像对象）`：一张实际影像及其摘要、投照位和来源信息。
 
-如果未来生成裁剪图，它必须作为独立的技术证据对象保存，并同时保留源图引用、生成方式和完整性摘要。Primary（主读）和 TargetedReview（专项复核）仍必须读取完整 Study，不能只依赖裁剪图。
+### 4.2 `Task（任务）` 像封存的工作单
 
-这意味着“物种定义知识上下文”目前只完成了上下文注入，尚未完成物种专用 Prompt 选择；“解剖区域定义专项范围”目前只完成了上下文和覆盖表达，尚未完成自动专项推导。两项都是 P3/P4 需要补齐并单独验证的设计缺口。
+创建 `Task（任务）` 时，要把以下内容冻结：
 
-## 7. 首期五个 Clinical Family（临床专项家族）
+- 使用哪一个 `Study Revision（检查修订版）`；
+- 有哪些有序 `Image（影像对象）`；
+- 使用哪个 `AI Config（人工智能配置）`；
+- 使用哪个 `Profile（流程配置）`；
+- 使用哪个 `Prompt（提示词）`、模型和输出 `Schema（结构合同）`；
+- 预算、截止时间和安全上下文。
 
-| 专项 | 主要覆盖 | 报告子域 | 候选关注点 |
-|---|---|---|---|
-| 胸腔专项 | 胸腔投照 | 呼吸、心血管、纵隔/胸膜、胸壁 | 心血管轮廓、肺野模式、胸膜纵隔、胸壁 |
-| 腹腔专项 | 腹腔投照 | 消化、肝胆/脾、泌尿生殖 | 胃肠异物/梗阻、泌尿矿化、腹腔矿化点、软组织肿块 |
-| 四肢骨关节专项 | 前肢或后肢 | 长骨、关节、排列、软组织 | 骨折/脱位、长骨关节、排列、髌骨膝关节 |
-| 轴骨骼专项 | 脊柱或骨盆/髋 | 颈胸腰椎、骨盆/髋、排列 | 骨折/脱位、排列、骨盆髋部 |
-| 头颈专项 | 头部或颈部 | 头颅、鼻腔/口腔、颈部软组织 | 首期只做报告组织，专项关注点需评测后再开放 |
+冻结之后，旧任务不能因为配置中心出现新提示词而悄悄改变。否则同一个病例以后无法重放，也无法解释结果来自哪一版配置。
+
+### 4.3 `Service（业务服务）` 和 `Stage（执行阶段）` 不一样
+
+- `Service（业务服务）` 像长期负责某件事的部门，例如任务服务、报告服务。
+- `Stage（执行阶段）` 像某张工作单经过的一道工序，例如检查准备、主读、定稿。
+
+不要把它们混为一谈：一个服务可以支持多个阶段，一个阶段也可能调用多个已有业务能力。
+
+---
+
+## 5. 当前真正可达的运行链
+
+### 5.1 系统总体架构图
+
+图中实线表示当前已经存在的主链关系；连接 `Evaluation Plane（评测面）` 的虚线表示离线证据方向，但评测数据库当前尚未就绪，不能运行医学基线。
+
+```mermaid
+flowchart TB
+    caller["Caller（调用方）"]
+
+    subgraph control["AI Control（人工智能控制面）"]
+        direction LR
+        nacos["Nacos（配置中心）<br/>Prompt Source（提示词来源）"]
+        control_api["Control API（控制接口）<br/>Prompt / Model / Config<br/>（提示词 / 模型 / 配置）"]
+        frozen_config["Frozen AI Config<br/>（冻结人工智能配置）"]
+        nacos --> control_api --> frozen_config
+    end
+
+    subgraph runtime["Online Runtime（在线运行时）"]
+        direction LR
+        runtime_api["Runtime API（运行接口层）"]
+        service["Service（业务服务层）"]
+        snapshot["Task Snapshot（任务快照）"]
+        execution["Reliable Execution（可靠执行）<br/>Outbox（事务发件箱）<br/>→ RabbitMQ（消息队列）<br/>→ Worker（工作进程）"]
+        medical["Medical Pipeline（医学判读流水线）<br/>检查准备 → 联合主读 → 结果定稿"]
+        report["Report（报告）"]
+
+        runtime_api --> service --> snapshot --> execution --> medical --> report
+    end
+
+    persistence["Persistence（持久化层）<br/>DalBase CRUD（统一数据访问）→ MySQL（在线数据库）<br/>Object Store Gateway（对象存储网关）→ OSS（对象存储）"]
+
+    subgraph evaluation["Evaluation Plane（评测面；当前不可运行）"]
+        direction LR
+        eval_db["ms_image_eval（影像评测数据库）<br/>当前不存在或不可连接"]
+        paired_eval["Paired A/B（配对 A/B）<br/>Failure Bank（失败样本库）<br/>Holdout（留出集）"]
+        release_gate["Medical Release Gate<br/>（医学发布门禁）"]
+        approval["Human Approval（人工审批）<br/>不自动修改线上配置"]
+        eval_db --> paired_eval --> release_gate --> approval
+    end
+
+    caller --> runtime_api
+    frozen_config --> snapshot
+    service --> persistence
+    execution --> persistence
+    report --> persistence
+    persistence -. "冻结输入与结果证据" .-> eval_db
+
+    classDef currentState fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef externalState fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    classDef blockedState fill:#fff3e0,stroke:#ef6c00,color:#e65100;
+    class runtime_api,service,snapshot,execution,medical,report,persistence,frozen_config currentState;
+    class caller,nacos,control_api externalState;
+    class eval_db,paired_eval,release_gate,approval blockedState;
+```
+
+这张图同时保留了项目强制分层：同步接口必须走 `API（接口层） → Service（业务服务层） → DalBase CRUD（统一数据访问层） → MySQL（数据库）`；异步模型任务则由 `Outbox（事务发件箱） → RabbitMQ（消息队列） → Worker（工作进程）` 继续执行。
+
+`Medical Release Gate（医学发布门禁）` 只产生是否值得发布的证据，不会自动修改线上配置；仍需 `Human Approval（人工审批）` 后由控制面创建新的冻结配置。
+
+### 5.2 当前第一目标：上传影像到查询报告的全链架构图
+
+这张图专门回答当前最优先的问题：一张已有 X 光影像怎样从调用方进入系统，经过 AI（人工智能）识别，最后变成调用方能读到的第一份最终报告。
+
+> “生成上传图”在当前工程里应理解为“准备并上传已有真实或隔离测试 X 光影像”。当前仓库不负责用生成式 AI（人工智能）合成医学 X 光图；合成影像也不能替代真实病例的医学验证。
+
+```mermaid
+flowchart LR
+    caller["Caller（调用方）"]
+    upload["Prepare Upload（准备上传）<br/>→ OSS PUT（对象存储上传）<br/>→ Complete Upload（完成上传）"]
+    image["Image ready（影像就绪）"]
+    study["Study finalize（检查定稿）"]
+    task["Task queued（任务排队）<br/>+ Frozen Snapshot（冻结快照）"]
+    async_chain["Outbox（事务发件箱）<br/>→ RabbitMQ（消息队列）<br/>→ Worker（工作进程）"]
+    provider["AI Provider（人工智能提供方）<br/>Strict Schema v2（严格结构合同第二版）"]
+    stages["StudyPreparation（检查准备）<br/>→ JointPrimaryReader（联合主读）<br/>→ DecisionFinalization（结果定稿）"]
+    report["Report final（最终报告）<br/>content_json.complete_medical_result<br/>（报告内容中的完整医学结果）"]
+    query["current/history（当前/历史查询）"]
+
+    duplicate["Duplicate Relay/Worker（重复转发/工作进程）<br/>阻断确定性复跑"]
+    report_cas["Report state_version missing<br/>（报告状态版本缺失）<br/>阻断 publish/void/revision<br/>（发布/作废/第二修订）"]
+    evaluation_gap["Evaluation + M1 missing<br/>（评测面与 M1 缺失）<br/>阻断医学发布"]
+
+    caller --> upload --> image --> study --> task --> async_chain --> provider --> stages --> report --> query
+    duplicate -. "当前现场风险" .-> async_chain
+    report_cas -. "不阻断第一份 final（最终报告）" .-> report
+    evaluation_gap -. "工程成功不等于医学准确" .-> report
+
+    classDef proven fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef external fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    classDef risk fill:#fff3e0,stroke:#ef6c00,color:#e65100;
+    class caller,upload,image,study,task,async_chain,stages,report,query proven;
+    class provider external;
+    class duplicate,report_cas,evaluation_gap risk;
+```
+
+绿色主线已有真实成功病例证明；橙色旁支是“已经发现但尚未关闭”的缺口。最容易讲错的是 `Report.state_version（报告状态版本）`：它不阻断第一份 `final Report（最终报告）` 和当前/历史查询，但会阻断 `publish（发布）`、`void（作废）` 和第二份报告替换旧报告时的 `CAS（比较并设置）`。
+
+### 5.3 当前主读执行链图
+
+当前生产代码中，`xray_primary_v1（X 光主读第一版流程）` 的静态路径是：
+
+```mermaid
+flowchart TB
+    subgraph frozen_input["1. Frozen Input（冻结输入）"]
+        direction LR
+        session["Session（会话）"]
+        study["Study（检查）<br/>Series（序列）<br/>Image（影像）"]
+        snapshot["Task Snapshot<br/>（任务快照）"]
+        session --> study --> snapshot
+    end
+
+    subgraph reliable_execution["2. Reliable Execution（可靠执行）"]
+        direction LR
+        outbox["Outbox（事务发件箱）"]
+        broker["RabbitMQ（消息队列）"]
+        worker["Worker（工作进程）"]
+        outbox --> broker --> worker
+    end
+
+    subgraph medical_pipeline["3. Medical Pipeline（医学判读流水线）"]
+        direction LR
+        preparation["StudyPreparation<br/>（检查准备）"]
+        primary["JointPrimaryReader<br/>（联合主读）"]
+        finalization["DecisionFinalization<br/>（结果定稿）"]
+        report["Report（报告）"]
+        preparation --> primary --> finalization --> report
+    end
+
+    snapshot --> outbox
+    worker --> preparation
+
+    classDef currentState fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef externalState fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    class session,study,snapshot,outbox,worker,preparation,primary,finalization,report currentState;
+    class broker externalState;
+```
+
+对应的阶段只有：
+
+1. `study_preparation（检查准备）`
+2. `joint_primary_reader（联合主读）`
+3. `decision_finalization（结果定稿）`
+
+### 5.4 当前阶段的真实边界
+
+| 阶段 | 当前代码真正做了什么 | 仍未做到什么 |
+|---|---|---|
+| `StudyPreparation（检查准备）` | 检查 `study_revision_id（检查修订标识）` 和 `manifest_sha256（清单摘要）` 是否为字符串 | 还没有执行旧设计所描述的完整覆盖、模型能力和预算门禁 |
+| `JointPrimaryReader（联合主读）` | 将冻结的完整检查交给模型，并接收结构化结果 | 医学准确率仍未建立基线 |
+| `DecisionFinalization（结果定稿）` | 主要透传上一步已接受结果，并记录来源 | 还没有完整验证流程、路由和唯一结果所有者的全部不变量 |
+
+这意味着目标设计里的规则不能写成“已经实现”。文档必须把 `Current Implementation（当前实现）` 和 `Target Design（目标设计）` 分开。
+
+---
+
+## 6. 当前项目状态：哪些完成了，哪些没有
+
+### 6.1 已有证据的部分
+
+| 能力 | 当前状态 | 小白解释 |
+|---|---|---|
+| 最小主链 | `PROVEN（已实证）` | 已有真实单图任务完成“上传 → AI 识别 → 第一份最终报告 → 当前/历史查询” |
+| 多视图接入 | `ENGINEERING_QUALIFIED（工程资格已通过）` | 真实 `VD（腹背位）+ Lateral（侧位）` 的顺序、投照位、摘要和来源能够对账 |
+| `C1.1 Medical State Boundary（C1.1 医学状态边界）` | `COMPLETED（已完成）` | 非法 `availability/result（可用性/结果）` 组合会明确失败；Report 写入前会核对列状态与内容状态一致 |
+| `P1-A Automatic Reconcile（P1-A 自动对账恢复）` | `COMPLETED（已完成）` | 未知模型调用已有自动调度与领取、查询、恢复路径 |
+| `P1-B Bounded Unknown Termination（P1-B 未知结果有界终止）` | `COMPLETED（已完成）` | `unknown（结果未知）` 不会无限等待，达到次数或时间上限后进入明确终态 |
+| `D1 Multi-view Evidence（D1 多视图证据）` | `COMPLETED（已完成）` | 影像顺序、投照位和实际发送回执可追溯 |
+| `D2 Clinical Context v1（D2 临床上下文第一版）` | `COMPLETED（已完成）` | 上下文字段有来源审计、白名单、冻结策略和摘要；剩余是上游传入真实数据 |
+| `C2 CompleteMedicalResult v2（C2 完整医学结果第二版）` | `ENGINEERING_QUALIFIED（工程资格已通过）` | v2 Schema（结构合同）必含版本、摘要、印象、发现和来源引用，真实报告已保存该结构 |
+| 测试记录 | `178 passed, 38 warnings（178 项通过，38 条警告）` | 这是 2026-08-28 最新已有的全量验证记录；本轮文档复核没有重新执行全量测试 |
+
+当前主库按 `ORM（对象关系映射）` 模型注册了 20 张物理表。当前 XRay（X 光）正式主读 `Prompt identity（提示词身份）` 仍是 `xray_primary/common（X 光主读/通用变体）`；`species（物种）` 和 `clinical context（临床上下文）` 是任务冻结数据，不是猫狗各建一套提示词身份。
+
+### 6.2 仍未完成的部分
+
+| 缺口 | 影响边界 | 是否阻断第一份最终报告 |
+|---|---|---|
+| 单 `owner（所有者）` 稳定启动 | 当前有 2 个 Relay（转发进程）和 3 个 Worker（工作进程），不同版本进程可能竞争同一队列 | **不推翻已有成功证据，但阻断确定性复跑资格** |
+| E2E harness parameterization（端到端验收工具参数化） | 现有脚本硬编码外部图片、`dog（狗）`、`UNKNOWN（未知投照位）`，只查询 history（历史）且证据摘要不完整 | **不阻断手工成功，但阻断产品级一键验收** |
+| `Report.state_version（报告状态版本）` | `publish（发布）`、`void（作废）`、第二 `revision（修订版）` 替换旧报告的 CAS（比较并设置）不可用 | **否**；第一份 final（最终）和 current/history（当前/历史）仍可用 |
+| `ms-ai-fast（上游业务服务）` 接线 | 尚未完成 `pet_type（宠物类型） → species（物种） → POST /tasks（创建任务）` | **不阻断 ms-image 独立演示，阻断业务产品全链** |
+| `Evaluation Plane（评测面）` | 独立 `ms_image_eval（影像评测数据库）`、评测就绪检查和 M1 医学基线未闭环 | **不阻断工程报告，阻断医学发布** |
+| `P1-C Production Security（P1-C 生产安全）` | Runtime/Admin JWT（运行时/管理端令牌）、Artifact signing（评测产物签名）和 Secret 最小权限未资格化 | **不阻断本地工程演示，阻断生产发布** |
+| 医学准确率 | 没有可信 Gold（医学金标准）、Scorer（评分器）、分母和 Holdout（留出集） | **不阻断工程报告，医学发布仍 NO-GO（禁止放行）** |
+
+### 6.3 DeepSeek 输出逐项裁决
+
+| DeepSeek 说法 | 裁决 | 准确口径 |
+|---|---|---|
+| Task `4b692c...` 全链成功 | **正确** | 真实单图链已到 `Task completed（任务完成）`、`Report final（最终报告）`，当前报告 API 也能读取 |
+| C2 已实现 | **正确** | C2 是工程资格通过，不等于医学准确率通过 |
+| 报告含完整 v2 结果 | **正确，但需补充位置** | 结果在 `Report.content_json.complete_medical_result（报告内容中的完整医学结果）` |
+| v1 Schema（结构合同第一版）缺摘要只是小清理，可同步 v2 | **错误** | v1 是冻结历史合同，必须保持不变；v2 用独立 Schema/Profile/Config（结构合同/流程配置/人工智能配置）演进 |
+| 当前进程可随时复跑 | **错误** | 当前 2 个 Relay（转发进程）+ 3 个 Worker（工作进程），只能确认曾跑通，不能确认确定性复跑 |
+| 178 项测试通过 | **最新已有记录正确** | 本轮没有重新跑全量测试，会议上不要说成“刚刚重跑” |
+| 立即把 129 个改动一次提交 | **不建议** | 当前 `git status（版本状态）` 是 130 条，应先按能力切片整理，不要把所有脏工作树混成一次提交 |
+| 工程主链全部完成 | **表述过大** | “第一份 final 报告链跑通”正确；稳定部署、报告状态治理、上游业务接线、医学评测和生产安全仍未完成 |
+
+---
+
+## 7. 为什么不采用“每个器官默认调用一次”
+
+按器官拆分看起来更专业，但会马上引入五类问题。
+
+### 7.1 多个结果可能互相冲突
+
+例如胸腔调用说“未见明显异常”，心血管调用却说“心影异常”。系统必须决定谁覆盖谁。简单投票、取并集或让程序拼接，都可能改变医学含义。
+
+### 7.2 调用次数增加不等于证据增加
+
+如果多个调用来自同一个基础模型，它们是相关意见，不是多个独立医生的证据。相同盲点可能被重复放大。
+
+### 7.3 误报会累积
+
+每个专项都追求发现更多可疑点时，合并后的整体误报通常会上升。局部召回提高，可能换来整个病例层面的质量下降。
+
+### 7.4 成本和延迟更难控制
+
+五个专项默认调用意味着每例都增加模型费用、网络延迟、超时和失败概率。
+
+### 7.5 实验因果不清楚
+
+一次同时改变五个提示词、五次调用和结果合并规则，即使分数变化，也很难知道是哪一个改变造成的。
+
+所以，五个专项当前用于组织报告和评测分层，不等于五次模型调用。
+
+---
+
+## 8. 未来候选：条件专项复核
+
+### 8.1 目标流程
+
+图中绿色实线是当前 `Primary-only（仅主读）` 路径；黄色虚线是未来实验路径。当前代码不会进入黄色分支。
+
+```mermaid
+flowchart TD
+    study["完整 Study（检查）"]
+    primary["Primary（主读）<br/>产生完整医学结果"]
+    finalization["DecisionFinalization<br/>（结果定稿）"]
+    report["Report（报告）"]
+    routing["FamilyRouting<br/>（专项家族路由）"]
+    targeted["TargetedReview（专项复核）<br/>唯一 Family（专项家族）<br/>+ 唯一 Focus（关注点）<br/>+ 最多一次调用"]
+    failed["fail-closed（失败关闭）<br/>not_produced（未产生医学结论）"]
+
+    study --> primary -->|当前 xray_primary_v1（X 光主读第一版流程）| finalization --> report
+    primary -. "未来实验 Profile（流程配置）" .-> routing
+    routing -. "当前 Handler（处理器）固定 primary_final（主读直接定稿）" .-> finalization
+    routing -. "未来门禁全部通过" .-> targeted
+    targeted -. "成功：新的完整医学结果" .-> finalization
+    targeted -. "技术失败" .-> failed
+
+    classDef currentState fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef futureState fill:#fff8e1,stroke:#f9a825,color:#5d4037,stroke-dasharray:5 5;
+    classDef stopState fill:#ffebee,stroke:#c62828,color:#b71c1c;
+    class study,primary,finalization,report currentState;
+    class routing,targeted futureState;
+    class failed stopState;
+```
+
+当前代码中的 `FamilyRouting（专项家族路由）` 固定返回 `primary_final（主读直接定稿）`。因此，上图右侧只是目标设计，不是当前已上线能力。
+
+### 8.2 专项复核不是“局部补丁”
+
+`TargetedReview（专项复核）` 必须继续读取完整 `Study（检查）`，并产生新的 `Complete Medical Result（完整医学结果）`。它不能只返回一句“肺部可能异常”再拼进主读结果。
+
+原因是医学发现之间存在关系：一个局部判断可能依赖其他投照位、邻近结构、全身状态或正常反证。
+
+### 8.3 谁拥有最终医学结果
+
+系统在任何时刻只能有一个 `medical owner（医学结果所有者）`：
+
+- 没有专项复核时，`Primary（主读）` 是结果所有者；
+- 专项复核成功且被接受时，`TargetedReview（专项复核）` 的完整结果替代主读，成为唯一结果所有者；
+- `DecisionFinalization（结果定稿）` 只选择和记录结果，不创造新发现；
+- `Report（报告）` 只固化已选结果，不投票、不拼接、不补写医学结论。
+
+### 8.4 为什么专项技术失败不能偷偷退回主读
+
+在资格化实验中，如果已经决定进入专项复核，但模型超时或返回非法结构，再静默使用主读结果，会掩盖专项方案的真实失败率。
+
+因此，实验合同应使用 `fail-closed（失败关闭）`：记录 `not_produced（未产生医学结论）` 或明确失败，并进入人工处理或受控恢复。以后是否允许某类降级，必须经过单独的产品、运行和医学审批。
+
+---
+
+## 9. 五个 `Family（专项家族）` 是候选词汇，不是永久医学分类
+
+`Family（专项家族）` 是一个完整临床评估包；它不是数据库表、不是裁剪图、不是额外服务，也不天然代表一次模型调用。
+
+第一版候选目录如下：
+
+| `Family（专项家族）` | 主要覆盖 | 候选 `Focus（关注点）` |
+|---|---|---|
+| 胸腔专项 | 胸腔投照 | 心血管轮廓、肺野模式、胸膜纵隔、胸壁 |
+| 腹腔专项 | 腹腔投照 | 胃肠异物或梗阻、泌尿矿化、腹腔矿化点、软组织肿块 |
+| 四肢骨关节专项 | 前肢或后肢 | 骨折或脱位、长骨关节、排列、髌骨膝关节 |
+| 轴骨骼专项 | 脊柱或骨盆髋部 | 骨折或脱位、排列、骨盆髋部 |
+| 头颈专项 | 头部或颈部 | 第一版只用于报告组织和评测分层，暂不开放专项关注点 |
 
 边界约定：
 
 - 颈椎属于轴骨骼专项；
 - 心血管和呼吸属于胸腔专项的报告子域；
 - 消化和泌尿生殖属于腹腔专项的报告子域；
-- 前肢和后肢是区域，不是两个专项；
-- 全身只表示多区域覆盖或跨专项 Finding，不是第六个专项。
+- 前肢和后肢是影像区域，不是两个独立专项；
+- 全身表示多区域覆盖，不是第六个专项。
 
-## 8. Family、Focus 与 Strategy 的关系
+### 9.1 `Family（专项家族）`、`Focus（关注点）`、`Strategy（策略）` 的区别
 
-Family 回答“属于哪个临床评估包”；Focus 回答“本次专项复核具体检查什么”；Strategy 回答“用什么方式复核这个 Focus”。
+可以把它们理解为“科室、具体问题、检查方法”：
 
-有效组合必须具有：
+- `Family（专项家族）`：属于哪一类完整评估包，例如胸腔专项；
+- `Focus（专项关注点）`：这次具体再查什么，例如肺野模式；
+- `Strategy（复核策略）`：采用什么复核方法，例如高召回或关键发现确认。
 
-- 唯一 Family；
-- 唯一 Focus；
-- 零个或一个 Strategy；
-- 一个或多个来源 Finding；
-- 充分的影像覆盖；
-- 冻结的模型、Prompt、Schema、预算和截止时间。
+有效复核必须是“一个专项家族 + 一个关注点 + 最多一个策略”。“胸腔 + 高召回”仍然不够明确，因为它没有说清到底复核肺野、心血管还是胸膜纵隔。
 
-Strategy 不能脱离 Focus 独立触发。例如“胸腔 + 高召回”不够明确，必须进一步明确是复核肺野模式、心血管轮廓还是胸膜纵隔问题。
+这些边界必须由医学评测证据调整，不能因为第一版文档这样分，就声称它们是最优医学本体。
 
-## 9. 专项关注点
+---
 
-### 9.1 胸腔专项
+## 10. `Prompt（提示词）` 为什么必须冻结
 
-| 关注点 | 主要问题 | 可选策略 |
+### 10.1 当前唯一正式身份
+
+当前 XRay（X 光）运行时只接受：
+
+```text
+xray_primary/common（X 光主读/通用变体）
+```
+
+`cat（猫）`、`dog（狗）` 或 `default（默认）` 不能作为 XRay（X 光）提示词变体自动回退。`species（物种）` 只作为冻结的安全上下文进入任务。
+
+### 10.2 冻结链
+
+```mermaid
+flowchart TB
+    subgraph publish_chain["1. Publish Chain（发布链）"]
+        direction LR
+        catalog["Prompt Catalog<br/>（提示词目录）"]
+        release["Release（发布版）"]
+        config["AI Config<br/>（人工智能配置）"]
+        catalog --> release --> config
+    end
+
+    subgraph task_chain["2. Task Chain（任务链）"]
+        direction LR
+        snapshot["Task Snapshot<br/>（任务快照）"]
+        compiled["Compiled Prompt<br/>（编译后提示词）"]
+        ai_call["AI Call<br/>（人工智能调用）"]
+        snapshot --> compiled --> ai_call
+    end
+
+    subgraph result_chain["3. Result Chain（结果链）"]
+        direction LR
+        result["Complete Medical Result<br/>（完整医学结果）"]
+        report["Report（报告）"]
+        evaluation["Evaluation（离线评测）"]
+        result --> report
+        result -. "冻结候选结果" .-> evaluation
+    end
+
+    config --> snapshot
+    ai_call --> result
+
+    classDef frozenState fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    classDef resultState fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20;
+    classDef blockedState fill:#fff3e0,stroke:#ef6c00,color:#e65100;
+    class catalog,release,config,snapshot,compiled,ai_call frozenState;
+    class result,report resultState;
+    class evaluation blockedState;
+```
+
+- `Prompt Catalog（提示词目录）`：可维护的提示词资产清单。
+- `Release（发布版）`：获准使用的一组冻结提示词、模型、结构合同和预算。
+- `AI Config（人工智能配置）`：任务要使用的完整人工智能配置记录。
+- `Task Snapshot（任务快照）`：创建任务时封存的输入和配置证据。
+- `Compiled Prompt（编译后提示词）`：某一次调用实际发送给模型的文本。
+- `AI Call（人工智能调用）`：一次可追踪的模型请求事实。
+
+任何旧任务都必须使用自己快照中的版本。不能拿“配置中心最新文件”覆盖旧病例，否则复现、审计和实验比较都会失效。
+
+### 10.3 为什么 v1 不能“顺手同步”成 v2
+
+`prompts/xray/complete_medical_result.schema.json（完整医学结果第一版结构合同）` 没有 `summary（摘要）` 和 `impression（印象）`，不是当前主链的小缺口，而是历史 v1 合同的既有形态。
+
+- v1 必须保持冻结，让历史 Config/Task（配置/任务）能够按原合同重放；
+- v2 使用独立的 `complete_medical_result.v2.schema.json（完整医学结果第二版结构合同）`、Profile（流程配置）、Handler（处理器）和 Config hash（配置摘要）演进；
+- 当前代码只对 v2 执行新的来源一致性检查，对非 v2 合同明确保持原行为；
+- 如果把 v1 文件补成 v2 字段，旧任务会在“文件名没变”的情况下改变含义，破坏冻结、审计和重放。
+
+因此正确动作是：`freeze v1, evolve v2 independently（冻结第一版，独立演进第二版）`。不要为了字段看起来整齐而修改 v1。
+
+---
+
+## 11. 工程状态和医学状态必须分开
+
+### 11.1 工程状态
+
+工程状态描述系统有没有可靠执行，例如：
+
+- `queued（排队中）`
+- `running（运行中）`
+- `completed（已完成）`
+- `failed（技术失败）`
+- `cancelled（已取消）`
+- `unknown（调用结果未知）`
+
+### 11.2 医学状态
+
+医学状态描述有没有形成怎样的医学结果，例如：
+
+- `normal（未见异常）`
+- `abnormal（发现异常）`
+- `review_required（需要复核）`
+- `non_diagnostic（医学上不可判读）`
+- `not_produced（未产生医学结论）`
+
+“未评估”不能当作“正常”；“工程完成”也不能自动当作“医学正常”。
+
+### 11.3 `C1.1（医学状态边界加固）` 已完成
+
+当前代码已经把这条边界从“目标行为”变成工程合同：
+
+- 只有合法的 `availability/result（可用性/结果）` 组合才能投影为持久医学状态；
+- 非法或冲突组合会明确失败，不再静默改成 `not_produced（未产生医学结论）`；
+- `ReportService（报告业务服务）` 在调用 DAL（数据访问层）之前，会核对报告列中的医学状态与 `content_json（内容）` 顶层医学状态一致；
+- Python（编程语言）只验证合同、路由和保存结果，不补写、推断或纠正医学发现。
+
+仍然必须保留“工程状态与医学状态分开”的原则。C1.1 完成只说明状态边界正确，不说明医学判断正确。
+
+---
+
+## 12. 当前 20 张表怎么理解
+
+不要再用旧文档里的“10 张核心表 + 4 张评测表”代表完整物理库。当前 `ORM（对象关系映射）` 模型注册的是 20 张表，可以按职责理解。
+
+| 分组 | 模型表 | 小白解释 |
 |---|---|---|
-| 心血管轮廓 | 心影、血管轮廓及其与肺野关系 | 安全检查、关键发现确认、正常闭环 |
-| 肺野模式 | 肺野模式、位置和分布 | 高召回、困难病例复核、正常闭环 |
-| 胸膜纵隔 | 胸膜腔、纵隔和膈肌相关征象 | 安全检查、高召回、关键发现确认 |
-| 胸壁 | 肋骨、胸骨和胸壁软组织 | 困难病例复核、关键发现确认 |
+| 影像接入 | `Session（会话）`、`Study（检查）`、`Series（序列）`、`Image（影像）`、`ObjectReconcileCursor（对象对账游标）` | 管理一套影像怎样上传、组织、版本化和对账 |
+| 可靠执行 | `Task（任务）`、`StageCheckpoint（阶段检查点）`、`Outbox（事务发件箱）` | 管理异步任务怎样排队、执行、恢复和落终态 |
+| 人工智能调用 | `AICall（人工智能调用）`、`AICallAttempt（人工智能调用尝试）` | 保存每次模型调用及其尝试、结果和来源 |
+| 控制面 | `AIAPIConnection（人工智能接口连接）`、`AIModelPool（人工智能模型池）`、`AIPromptTemplate（人工智能提示词模板）`、`AIConfigRecord（人工智能配置记录）`、`AIControlAuditRecord（人工智能控制审计记录）` | 管理可用模型、提示词、配置和审计 |
+| 报告 | `Report（报告）` | 固化被选中的完整医学结果 |
+| 离线评测 | `EvaluationJob（评测任务）`、`EvaluationRun（评测运行）`、`EvaluationArtifact（评测产物）`、`EvaluationOutbox（评测事务发件箱）` | 运行离线实验并保存证据，不改在线结果 |
 
-### 9.2 腹腔专项
+表已经存在或模型已经注册，只能说明数据结构具备基础。它不等于完整运行时已资格化，也不等于评测系统现在可运行。
 
-| 关注点 | 主要问题 | 可选策略 |
+---
+
+## 13. 三个容易被误报为“已完成”的边界
+
+### 13.1 完整 `Worker Runtime（工作进程运行时）`
+
+`P1-A Automatic Reconcile（P1-A 自动对账恢复）` 和 `P1-B Bounded Unknown Termination（P1-B 未知结果有界终止）` 已完成代码与既有验证，因此不能再列为缺失能力。
+
+当前真正未资格化的是本地启动现场：同一队列同时有 2 个 `Outbox Relay（事务发件箱转发进程）` 和 3 个 `Celery Worker（Celery 工作进程）`。这会让任务由哪个代码版本领取变得不确定。`P1-C Production Security（P1-C 生产安全）` 的令牌、签名和 Secret（密钥）最小权限仍按用户决定延期，不应和 P1-A/P1-B 混为一项。
+
+### 13.2 `Report publish/void（报告发布/作废）`
+
+当前代码里已经有发布和作废的接口、服务和数据访问方法，但 `Report（报告）` 模型与响应缺少 `state_version（状态版本）`，而服务又要求使用它做 `CAS（比较并设置）`。
+
+所以正确口径是“代码存在、运行不可用”，不能对同事说“报告发布和作废已经完成”。作废还需要补充原因、操作者和审计治理。
+
+### 13.3 `Evaluation Plane（评测面）`
+
+评测代码、模型和接口骨架存在，但独立 `ms_image_eval（影像评测数据库）` 当前不可用，评测面还没有形成可运行闭环。
+
+在线 `readiness（就绪检查）` 刻意与评测面隔离，所以在线服务就绪也不能证明离线评测已经就绪。
+
+---
+
+## 14. 怎样证明专项复核真的更好
+
+### 14.1 先建立 `M1 Medical Baseline（M1 医学基线）`
+
+在增加专项复核前，先用冻结的主读方案回答：
+
+- 哪些病例读对了；
+- 哪些异常漏掉了；
+- 哪些正常病例被误报了；
+- 哪些病例应该进入人工复核；
+- 哪些输入医学上不可判读；
+- 不同物种、部位、投照位和病例难度表现怎样。
+
+前提包括：
+
+- `Gold（可信金标准）` 由获准的医学流程产生；
+- `Scorer（评分器）`、分母和排除规则先冻结；
+- `Failure Bank（失败样本库）` 记录可重复的失败类型；
+- `Regression Set（回归集）` 防止修好一个问题又破坏旧能力；
+- `Holdout（留出集）` 在方案冻结前不用于调参。
+
+### 14.2 只针对一个已证实问题做实验
+
+每轮实验只改变一个主要因素，例如：
+
+- 一个 `Focus（专项关注点）`；
+- 一版 `Prompt（提示词）`；
+- 一个模型版本；
+- 一条路由门禁。
+
+不要同时改提示词、模型、结构合同、路由和结果合并规则，否则结果无法归因。
+
+### 14.3 使用同病例配对比较
+
+同一批病例同时运行：
+
+```text
+A 组：Primary-only（仅主读）
+B 组：Primary + Conditional Targeted（主读 + 条件专项复核）
+```
+
+重点比较：
+
+- `Recall（召回率）`：应发现的异常找到了多少；
+- `Specificity（特异度）`：正常病例有多少没有被误报；
+- `Precision（精确率）`：报告的异常中有多少是真的；
+- `Review Burden（人工复核负担）`：需要人工处理的病例是否失控；
+- `Non-diagnostic Safety（不可判读安全性）`：输入不足时是否诚实停止；
+- `Latency（延迟）` 和 `Cost（成本）`：增加一次复核带来的代价；
+- `Technical Failure Rate（技术失败率）`：专项调用是否引入更多无法交付的病例。
+
+### 14.4 看整体净收益，不只看专项子集
+
+不能只展示“成功触发专项的病例”。必须用所有符合条件的病例作为分母，包括：
+
+- 应该触发但没有触发的病例；
+- 错误触发的正常病例；
+- 专项调用技术失败的病例；
+- 专项修正成功的病例；
+- 专项把原本正确结果改错的病例。
+
+只有整体净收益达到预先冻结的门槛，并在独立 `Holdout（留出集）` 上复现，才允许讨论启用。
+
+### 14.5 停止条件
+
+出现以下任一情况，应停止扩大专项方案：
+
+- 没有可信医学金标准；
+- 整体误报或人工复核负担明显上升；
+- 关键异常召回下降；
+- 路由漏掉大部分真正需要复核的病例；
+- 技术失败、成本或延迟超过冻结预算；
+- 收益只存在于开发集，留出集不能复现；
+- 无法指出唯一结果所有者或无法重放结果来源。
+
+---
+
+## 15. 推荐实施顺序
+
+当前架构不需要推倒重写。推荐决策是 `local correction（局部修正）`：保留 `API（接口层） → Service（业务服务层） → DalBase CRUD（统一数据访问层） → Model/DB（模型/数据库）` 和现有异步链，只修当前能够明确定位的合同与验收缺口。
+
+### P0-1：先恢复单一进程所有者
+
+- 演示环境只保留 1 个 Runtime API（运行接口进程）、1 个 Outbox Relay（事务发件箱转发进程）和 1 个 Celery Worker（Celery 工作进程）。
+- 停止现有重复进程会改变本地运行状态，必须先获得操作者授权；本文只记录风险，不自行停止。
+- 启动前核对 Broker（消息队列）、OSS（对象存储）、AI Platform（人工智能平台）、active Config（活动配置）和 Connection URL（连接地址）一致。
+
+### P0-2：增强已有启动器，不新增平行脚本
+
+- 在现有 `scripts/dev/run_local_chain.sh（本地全链启动脚本）` 中检查已有 API、Relay、Worker 和 Beat（调度进程），发现重复时 `fail-closed（失败关闭）`。
+- 保持 `${PYTHONPATH:-}` 的兼容写法；不要再创建第二套启动器。
+- 启动摘要只显示非敏感状态，不输出 Token/Secret（令牌/密钥）。
+
+### P0-3：参数化已有 E2E harness（端到端验收工具）
+
+- 修改现有 `scripts/dev/run_e2e_local.py（本地端到端脚本）`，支持传入图片路径、`species（物种）`、`projection（投照位）` 和允许的 `clinical context（临床上下文）`。
+- 移除仓库外绝对图片路径和固定 `dog（狗）`；默认不从文件名或像素猜测投照位。
+- 同时核验 `current（当前报告）` 与 `history（历史报告）`，并输出 Image/Study/Task/Attempt/Call/Stage/Report（影像/检查/任务/尝试/调用/阶段/报告）的非敏感边界证据。
+
+### P0-4：连续复跑并冻结第一阶段完成定义
+
+- 在单一进程所有者环境，用同一固定影像连续运行 2～3 次。
+- 每次都必须达到：上传成功、Image ready（影像就绪）、Study finalized（检查已定稿）、Task completed（任务完成）、Attempt/Call succeeded（尝试/调用成功）、3 个 Stage completed（阶段完成）、Report final（最终报告）、current/history（当前/历史）可读取。
+- 核对 `Report.content_json.complete_medical_result（报告内容中的完整医学结果）` 确实为 v2；结果缺失、Schema（结构合同）失败或来源引用不一致时立即停止，不把技术失败算作成功。
+
+### P0-5：整理 Git（版本控制）改动，不立即整包提交
+
+- 当前工作树有 130 条状态记录，先按能力切片形成清单：Runtime/Worker（运行时/工作进程）、C1.1/D1/D2/C2 合同、P1-A/P1-B、E2E/launcher（端到端/启动器）、文档与 handoff（交接记忆）。
+- 不把 `.env（环境变量文件）`、密钥、运行产物或不相关改动带入提交。
+- 只有范围、验证和回滚说明清楚后，再由用户决定如何提交。
+
+### P1：经授权补 `Report.state_version（报告状态版本）`
+
+- 增加模型字段、响应字段和数据库迁移，关闭 `publish/void/revision CAS（发布/作废/修订比较并设置）` 缺口。
+- 该步骤涉及表字段和迁移，本轮未实施；实施前还要确认 `void reason/actor/audit（作废原因/操作者/审计）` 的最小范围。
+
+### P2：接通 `ms-ai-fast（上游业务服务）`
+
+- 将 `pet_type=1/2（宠物类型：猫/狗）` 明确映射为 `species=cat|dog（物种：猫或狗）`，再创建 ms-image 的 Session/Study/Image/Task（会话/检查/影像/任务）并查询报告。
+- 上游传入真实 `clinical context（临床上下文）`；Worker（工作进程）不回读会变化的宠物档案来改写冻结任务。
+
+### P3：让评测面可运行，再建立医学基线
+
+- 创建并迁移独立 `ms_image_eval（影像评测数据库）`，增加 Evaluation readiness（评测就绪检查）。
+- 冻结 Gold（医学金标准）、Scorer（评分器）、分母、Failure Bank（失败样本库）、Regression Set（回归集）和 Holdout（留出集），运行 `M1 Medical Baseline（M1 医学基线）`。
+- 只有 M1 发现可重复、重要、可度量的主读盲点，才进入条件专项复核实验。
+
+### P4：生产安全与发布工件资格化
+
+- 关闭 Runtime/Admin JWT（运行时/管理端令牌）、Artifact signing（评测产物签名）、Secret（密钥）最小权限和发布工件冻结问题。
+- 只有医学、工程、安全、成本和运行指标全部达标，才讨论 `MEDICAL_RELEASE=GO（医学发布允许放行）`。
+
+---
+
+## 16. 常见误解
+
+### 误解一：“多看几次一定更准”
+
+不一定。多次同源模型调用可能重复相同盲点，还会累积误报、失败、费用和延迟。
+
+### 误解二：“两视图工程通过，说明模型理解了两个投照位”
+
+不对。当前证据只证明两张不同投照位影像被正确冻结、发送、追踪和保存。模型是否真正利用多视图，需要医学评测。
+
+### 误解三：“五个专项就是五个模型”
+
+不对。五个专项目前是报告组织和评测分层词汇，不是五个服务、五张表或五次调用。
+
+### 误解四：“路由能发现主读完全没看到的问题”
+
+不能默认这样认为。当前候选路由主要依赖主读结果和冻结上下文；如果主读完全没有暴露某个问题，路由也可能没有触发依据。
+
+### 误解五：“报告可以把两次结果智能合并”
+
+不应该。报告不是第二位医生，只能固化唯一已接受的完整医学结果。
+
+### 误解六：“代码存在就代表功能可用”
+
+不对。报告发布作废和评测面都是典型例子：代码骨架存在，但运行合同尚未闭环。
+
+---
+
+## 17. 和同事讲解时可直接使用的 10 分钟话术
+
+建议按下面的顺序展示架构图：
+
+1. 第 5.2 节“上传影像到查询报告的全链架构图”：先讲当前最关心的产品链；
+2. 第 2.3 节“方案选型图”：解释为什么当前选仅主读；
+3. 第 5.1 节“系统总体架构图”：再讲控制面、在线运行时、持久化层和评测面；
+4. 第 5.3 节“当前主读执行链图”：说明当前代码真正会走哪些节点；
+5. 第 8.1 节“目标流程”和第 10.2 节“冻结链”：区分当前能力、未来候选与历史重放。
+
+### 第 1 分钟：先说结论
+
+“我们已经证明一条真实病例可以完成上传、调用模型、生成第一份最终报告并被查询。当前仍采用一次完整主读作为基线，不做每个器官默认多调用。”
+
+### 第 2～3 分钟：解释为什么
+
+“调用更多不天然代表更准确。多结果会有冲突、误报、费用、延迟和结果归属问题。一次主读最容易形成可信基线，也最容易知道问题来自哪里。”
+
+### 第 4～5 分钟：讲当前真实链路
+
+“系统先准备上传地址，把影像传到对象存储并校验；检查定稿后创建冻结任务，经事务发件箱、消息队列和工作进程调用模型，再经过检查准备、联合主读和结果定稿，最后写入报告。单图最小链和腹背位加侧位的两视图工程链都已有成功证据。”
+
+### 第 6 分钟：主动划清证据边界
+
+“工程链跑通不证明医学准确率。C2 第二版完整结果已经落到报告里，但它只是结构和来源合同通过。当前本地还有重复工作进程，所以今天应说‘链路跑通过’，不应说‘环境已经稳定可重复部署’；医学验证仍是未知，医学发布仍禁止。”
+
+### 第 7～8 分钟：讲未来专项复核
+
+“如果医学基线证明某个明确问题反复失败，我们才针对一个专项家族里的一个关注点，最多追加一次完整复核。复核仍看整套片子，并输出一份新的完整结果，不是往原结果打补丁。”
+
+### 第 9 分钟：讲如何判断是否上线
+
+“同一批病例做仅主读和条件专项复核的配对比较，既看召回，也看误报、人工复核负担、失败率、成本和延迟；最后还要在独立留出集复现。”
+
+### 第 10 分钟：收尾
+
+“所以下一步先恢复单一进程所有者，增强现有一键验收工具并连续复跑；再经授权补报告状态版本、接上游业务；之后才启动评测面和医学基线。当前选择局部修正，不需要推倒重写，也不会把工程成功包装成医学成功。”
+
+---
+
+## 18. 中英术语表
+
+| 英文术语 | 中文含义 | 一句话解释 |
 |---|---|---|
-| 胃肠异物/梗阻 | 胃肠位置、形态、分布和梗阻征象 | 关键发现确认 |
-| 泌尿矿化 | 矿化影位置及与泌尿结构关系 | 关键发现确认 |
-| 腹腔矿化点 | 无法立即归属具体系统的矿化点 | 困难病例复核 |
-| 软组织肿块 | 软组织轮廓、占位和邻近结构关系 | 困难病例复核、正常闭环 |
+| `XRay` | X 光 | 本文讨论的影像模态 |
+| `Session` | 影像诊疗会话 | 一次业务流程的外层容器 |
+| `Study` | 影像检查 | 同一诊断目的下要一起看的整套影像 |
+| `Series` | 影像序列 | 检查内的一组同类采集影像 |
+| `Image` | 影像对象 | 一张影像及其元数据和来源 |
+| `Revision` | 修订版 | 某次检查输入的不可变版本 |
+| `Manifest` | 清单 | 有序影像列表及其摘要和元数据 |
+| `Task` | 任务 | 一次冻结后可重放的分析请求 |
+| `Snapshot` | 快照 | 任务创建时封存的输入和配置 |
+| `Service` | 业务服务 | 长期负责某类业务规则的模块 |
+| `Stage` | 执行阶段 | 一次任务中的可恢复步骤 |
+| `Outbox` | 事务发件箱 | 保证数据库事实与消息投递可对账的记录 |
+| `Outbox Relay` | 事务发件箱转发进程 | 把数据库里的待投递事件发送到消息队列的进程 |
+| `Worker` | 工作进程 | 从队列领取并执行任务的进程 |
+| `Provider` | 模型提供方 | 真正接收请求并生成结果的外部服务 |
+| `Model` | 模型 | 执行影像分析的人工智能模型 |
+| `Prompt` | 提示词 | 告诉模型任务、规则和输出要求的文本 |
+| `Schema` | 结构合同 | 模型输出必须遵守的数据结构 |
+| `Profile` | 流程配置 | 决定任务经过哪些阶段 |
+| `Primary` | 主读 | 对完整检查进行的第一次完整判读 |
+| `JointPrimaryReader` | 联合主读 | 同时读取一套检查内全部冻结影像的主读阶段 |
+| `TargetedReview` | 专项复核 | 围绕一个明确问题再次完整判读整套影像 |
+| `Family` | 专项家族 | 一类完整临床评估包 |
+| `Focus` | 专项关注点 | 本次复核要解决的具体问题 |
+| `Strategy` | 复核策略 | 复核这个问题时使用的方法 |
+| `Finding` | 影像发现 | 可追溯的医学观察 |
+| `Complete Medical Result` | 完整医学结果 | 能独立覆盖整个病例的结果，不是局部补丁 |
+| `CompleteMedicalResult v2` | 完整医学结果第二版 | 必含版本、摘要、印象、发现和来源引用的当前结果合同 |
+| `medical owner` | 医学结果所有者 | 唯一有资格成为报告来源的结果 |
+| `Report` | 报告 | 被选医学结果的不可变呈现 |
+| `Control Plane` | 控制面 | 决定新任务能使用哪些冻结配置 |
+| `Runtime` | 运行时 | 在线任务实际执行的环境和能力 |
+| `Evaluation Plane` | 评测面 | 离线比较候选方案、生成发布证据的独立区域 |
+| `Gold` | 可信金标准 | 经批准的医学真值或参考标准 |
+| `Scorer` | 评分器 | 按冻结规则比较结果与金标准的工具 |
+| `Failure Bank` | 失败样本库 | 按失败原因归类的病例集合 |
+| `Regression Set` | 回归集 | 检查修改是否破坏已有能力的数据集 |
+| `Holdout` | 留出集 | 方案冻结前不参与调参的独立验证集 |
+| `Paired A/B` | 同病例配对 A/B 实验 | 同一病例分别运行基线和候选方案 |
+| `CAS` | 比较并设置 | 只有版本仍符合预期时才允许更新 |
+| `state_version` | 状态版本 | CAS 更新时用来防止并发覆盖的整数版本号 |
+| `E2E harness` | 端到端验收工具 | 从上传一直检查到报告查询的自动化验收入口 |
+| `deterministic replay` | 确定性复跑 | 同一冻结输入在受控进程和配置下得到可解释、可对账执行结果 |
+| `local correction` | 局部修正 | 保留主体架构，只修明确缺口和边界的改造级别 |
+| `lease` | 租约 | 防止任务被多个工作进程同时长期占用的时限 |
+| `deadline` | 截止时间 | 任务允许继续执行的最晚时间 |
+| `provenance` | 来源信息 | 证明输入或结果从哪里产生的证据 |
+| `readiness` | 就绪检查 | 判断某个服务是否具备接收工作的条件 |
+| `fail-closed` | 失败关闭 | 条件不满足时明确停止，不猜测或偷偷降级 |
 
-### 9.3 四肢骨关节专项
+---
 
-| 关注点 | 主要问题 | 可选策略 |
-|---|---|---|
-| 骨折/脱位 | 骨皮质连续性和关节对应 | 关键发现确认 |
-| 长骨/关节 | 完整长骨、相邻关节和多投照一致性 | 困难病例复核 |
-| 排列 | 同一肢体的排列一致性 | 冲突处理 |
-| 髌骨/膝关节 | 髌骨、膝关节对应和投照限制 | 关键发现确认 |
+## 19. 代码与证据索引
 
-### 9.4 轴骨骼专项
+以下位置用于核对本文结论，不要求小白阅读全部源码：
 
-| 关注点 | 主要问题 | 可选策略 |
-|---|---|---|
-| 骨折/脱位 | 脊柱或骨盆连续性和关节对应 | 关键发现确认 |
-| 排列 | 脊柱节段或骨盆排列 | 冲突处理 |
-| 骨盆/髋部 | 骨盆对称性、髋部对应和投照限制 | 困难病例复核 |
-
-### 9.5 头颈专项
-
-首期只建立报告结构和评测分层，不开放 Targeted Focus。原因是输入覆盖、具体 Focus、可信 Gold 和失败样本分层尚未闭环。过早开放会把不清晰的范围转化为不可解释的调用和不稳定结果。
-
-## 10. Review Strategy（复核策略）
-
-| 策略 | 目标 | 主要风险 |
-|---|---|---|
-| 安全检查 | 检查可能遗漏的重要征象，同时寻找反证 | 正常误报和 review 膨胀 |
-| 高召回 | 在一个明确 Focus 内扩大搜索敏感度 | 弱证据被异常化 |
-| 困难病例复核 | 重新评估边界不清或表现复杂的证据 | 延迟、成本和过度保守 |
-| 硬阳性复核 | 验证强阳性候选的支持与反证 | 正常误报和同源偏差 |
-| 正常闭环 | 要求充分正常反证，同时复核异常候选 | 异常漏诊 |
-| 漏诊搜索 | 针对预注册失败类型检查遗漏 | 正常误报和 review 率 |
-| 冲突处理 | 处理同一专项、同一关注点内的冲突 | 错误投票和跨专项混合 |
-| 关键发现确认 | 对唯一来源 Finding 进行确认 | 形成第二医学所有者 |
-
-策略只是 Prompt 的复核方法，不是独立 Stage，不产生独立医学结果。
-
-## 11. 技术证据边界
-
-质量检查、解剖定位、分割、裁剪、标志点和单视图限制都属于技术证据。
-
-它们可以：
-
-- 描述图像是否可用；
-- 描述结构位置和区域；
-- 生成辅助局部图；
-- 表达投照和覆盖限制；
-- 帮助模型定位需要检查的位置。
-
-它们不能：
-
-- 判断正常或异常；
-- 直接产生 TargetedCandidate；
-- 根据坐标或角度阈值修改医学结论；
-- 替代完整 Study 输入；
-- 被当成独立医学证据进行投票。
-
-如果轮廓结果只包含几何坐标，它仍是技术证据；只有 Primary 已经产生有医学语义的来源 Finding，才能进入对应临床关注点。
-
-## 12. JointPrimaryReader（联合主读）
-
-联合主读不是一份没有专项知识的大型通用 Prompt，而是一次调用中的模块化病例阅读：
-
-- 完整 Study 阅读顺序；
-- 物种上下文；
-- 实际覆盖和投照限制；
-- 本次检查适用的专项模块；
-- 正常反证和安全检查；
-- 完整结果结构；
-- Finding 与来源图像的追溯要求。
-
-为什么只调用一次：
-
-- 保留不同系统和结构之间的病例关系；
-- 避免每个专项分别输出互相冲突的结论；
-- 形成唯一医学所有者；
-- 降低成本和延迟；
-- 为后续专项实验提供稳定对照。
-
-潜在缺陷：
-
-- Prompt 内容可能过大；
-- 模型可能降低对局部专项的关注；
-- 如果 Primary 完全没有发现某个异常，基于 Primary 候选的 Router 也无法触发专项。
-
-这些缺陷必须通过模块化 Prompt、失败样本回归和离线审计处理，不能仅靠增加在线调用次数掩盖。
-
-## 13. FamilyRouting（家族路由）
-
-FamilyRouting 是确定性控制节点，不读取图像、不调用模型、不读取 Gold、不修改医学结论。
-
-它只验证：
-
-- 当前 Task 是否允许专项复核；
-- Primary 是否给出唯一 Family 和 Focus；
-- 是否存在可追溯的来源 Finding；
-- 图像覆盖和投照是否充分；
-- Focus 与 Strategy 是否在冻结目录中允许；
-- Targeted Prompt、Schema、模型和 Provider 是否已经资格化；
-- 整条候选链的预算和截止时间是否已经预留。
-
-Router 只能产生两种决定：
-
-- Primary 直接定稿；
-- 进入一次专项复核。
-
-多个专项候选、没有具体 Focus、覆盖不足、配置不完整或预算不足，都不能动态扩展为多专项调用。
-
-## 14. TargetedReview（专项复核）
-
-TargetedReview 的输入包括：
-
-- 完整且有序的 Study；
-- Primary 完整结果；
-- 唯一 Family；
-- 唯一 Focus；
-- 零个或一个 Strategy；
-- 来源 Finding；
-- 冻结的 Prompt、Schema、模型、Provider、预算和截止时间。
-
-TargetedReview 仍然必须输出完整病例结果，而不是：
-
-- 一个器官的 yes/no；
-- 一条证据增量；
-- 一个置信度；
-- 对 Primary 的局部修补；
-- Primary 与 Targeted 的有利片段拼接。
-
-Targeted 成功时，Targeted 完整结果成为该分支唯一医学所有者。
-
-## 15. Targeted 的触发门禁
-
-必须同时满足：
-
-1. Task 使用专项实验 Profile。
-2. Primary 只给出一个专项候选。
-3. 候选包含唯一 Family、唯一 Focus 和来源 Finding。
-4. 对应专项影像覆盖充分。
-5. Focus 和可选 Strategy 属于冻结目录。
-6. 对应 Prompt、Schema、模型和 Provider 已通过资格验证。
-7. 整条候选链预算和截止时间已经预留。
-8. 该 Focus 有预注册失败类型和配对评测计划。
-
-任何一项不满足，都不能调用 Targeted。
-
-## 16. 医学所有权
-
-医学所有权必须唯一：
-
-| 场景 | 医学结果所有者 |
+| 结论 | 主要证据 |
 |---|---|
-| 默认主链 | Primary |
-| 专项 Profile 未触发 Targeted | Primary |
-| Targeted 成功且输出完整结果 | Targeted |
-| Targeted 技术失败 | 不产生候选链医学结果 |
-| DecisionFinalization（结果定稿阶段） | 无医学所有权，只验证和选择 |
-| ReportRenderer | 无医学所有权，只展示 |
-
-DecisionFinalization（结果定稿阶段）不比较哪个结果“看起来更好”，不投票、不融合、不修改判断。
-
-## 17. Targeted 失败是否回退 Primary
-
-这是当前方案中最需要辩证看待的边界。
-
-### 17.1 不回退的优点
-
-- 保持候选链定义一致；
-- 防止只有 Targeted 有利时才采用 Targeted；
-- 避免隐藏 Provider 和工程失败；
-- 保证配对实验的因果解释。
-
-### 17.2 不回退的缺点
-
-- Primary 已经存在可用结果，但候选 Task 仍可能没有医学输出；
-- 正式服务可用性下降；
-- Provider 短暂故障会扩大为报告不可用；
-- 用户体验可能弱于 Primary-only。
-
-### 17.3 推荐处理
-
-- 在 validation-only 和 shadow 阶段，候选任务保持失败关闭，Primary 基线任务继续独立产生用户可见结果。
-- Targeted 进入正式发布前，必须证明技术失败率足够低。
-- 如果未来确实需要“Targeted 技术失败后使用 Primary”，它必须成为新的、显式命名的 Profile，并把回退规则作为实验变量整体评测；不能在运行时静默发生。
-
-因此“不回退”不是永远正确的医学原则，而是当前实验因果完整性优先的阶段性设计。
-
-## 18. 数据和模块边界
-
-专项不新增独立数据库表。专项目录、关注点、策略和 Prompt 组合属于不可变 AI Config/Profile。
-
-在线事实仍由以下领域拥有：
-
-| 领域 | 核心事实 |
-|---|---|
-| 影像事实 | Session、Study、Series、Image 和检查修订 |
-| 执行事实 | Task、Stage、Outbox 和 AI Call |
-| 配置事实 | Family、Focus、Strategy、Prompt、Schema、模型、Provider 和 Profile |
-| 医学结果 | Primary 或 Targeted 的完整 Stage 输出与 accepted Call |
-| 报告事实 | 不可变 Report 和当前报告指针 |
-| 评测事实 | Dataset、Gold、Run、Artifact、指标和审批 |
-
-专项服务通过现有执行与 AI 请求能力运行，不建立平行业务数据库服务，也不直接操作 Task、报告或 Gold。
-
-## 19. Prompt 组织原则
-
-Primary Prompt 由以下部分组成：
-
-- 病例级阅读和总体结论要求；
-- 物种上下文；
-- 覆盖和投照限制；
-- 适用专项模块；
-- 正常反证与安全规则；
-- 完整医学结果结构；
-- 来源图像追溯规则。
-
-Targeted Prompt 由以下部分组成：
-
-- 专项复核基础规则；
-- 唯一专项模块；
-- 唯一关注点；
-- 可选复核策略；
-- 完整 Study；
-- Primary 完整结果；
-- 完整医学结果结构。
-
-规则优先级为：医学输出和安全不变量，高于专项和策略模块；专项和策略不能覆盖完整结果、来源追溯和不确定性要求。
-
-### 19.1 Prompt（提示词）完整链路：先发布配置，再运行病例
-
-Prompt（提示词）不是一份在 Worker（异步工作进程）启动时随意读取的文本，也不是一个独立的医学 Stage（阶段）。它是一条受版本冻结、输入白名单、调用审计和离线评测共同约束的配置链。
-
-必须区分以下六个互不替代的事实：
-
-| 事实 | 中文用途 | 产生时机 | 是否可被运行中 Task（任务）改变 |
-|---|---|---|---:|
-| Prompt Catalog（提示词目录）与 Prompt Asset（提示词资产） | 开发期维护已发布的中文片段、角色、适用条件和内容摘要 | 配置编译前 | 否；它不是运行时的“最新版本”来源 |
-| AI Config Release（AI 配置发布版） | 冻结一个 Profile（流程配置）所需的 Prompt Bundle（提示词包）、Schema（结构合同）、模型、Provider（AI 服务提供方）和预算 | 配置验证并激活前 | 否；新内容只能形成新 Release（发布版） |
-| Task Snapshot（任务快照） | 把具体 Study（检查）、AI Config Release（AI 配置发布版）、图像清单、专项范围、预算和截止时间绑定为一次可重放请求 | Task 创建时 | 否 |
-| Prompt Command（提示词命令） | 由当前医学 Stage（阶段）从冻结 Task/Stage（任务/阶段）事实中提取允许进入 Prompt 的上下文和选择条件 | Stage 执行时 | 只能读取冻结事实 |
-| Compiled Prompt（已编译提示词） | 将已冻结资产和安全病例上下文按固定顺序组合为本次调用真正看到的内容 | 每个逻辑 AI Call（AI 调用）准备时 | 不可被人工或 Worker 临时补写 |
-| AI Call Record（AI 调用记录） | 记录一次逻辑调用所使用的 Config、渲染 Prompt、Schema 和影像清单摘要，以及发送/回执/结果处置 | 调用前及调用后 | 仅追加状态推进，不替换已使用的版本 |
-
-其中，Prompt Catalog（提示词目录）解决“开发者能维护哪些经发布资产”；AI Config Release（AI 配置发布版）解决“这个 Task（任务）到底允许使用哪一组资产”；Compiled Prompt（已编译提示词）解决“这一次模型实际看到了什么”。三者不能合并，也不能互相替代。
-
-### 19.2 配置发布链：从 Prompt Asset（提示词资产）到可冻结 Release（发布版）
-
-```mermaid
-flowchart LR
-    CAT["Prompt Catalog（提示词目录）<br/>已发布 zh-CN（中文）资产与完整结果 Schema（结构合同）"]
-    CFG["AIConfigService（AI 配置服务）<br/>选择、编译、校验"]
-    REL["AI Config Release（AI 配置发布版）<br/>不可变 Bundle（提示词包）/ Schema（结构合同）/ Pipeline（流水线）/ Model（模型）/ Provider（AI 服务提供方）/ Budget（预算）"]
-    VAL["Validate（验证）<br/>资产、Profile、资格、调用上限"]
-    ACT["Activate（激活）<br/>Primary 全局或 Targeted 实验范围"]
-    TASK["TaskService（任务服务）<br/>冻结 Release 指纹到 Task Snapshot（任务快照）"]
-
-    CAT --> CFG --> REL --> VAL --> ACT --> TASK
-```
-
-该链的输入、输出和硬约束如下：
-
-| 节点 | 接收什么 | 输出什么 | 必须拒绝什么 |
-|---|---|---|---|
-| Prompt Catalog（提示词目录） | 已审定的中文 Prompt Asset（提示词资产）、内容 SHA、角色、Family（专项家族）/Focus（关注点）/Strategy（复核策略）适用条件和 `complete_medical_result` Schema（完整医学结果结构合同） | 可被配置编译器精确引用的发布资产 | 未发布资产、重复键、内容 SHA 不一致、语言不一致或无输出合同的资产 |
-| AIConfigService（AI 配置服务） | 目录修订、固定 Profile、资产选择规则、模型/Provider/预算策略 | 含完整资产内容和 SHA 的 Prompt Bundle（提示词包）、Schema Bundle（结构合同包）、Pipeline（流水线）摘要、Config SHA 和 Release Fingerprint（发布指纹） | 原始 Prompt 文本直接进入 Config API（配置接口）、超过 Profile 调用上限、无资格 Provider 或 Targeted（专项复核）在非实验范围启用 |
-| Validate/Activate（验证/激活） | Draft（草稿）Release、资产/Schema/调用预算/资格校验结果 | 可供新 Task 使用的 Active Config（已激活配置） | 覆盖已激活 Release 正文；激活不会改变已经运行或已完成的 Task |
-| TaskService（任务服务） | ready Study Revision（就绪检查修订）、Active Config（已激活配置）、请求预算和业务类型 | Task Snapshot（任务快照）中的 `ai_config_id`、Config/Release/Bundle 指纹、Profile、图像清单、`applicable_family_keys`（适用专项家族键）和 deadline（截止时间） | 用“当前目录最新文件”替代 Task 已冻结的 Release；就绪前的 Study 或不合格配置启动 Task |
-
-运行时不能重新从文件系统或“最新 Catalog（目录）”选择 Prompt（提示词）。即使目录随后新增、修改或下线资产，已经创建的 Task（任务）仍必须从其冻结 Bundle（提示词包）重建相同的 Prompt（提示词）。任何 Prompt、Schema、模型、Provider、Profile 或预算的实质变化都必须创建新的 AI Config Release（AI 配置发布版），并只影响新 Task。
-
-### 19.3 Primary（主读）病例运行链：一次完整 Study（检查）读取
-
-```mermaid
-flowchart LR
-    TS["冻结 Task Snapshot（任务快照）"]
-    SP["StudyPreparation（检查准备）<br/>确认完整修订、影像清单、覆盖、能力、预算"]
-    PC["Primary Prompt Command（主读提示词命令）<br/>只提取安全上下文与适用专项家族"]
-    CP["PromptCompiler.compile_primary（主读提示词编译）"]
-    CALL["AIRequestService（AI 请求服务）<br/>prepared AI Call（已准备调用）"]
-    PROV["Provider（AI 服务提供方）<br/>目标态：一次视觉调用"]
-    OUT["Complete Medical Result（完整医学结果）"]
-    FIN["DecisionFinalization（结果定稿）"]
-
-    TS --> SP --> PC --> CP --> CALL --> PROV --> OUT --> FIN
-```
-
-Primary Prompt（主读提示词）固定按以下顺序编译，顺序本身属于 Release（发布版）合同：
-
-1. `joint_primary_base`（联合主读基础片段）：完整病例阅读、安全边界、正常反证和总体输出要求。
-2. `joint_primary_module`（联合主读专项模块）：仅加入冻结 `applicable_family_keys`（适用专项家族键）所允许的 0 至 5 个模块，并以固定 Family（专项家族）顺序排列。
-3. `technical_evidence`（技术证据片段）：仅在该 Config（配置）允许且当前 Task（任务）已冻结可用技术证据时加入；它只能解释来源、派生图或使用限制，不能输出医学结论。
-4. `complete_medical_result`（完整医学结果结构合同）：强制模型输出统一的医学状态、Findings（影像发现）、正常反证、覆盖、限制和来源图像引用。
-5. `SAFE_STUDY_CONTEXT_JSON`（安全检查上下文）：只允许包含冻结的物种、解剖区域、投照、覆盖、技术限制、白名单临床上下文和有序影像引用摘要。
-
-Primary Prompt Command（主读提示词命令）不根据图像像素做判断，也不从病例文本中接受可改变系统规则的指令。它只把 `species（物种）`、`anatomy_regions（解剖区域）` 等信息作为安全上下文注入；真正决定哪些专项模块被装载的是 Task Snapshot（任务快照）中的 `applicable_family_keys`（适用专项家族键）。`anatomy_regions`（解剖区域）不是裁剪图，也不会自动触发新的模型调用。
-
-PromptCompiler（提示词编译器）必须在发起调用前完成以下检查：资产已发布且摘要匹配、Family（专项家族）选择合法且无重复、技术证据已获配置许可、上下文白名单与泄漏检查通过、Prompt 长度不超过冻结上限、输出 Schema（结构合同）与 Bundle（提示词包）完全一致。任一项失败都必须在 Provider（AI 服务提供方）调用前失败关闭，医学状态为 `not_produced`（未产生医学结论）；不得静默删减片段、截断上下文或通过增加额外调用来规避长度限制。
-
-AIRequestService（AI 请求服务）准备 AI Call（AI 调用）时，将 Config SHA、Release Fingerprint（发布指纹）、渲染 Prompt SHA、Schema SHA、影像清单 SHA、模型策略 SHA 和逻辑幂等键一起持久化。当前已实现的 provider-disabled（Provider 关闭）模式会真实编译上述 Prompt/Schema 并写入摘要，但不会发送图像或 Prompt 到 Provider；它会以 `provider_disabled` 结束且医学状态为 `not_produced`。真实 Provider（AI 服务提供方）链仍属于未资格化的目标态，不能据此宣称已得到医学结果。
-
-### 19.4 TargetedReview（专项复核）病例运行链：最多一次、唯一 Focus（关注点）
-
-```mermaid
-flowchart LR
-    PRI["Primary（主读）完整结果"]
-    ROUTE["FamilyRouting（专项家族路由）<br/>确定性门禁，不读图、不调用模型"]
-    PF["primary_final（主读直接定稿）"]
-    TC["Targeted Prompt Command（专项提示词命令）"]
-    CC["PromptCompiler.compile_targeted（专项提示词编译）"]
-    CALL["AIRequestService（AI 请求服务）<br/>第二且最后一次 AI Call（AI 调用）"]
-    TR["TargetedReview（专项复核）<br/>完整病例结果"]
-    FIN["DecisionFinalization（结果定稿）"]
-
-    PRI --> ROUTE
-    ROUTE -->|"不满足门禁"| PF --> FIN
-    ROUTE -->|"唯一 Family + Focus + 资格"| TC --> CC --> CALL --> TR --> FIN
-```
-
-只有 Targeted 实验 Profile（专项复核实验流程配置）中，并且 FamilyRouting（专项家族路由）已经确认“唯一 Family（专项家族）+ 唯一 Focus（关注点）+ 可选唯一 Strategy（复核策略）+ 来源 Finding（影像发现）+ 覆盖证据 + 资格 + 预算 + deadline（截止时间）”时，才构造 Targeted Prompt Command（专项提示词命令）。普通 Primary（主读）结果、多个候选、缺失来源、覆盖不足、未资格化资产或超出预算，都应走 `primary_final`（主读直接定稿），而非继续增加调用。
-
-Targeted Prompt（专项复核提示词）固定按以下顺序编译：
-
-1. `targeted_focus.base`（专项复核基础片段）：声明这是一次完整病例复核，不能只回答局部 yes/no。
-2. 唯一 `targeted_focus`（专项关注点片段）：将本次复核限定为一个 Family（专项家族）中的一个 Focus（关注点）。
-3. 零或一个 `review_strategy`（复核策略片段）：约束高召回、正常闭环、关键发现确认等复核方式，不能改变最终输出结构。
-4. 可选 `technical_evidence`（技术证据片段）：只说明派生技术证据的来源和边界。
-5. `complete_medical_result`（完整医学结果结构合同）。
-6. `PRIMARY_COMPLETE_RESULT_JSON`（Primary 完整结果）：仅作为待复核的上游候选与来源线索，不是已经被证明的医学事实。
-7. `SAFE_STUDY_CONTEXT_JSON`（安全检查上下文）：仍指向同一冻结、完整、有序的 Study（检查）原图集合。
-
-这里有一个不能被忽略的风险：向 TargetedReview（专项复核）提供 Primary（主读）结果可能形成锚定偏差，使模型机械确认上游候选。专项 Prompt（提示词）必须明确要求模型重新检查完整原图、同时寻找支持和反证，并允许推翻 Primary 的局部判断；离线评测还必须比较“含 Primary 结果”与“无 Primary 结果”的消融影响。即使未来确认需要不含上游结果的专项方案，它也必须作为新 Release（发布版）和独立实验变量，不能在同一实验中混用。
-
-TargetedReview（专项复核）成功时必须输出完整病例结果，成为该实验分支的唯一医学结果所有者；DecisionFinalization（结果定稿）只校验 Profile（流程配置）和路由合同，不按 Finding（影像发现）数量、模型自报 confidence（置信度）或结果“看起来更好”来选择 Primary 或 Targeted。Targeted 技术失败目前不允许静默回退 Primary；若未来需要回退，必须设计、命名并独立评测一个新的 Profile（流程配置）。
-
-### 19.5 从调用结果到评测发布：Prompt（提示词）不能绕过医学与治理边界
-
-| 环节 | 接收什么 | 输出什么 | Prompt（提示词）相关约束 |
-|---|---|---|---|
-| Provider response（Provider 响应）与 Schema validation（结构校验） | 请求实际发送/回执、原始响应、冻结 Schema | 通过校验的 Complete Medical Result（完整医学结果），或工程失败 | 实际模型、影像发送清单、回执或 Schema 不匹配时，结果不能成为医学所有者 |
-| DecisionFinalization（结果定稿） | 当前 Profile、路由决定、已接受的完整结果 | 唯一医学结果所有者 | 不重写 Prompt 输出，不融合 Primary/Targeted 片段，不以医学内容挑选“赢家” |
-| ReportService（报告服务） | 已选完整医学结果及其来源 | 不可变 Report（报告） | 报告只格式化和发布；不补写、删除或改判 Prompt 产生的 Finding |
-| Evaluation Plane（离线评测与发布证据面） | 脱敏冻结病例产物、Config/Release/Bundle/Prompt/Schema 指纹、Gold（可信金标准）和预注册比较计划 | 病例级结果、指标、失败分析和候选发布证据 | Prompt 变更必须可定位；配对 A/B（同病例配对实验）一次只改变一个主要变量，不能把 Prompt、模型、Schema 和路由同时改变后声称准确率来自 Prompt |
-| Control Plane（控制面） | 评测证据、资格和审批 | 新 AI Config Release 的激活或拒绝 | Evaluation（离线评测）不能直接改 Active Config（已激活配置），在线 Task 也不会随评测结果被改写 |
-
-Prompt（提示词）内容、完整病例上下文、签名地址、Secret（密钥）、Gold（可信金标准）、Holdout（独立留出集）标签和原始评测答案都不得进入普通 API 响应、日志或无授权的评测产物。运行可追溯性默认依赖不可变版本、选择结果和 SHA；只有经授权的受控审计路径才可读取完整 Prompt（提示词）正文。
-
-### 19.6 一张完整的 Prompt（提示词）链路图
-
-```mermaid
-flowchart TD
-    CAT["Prompt Catalog（提示词目录）<br/>已发布中文资产、内容 SHA、角色、Schema"]
-    AIC["AIConfigService（AI 配置服务）<br/>编译 Bundle、Pipeline、模型/Provider/预算"]
-    REL["AI Config Release（AI 配置发布版）<br/>不可变、可验证、可激活"]
-    TS["TaskService（任务服务）<br/>冻结 Release + Study Revision（检查修订）"]
-    PREP["StudyPreparation（检查准备）"]
-    P1["Primary Prompt Command（主读提示词命令）"]
-    C1["PromptCompiler.compile_primary（主读提示词编译）"]
-    R1["AIRequestService（AI 请求服务）<br/>prepared logical AI Call（已准备逻辑调用）"]
-    M1["Primary Provider Call（主读模型调用）<br/>目标态一次"]
-    PR["Primary 完整医学结果"]
-    FR["FamilyRouting（专项家族路由）<br/>仅 Targeted 实验 Profile"]
-    P2["Targeted Prompt Command（专项提示词命令）"]
-    C2["PromptCompiler.compile_targeted（专项提示词编译）"]
-    R2["AIRequestService（AI 请求服务）<br/>最多第二次逻辑调用"]
-    M2["Targeted Provider Call（专项模型调用）<br/>目标态最多一次"]
-    TR["Targeted 完整医学结果"]
-    DF["DecisionFinalization（结果定稿）"]
-    REP["ReportService（报告服务）"]
-    EVA["Evaluation Plane（离线评测与发布证据面）"]
-
-    CAT --> AIC --> REL --> TS --> PREP --> P1 --> C1 --> R1 --> M1 --> PR
-    PR --> FR
-    FR -->|"primary_final（主读直接定稿）"| DF
-    FR -->|"targeted_review（专项复核）"| P2 --> C2 --> R2 --> M2 --> TR --> DF
-    DF --> REP --> EVA
-    EVA -. "候选证据 + 审批" .-> AIC
-```
-
-这张图中唯一允许在线发送医学模型请求的节点是 Primary Provider Call（主读模型调用）和 Targeted Provider Call（专项模型调用）。所有 Prompt Asset（提示词资产）、Family（专项家族）、Focus（关注点）、Strategy（复核策略）、Schema（结构合同）与技术证据都只是在这两次调用之前受控编译的输入，不是额外的模型调用、Stage（阶段）、数据库表或并行服务。
-
-## 20. 可靠执行边界
-
-可靠执行必须保证：
-
-- 每次模型调用在发送前已有持久化事实；
-- 同一逻辑调用重试时复用同一幂等身份；
-- 结果未知时先对账，不能新建第二次调用；
-- 重试只能针对传输和受控结构错误，不能因为医学结果不满意重问；
-- Task 取消后返回的结果不能覆盖报告；
-- 重复消息不能产生第二医学结果；
-- Targeted Profile 的第二次调用预算在 Primary 前已经预留；
-- 运行中缺失资格或预算事实属于工程失败，不能静默回退 Primary。
-
-## 21. 影像输入边界
-
-Primary 与 Targeted 必须使用同一个冻结 Study 修订和原图集合。
-
-要求：
-
-- 图像顺序稳定；
-- 图像版本和内容摘要稳定；
-- 投照、侧别和区域信息可追溯；
-- 重复图不增加证据权重；
-- 派生图明确关联源图；
-- 裁剪、分割和标志点只能辅助，不能替代原图；
-- Provider 能力不足时调用前终止，不能静默少发图片。
-
-## 22. 安全和隐私边界
-
-进入 Prompt 的上下文必须最小化并经过白名单处理。
-
-禁止进入 Prompt 或日志的内容包括：
-
-- Secret 和 Provider 凭证；
-- 数据库或对象存储连接信息；
-- 与影像诊断无关的用户和业务正文；
-- Gold、留出集标签和评测角色；
-- 未经过白名单处理的 DICOM 标签；
-- 调用方提供的指令性文本；
-- 长期签名地址和图像字节。
-
-调用方备注和影像元数据都只能作为数据，不能改变系统规则、专项目录、模型或医学输出结构。
-
-## 23. 报告架构
-
-报告按照实际覆盖的专项和报告子域组织：
-
-- 病例总体结论；
-- 已评估专项；
-- 各专项内的报告子域；
-- Findings 和来源图像；
-- 正常反证；
-- 未评估专项；
-- 覆盖限制和医学限制；
-- 模型、配置和结果来源标识。
-
-报告必须区分“正常”和“未评估”。
-
-专项关注点和复核策略主要用于内部追踪与评测，是否展示给普通用户由产品合同决定。报告渲染只能排序、翻译和格式化，不能改变医学事实。
-
-## 24. 可观测性
-
-每个 Task 必须能够回答：
-
-- 使用了哪个检查修订和图片集合；
-- 使用了哪个配置、Prompt、Schema、模型和 Provider；
-- 为什么进入或没有进入专项复核；
-- 选择了哪个 Family、Focus 和 Strategy；
-- 来源 Finding 是什么；
-- Provider 是否实际接收；
-- 哪个 Stage/Call 成为最终结果所有者；
-- 报告由哪个结果生成。
-
-需要分别观察工程指标和医学评测指标，不能用成功调用率替代准确率。
-
-## 25. 评测架构
-
-评测至少分为：
-
-- 开发集；
-- 固定失败样本库；
-- 回归集；
-- 独立留出集。
-
-Primary 模块实验应尽量只改变一个变量。Targeted 实验的变量是完整策略，包括路由、专项资格、Prompt、模型、预算和失败行为。
-
-必须报告：
-
-- 总体和逐专项/关注点的异常召回；
-- 正常准确和异常误报；
-- review_required 和 non_diagnostic；
-- 不安全翻转；
-- 技术失败、缺失结果和超预算；
-- 延迟和成本；
-- Primary 到 Targeted 的病例级变化。
-
-不能只报告被路由病例，也不能在运行后选择最有利指标。
-
-## 26. 当前方案的主要优点
-
-| 优点 | 原因 |
-|---|---|
-| 医学所有者清晰 | 默认 Primary，专项成功时由完整 Targeted 取代，不拼接 |
-| 病例上下文完整 | Primary 与 Targeted 都读取完整 Study |
-| 成本和延迟可控 | 默认一次调用，实验最多两次 |
-| 可回滚 | 关闭专项 Profile 即回到 Primary-only |
-| 可评测 | 候选链相对 Primary 基线进行同病例比较 |
-| 多模态底座可复用 | 专项位于模态医学层，不污染公共表 |
-| 失败语义明确 | 工程失败、覆盖不足和医学不可诊断分开 |
-
-## 27. 当前方案的关键缺陷
-
-### 27.1 Primary 静默漏诊无法触发专项
-
-Router 依赖 Primary 给出专项候选。如果 Primary 完全没有发现某个异常，也没有表达不确定性，Router 无法知道需要复核。
-
-这是当前架构最重要的准确率限制。Targeted 更擅长解决“已发现但不确定、冲突或需要确认”的问题，不天然解决完全漏检。
-
-可行缓解：
-
-- 优先提高 Primary 本身的完整 Study 召回；
-- 在 Primary Prompt 中加入高价值检查项和正常反证；
-- 使用固定失败样本库回归；
-- 使用离线独立审计发现静默漏诊；
-- 只有证据证明必要时，再评审有限的独立 Sentinel 候选，而不是默认增加第二 Reader。
-
-### 27.2 Router 存在自我路由偏差
-
-Primary 同时负责医学判断和提出专项候选，模型可能只对自己已经意识到的问题请求复核。不同模型或 Prompt 版本也可能改变路由率，导致候选策略难以比较。
-
-缓解方式：冻结候选输出结构、Router 规则和路由率指标；实验中同时报告未路由病例和整体分母。
-
-### 27.3 联合主读 Prompt 可能过载
-
-五个专项的医学规则、正常反证、输出结构和来源要求放在一次调用中，可能降低模型注意力或导致结构遗漏。
-
-缓解方式：按实际覆盖动态加载专项模块，减少无关内容；进行 Prompt 长度和模块消融实验；不通过增加默认调用数直接解决。
-
-### 27.4 五个专项可能过粗或过细
-
-胸腔和腹腔合并多个报告子域，有利于整体关系，但可能削弱某些系统的专项深度；继续细分又会增加重叠和调用复杂度。
-
-缓解方式：保持 Family 稳定，优先在 Focus 和报告子域层扩展；只有评测证据证明 Family 边界不合理时才拆分。
-
-### 27.5 多专项病例无法使用 Targeted
-
-首期只允许一个专项候选。真正的多系统病例可能同时需要多个关注点，当前设计会保留 Primary，而不是多次复核。
-
-这是为了控制调用数和实验变量的阶段性取舍。未来若考虑多 Focus，必须先证明单 Focus Targeted 有稳定收益，并重新设计预算、顺序和最终所有权。
-
-### 27.6 失败关闭影响可用性
-
-专项复核技术失败后不采用 Primary，有利于实验完整性，但可能降低用户可用性。该问题必须在正式发布前通过明确 Profile 和可用性实验解决。
-
-### 27.7 专项目录缺少真实医学分母
-
-当前五个专项和关注点是结构化候选，没有足够 Gold、病例分层和样本量证明每个边界最优。
-
-因此目录可以指导设计，但不能直接作为生产医学本体。
-
-### 27.8 配置治理复杂
-
-Family、Focus、Strategy、Prompt、Schema、模型、Provider、预算和路由都需要版本化。治理不完整会导致无法重放、实验指纹漂移和错误发布。
-
-缓解方式：首期只允许两个固定 Profile，不建设通用可拖拽流程；所有变化只影响新 Task。
-
-## 28. 缺陷与取舍矩阵
-
-| 争议点 | 正面价值 | 负面影响 | 当前取舍 | 重新评审条件 |
-|---|---|---|---|---|
-| 默认只调用一次 | 成本低、所有者清晰、容易评测 | 可能漏掉局部问题 | 作为首期基线 | Primary 召回无法通过 Prompt/模型改善 |
-| 只允许一个 Targeted | 控制变量、成本和最终所有权 | 无法处理多个专项问题 | 实验阶段保留 | 单 Focus Targeted 已有稳定净收益 |
-| Targeted 输出完整病例 | 避免拼接和双事实源 | Prompt 更重、成本更高 | 强制保留 | 有证据证明增量结果能安全合并 |
-| Router 不读图 | 工程逻辑不作医学判断 | 无法独立发现 Primary 漏诊 | 强制保留 | 出现可独立资格化的医学 Sentinel |
-| Targeted 失败不回退 | 实验因果清晰 | 可用性下降 | shadow 阶段保留 | 进入正式发布前必须重新评测 |
-| 不建 Family 表 | 数据事实简洁、版本随 Config 冻结 | 在线查询目录不如独立表直观 | 保留 | 形成独立管理、检索或法规合同 |
-
-## 29. 准确率杠杆与可证伪假设
-
-| 杠杆 | 可能改善准确率的机制 | 主要受益指标 | 可能恶化的护栏 | 最小验证 |
-|---|---|---|---|---|
-| Primary 专项模块 | 提高完整 Study 中相关结构的检查覆盖 | 异常召回 | Prompt 过载、正常误报 | 固定失败样本库模块消融 |
-| 正常反证 | 降低正常病例被弱征象误报 | 正常准确 | 异常漏诊 | 同病例正常/异常平衡 A/B |
-| 高召回策略 | 对明确 Focus 扩大搜索敏感度 | Focus 异常召回 | 正常误报、review 率 | 指定 Focus 失败样本库 |
-| 冲突处理 | 避免同一专项内互相矛盾的 Findings | strict accuracy | 过度保守 | 冲突病例配对 A/B |
-| TargetedReview | 对已识别的困难 Focus 增加一次完整复核 | 特定 Focus 准确率 | 技术失败、成本、延迟、正常误报 | Primary-only 对完整 Targeted 策略 |
-| 更强模型 | 提高视觉和病例级推理能力 | 总体召回和准确 | 成本、延迟、稳定性 | 同输入/Prompt/Schema 模型 A/B |
-
-任何杠杆在实验前必须声明目标失败、预期机制、受益指标、护栏和停止条件。
-
-## 30. 分阶段实施
-
-| 阶段 | 目标 | 专项相关结果 |
-|---|---|---|
-| P1 | 影像事实和输入可靠性 | 已完成代码；未进行真实运行演练 |
-| P2 | Task、Stage、Outbox 和零模型恢复 | 建立专项运行所需可靠执行底座 |
-| P3 | Registry、Profile 和配置冻结 | 实现五个专项目录和两个固定 Profile |
-| P4 | AI Config、AI Call 和 Primary | 实现 Primary-only 联合主读 |
-| P5 | Finalization 和 Report | 完成不可变结果闭环 |
-| P6 | 发布和回滚 | validation-only、shadow、gray 和 active |
-| P7 | 评测与医学门禁 | Failure Bank、配对实验、留出集和审批 |
-
-TargetedReview 的开发和启用必须晚于 Primary 基线建立，不能与 Primary 同时开发后直接比较完整新链和空白基线。
-
-## 31. 发布门禁
-
-### 31.1 Primary-only 门禁
-
-- 输入清单和发送清单完全一致；
-- 模型、Prompt 和 Schema 可追溯；
-- 工程失败与医学结果分开；
-- 正常和异常病例均有可信评测；
-- 报告与唯一医学结果一致；
-- 技术失败率、成本和延迟满足预注册要求。
-
-### 31.2 Targeted 候选门禁
-
-- Primary 基线已经冻结；
-- Router、专项目录、Prompt、模型和失败行为全部冻结；
-- 同病例比较只有候选专项链一个主要变化；
-- 报告整体分母，而不是只报告被路由病例；
-- 正常误报、异常漏诊、review、技术失败、成本和延迟均未越过护栏；
-- 独立留出集通过；
-- 经过明确审批。
-
-## 32. 仍未确定的事项
-
-以下内容不能仅靠架构推断，需要真实数据或业务确认：
-
-- 每个专项的具体投照和覆盖要求；
-- 每个 Focus 的可信 Gold 和样本规模；
-- Primary 是否能稳定产生唯一专项候选；
-- 不同模型的真实多图和结构化输出能力；
-- Targeted 的技术失败率和额外延迟；
-- 各项准确率和安全护栏的具体数值；
-- 正式发布阶段是否允许显式 Primary 回退 Profile；
-- 头颈专项何时具备足够证据开放 Targeted Focus；
-- 调用方关注点是否允许影响 Primary Prompt 模块。
-
-这些问题应保持 UNKNOWN（待确认），不能写成已确定合同。
-
-## 33. 外部证据与辩证评审
-
-### 33.1 影像检查边界
-
-DICOM 标准将 Study 定义为为诊断目的而逻辑相关的一组 Series 和图像，Series 又属于一个 Study。这直接支持以 Study 而不是单图、单器官或单 Prompt 作为模型输入和任务冻结边界。
-
-该证据支持：
-
-- Session/Study/Series/Image 分层；
-- 完整 Study 联合主读；
-- 图像顺序、Series 和检查修订冻结；
-- Targeted 仍读取完整 Study。
-
-该证据不支持：
-
-- 某个具体大模型已经能够可靠理解完整 Study；
-- 五个专项目录就是最佳医学分类；
-- 多图输入一定优于经过验证的其他输入策略。
-
-### 33.2 兽医影像报告规范
-
-ACVR/ECVDI 影像报告共识强调：诊断报告应记录所有异常和相关正常 Findings、形成综合 Impression、回答临床问题，并明确技术或医学限制。结构化报告有利于一致性和检索，但模板也可能遗漏未预期的 Findings。
-
-该证据支持：
-
-- Primary 和 Targeted 都必须输出完整病例结果；
-- 报告同时包含异常 Findings、相关正常反证和 limitations；
-- `review_required/non_diagnostic` 可以表达问题未得到可靠回答；
-- ReportRenderer 不能只保留专项局部结论。
-
-同时提醒：过度固定的五专项模板可能让模型忽略目录之外的异常，因此必须允许跨专项 Findings 和自由限制说明。
-
-### 33.3 兽医影像 AI 的直接证据
-
-2025 年一项 50 个犬猫影像检查、11 位专科影像医师与商业 AI 的比较研究显示，该 AI 在描述性 Findings 上总体表现接近较高水平影像医师，但更偏特异性、异常敏感性相对较弱，也不提供鉴别诊断。该研究规模较小，不能证明其他模型或当前架构具有相同表现。
-
-2026 年一项犬腹部影像外部测试对 6 个商业 AI 平台进行了比较。结果显示总体表现差异较大，标签级敏感性偏低，小肠梗阻等关键问题仍经常漏检。该研究病例数有限，但直接说明开发环境表现不能替代来自实际临床来源的外部测试。
-
-这些直接证据支持：
-
-- 将静默漏诊视为首要风险；
-- Primary 优先提高异常召回，同时监控正常误报；
-- 腹腔专项必须有来自真实临床来源的独立评测；
-- 不把“总体准确率”当成异常安全性；
-- 不在证据不足时宣称 AI 能替代兽医影像医师。
-
-这些证据不能直接证明：
-
-- 当前五个 Family 的划分最优；
-- TargetedReview 一定能提高异常敏感性；
-- 通用视觉语言模型与商业专用算法具有相同行为。
-
-### 33.4 通用视觉语言模型的放射影像证据
-
-多项人类放射影像研究显示，通用视觉语言模型在影像解释中可能出现低检出率、虚构 Findings、解剖区域识别错误和结果重复性不足。至少一项研究发现模型自报置信度与实际准确性缺乏可靠相关性。
-
-该证据支持：
-
-- Router 不能使用模型 confidence 直接决定医学路由；
-- 每个模型必须用真实图像、完整输入和目标 Schema 单独资格化；
-- 临床上下文可以帮助模型，但上下文也可能压过图像证据，因此必须最小化和结构化；
-- Prompt 输出需要来源图像引用、限制和可观测性；
-- 模型产品名称不能代替模型版本和实际能力验证。
-
-这些研究来自人类放射影像和特定模型，不能直接外推为犬猫 XRay 的准确率数值，但可以作为安全架构的风险信号。
-
-### 33.5 第二读者与条件路由证据
-
-人类乳腺筛查中的随机或配对研究表明，经过严格设计的 AI 支持流程可以降低阅读工作量，并在特定工作流中维持或改善检测表现。但不同研究也观察到 recall 等护栏变化，收益依赖具体模型、阈值、人类读者、病例分布和工作流。
-
-这说明：
-
-- “第二读者”不是天然有效或天然无效；
-- 条件路由必须作为完整工作流评测，而不是只测单个 Prompt；
-- 成功的人类筛查工作流不能直接证明一次模型自我复核对兽医 XRay 有效；
-- Primary 与 Targeted 若使用同类模型和相同证据，错误可能高度相关。
-
-因此当前把 TargetedReview 设为候选而非默认节点是合理的，但仍缺少直接证据。
-
-### 33.6 自动化偏差与人机协作
-
-人类放射影像研究显示，错误 AI 建议可能降低读者表现并产生自动化偏差；解释性呈现可能降低但不能消除这一问题。不同读者从 AI 辅助中获得的收益也高度不一致。
-
-当前系统首期不实现人工复核，这可以缩小工程范围，但带来一个明确限制：
-
-- 它可以作为自动化评测、validation-only 或影像决策支持候选；
-- 在没有兽医专业人员监督的情况下，不能根据现有证据直接宣称适合自主临床最终诊断；
-- 如果未来加入人工使用界面，必须单独评测自动化偏差、信息展示、警示和使用者培训。
-
-### 33.7 兽医专业组织立场
-
-ACVR/ECVDI 关于 AI 的立场强调良好机器学习实践、透明、错误报告、临床专家参与、安全数据处理、部署后监控和独立评估，并主张 AI 应增强而不是削弱兽医诊疗。
-
-这与当前架构相符的部分：
-
-- 控制面（Control Plane）与离线评测与发布证据面（Evaluation Plane）分离；
-- 版本、模型、Prompt、Schema 和数据可追溯；
-- Failure Bank、独立测试和持续监控；
-- 明确 limitations 和错误状态；
-- 不将工程成功率冒充医学准确率。
-
-当前仍不充分的部分：
-
-- 尚未形成兽医影像专家参与的 Gold 和专项目录评审机制；
-- 尚未形成独立第三方测试；
-- 尚未定义 AI 输出在实际兽医工作流中的角色；
-- 尚未定义面向使用者的透明说明和替代诊断路径；
-- 尚未形成部署后性能漂移监控数据。
-
-### 33.8 医疗 AI 开发与报告规范
-
-FDA/IMDRF 良好机器学习实践强调全生命周期风险管理、代表性数据、独立测试、目标使用场景、人机团队表现和持续监控。CLAIM 2024、STARD-AI、TRIPOD+AI、PROBAST+AI 和 DECIDE-AI 分别强调医学影像 AI 报告透明性、诊断准确率研究、预测模型报告、偏倚评估和早期临床评价。
-
-该证据支持：
-
-- 配置、数据和模型变更必须创建新评测指纹；
-- 内部测试与外部测试必须分开报告；
-- 样本选择、参考标准、缺失病例和失败调用必须透明；
-- 不能只报告成功返回的病例；
-- 开发集、失败样本库、回归集和独立留出集必须隔离；
-- 上线后还需要持续监控，而不是一次测试永久放行。
-
-### 33.9 外部证据的适用范围
-
-| 证据来源 | 对当前架构的适用程度 | 可以支持 | 不能支持 |
-|---|---|---|---|
-| DICOM 标准 | 直接适用 | Study/Series/Image 边界和完整输入 | 模型医学准确率 |
-| 兽医影像报告共识 | 高度适用 | 完整报告、相关正常 Findings、限制和临床问题 | 自动化模型性能 |
-| 兽医影像 AI 研究 | 直接但样本有限 | 异常敏感性、外部测试和监督风险 | 当前模型与全部病种的数值性能 |
-| 兽医 AI 专业立场 | 高度适用 | 透明、专家参与、独立评价和监控 | 具体 Family/Focus 目录 |
-| 人类视觉语言模型研究 | 间接适用 | 幻觉、置信度、上下文依赖等风险 | 犬猫 XRay 的准确率数值 |
-| 人类第二读者研究 | 间接适用 | 工作流级评测和条件路由思想 | 模型自我复核的直接收益 |
-| FDA/IMDRF 与报告指南 | 原则适用 | 全生命周期、偏倚、透明和外部测试 | 具体兽医临床放行标准 |
-
-## 34. 架构可行性结论
-
-### 34.1 工程可行性
-
-结论：可行。
-
-原因：
-
-- Study/Series/Image 边界符合影像信息模型；
-- Task/Stage/Outbox/Call 能表达可靠异步执行；
-- Primary-only 与 Targeted candidate 可以通过固定 Profile 隔离；
-- 唯一医学所有者和不可变报告可以避免结果拼接；
-- 配置、模型和评测可以通过控制面冻结和回滚。
-
-主要前提：P2 的可靠执行、P3 的固定 Profile、P4 的 Provider 资格和 P5 的报告事务必须先闭环。
-
-### 34.2 医学研究可行性
-
-结论：有条件可行。
-
-原因：
-
-- Primary-only 提供清晰对照；
-- 专项目录可以用于失败分层；
-- Targeted 策略可以作为完整候选进行同病例比较；
-- 失败关闭和唯一 owner 有利于避免选择性结果。
-
-主要前提：必须建立可信参考标准、病例级拆分、外部测试和专项护栏。
-
-### 34.3 决策支持产品可行性
-
-结论：有条件可行，但尚未得到证明。
-
-需要：
-
-- 明确 AI 的目标使用者和工作流位置；
-- 报告 limitations、模型身份和适用范围；
-- 独立外部评测；
-- 使用者培训和错误反馈机制；
-- 持续性能监控；
-- 专业兽医参与目录、Gold 和发布审批。
-
-### 34.4 完全自主临床报告可行性
-
-结论：当前证据不足，不建议把架构直接定位为完全自主最终诊断。
-
-原因：
-
-- 兽医专业组织强调兽医参与和独立验证；
-- 直接兽医研究仍显示异常敏感性和外部泛化问题；
-- 通用视觉语言模型仍存在幻觉和低影像检出风险；
-- 当前没有人工监督、外部测试和真实临床监控闭环；
-- Targeted 无法补救 Primary 完全没有意识到的静默漏诊。
-
-因此当前最合理定位是：先作为严格验证的 AI 影像分析和决策支持候选，逐阶段建立临床证据，而不是提前宣称替代兽医影像医师。
-
-## 35. 基于辩证评审的调整建议
-
-1. 把 Primary-only 设为真正的医学基线，不同时开发复杂专项链后再与空白版本比较。
-2. 五个专项先用于报告结构和评测分层，只为有明确失败证据的 Focus 开放 Targeted。
-3. 将静默漏诊设为首要风险指标；Router route rate 不能当作覆盖静默漏诊的证据。
-4. 不使用模型 confidence 作为 Targeted 的核心触发条件。
-5. 为 Primary 增加模块消融实验，判断 Prompt 过载是否真实存在。
-6. 腹腔专项优先使用来自实际临床来源的外部病例做测试，尤其关注梗阻、矿化和软组织 Findings。
-7. 将兽医影像专家参与纳入 Gold、Family/Focus 目录和发布审批；即使首期不开发人工复核系统，也不能取消专家治理。
-8. 将人工监督缺失明确写成产品限制；不得把 validation-only 结果描述为自主临床能力。
-9. Targeted 失败回退策略继续保持为独立决策，进入正式发布前必须重新评测可用性和选择偏差。
-10. 按 CLAIM、STARD-AI、TRIPOD+AI、PROBAST+AI 和 DECIDE-AI 的思想建立评测和报告清单。
-11. 除独立留出集外，再增加来自不同机构、设备和时间段的外部测试。
-12. 发布后持续监控 Family/Focus 分层性能、输入分布漂移、失败率和错误反馈。
-
-## 36. 参考资料
-
-以下资料用于架构与风险分析，不代表其研究对象与犬猫 XRay 完全等价：
-
-1. DICOM Standard，Current Edition，PS3.3 Information Object Definitions。
-2. Appleby RB 等，ACVR/ECVDI Position Statement on Artificial Intelligence，JAVMA，2025，DOI: 10.2460/javma.25.01.0027。
-3. Scrivani PV 等，ACVR/ECVDI Consensus Statement on Imaging Report Foundations，Veterinary Radiology & Ultrasound，2025，DOI: 10.1111/vru.13471。
-4. Ndiaye YS 等，犬猫放射影像 AI 与专科影像医师比较，Frontiers in Veterinary Science，2025，DOI: 10.3389/fvets.2025.1502790。
-5. Ma D 等，犬腹部放射影像商业 AI 外部测试，JAVMA，2026，DOI: 10.2460/javma.25.10.0691。
-6. Huppertz MS 等，GPT-4V 放射影像解释能力与风险，2024，PMID: 39422726。
-7. Evaluating GPT-4V on Detection of Radiologic Findings on Chest Radiographs，Radiology，2024，PMID: 38713028。
-8. Lång K 等，MASAI 随机对照试验，Lancet Oncology，2023，DOI: 10.1016/S1470-2045(23)00298-X。
-9. Pesapane F 等，AI 辅助乳腺影像中的自动化和锚定偏差，European Radiology，2026，DOI: 10.1007/s00330-026-12666-6。
-10. FDA/IMDRF，Good Machine Learning Practice for Medical Device Development，2025。
-11. FDA/MHRA/Health Canada，Transparency for Machine Learning-Enabled Medical Devices。
-12. IMDRF，Software as a Medical Device: Clinical Evaluation，IMDRF/SaMD WG/N41FINAL:2017。
-13. CLAIM 2024 Update，Radiology: Artificial Intelligence，DOI: 10.1148/ryai.240300。
-14. STARD-AI，Nature Medicine，2025，DOI: 10.1038/s41591-025-03953-8。
-15. TRIPOD+AI Statement，BMJ，2024，DOI: 10.1136/bmj-2023-078378。
-16. PROBAST+AI，BMJ，2025，DOI: 10.1136/bmj-2024-082505。
-17. DECIDE-AI，Nature Medicine，2022，DOI: 10.1038/s41591-022-01772-9。
-18. Brady AP 等，多学会放射影像 AI 开发、采购、实施与监控声明，2024，DOI: 10.1186/s13244-023-01541-3。
-
-## 37. 最终建议
-
-1. 先把 Primary-only 做成可信、可追溯、可评测的完整基线。
-2. 五个专项用于报告和评测，不立即转化为五次模型调用。
-3. Targeted 只解决一个明确 Focus，不承担修复所有 Primary 漏诊的责任。
-4. 对静默漏诊，优先改善 Primary 和离线审计；不要假设 Router 能发现 Primary 没有意识到的问题。
-5. Targeted 失败不回退 Primary 是实验阶段的取舍，正式发布前必须重新评审可用性。
-6. 任何新增专项、Focus、Strategy 或模型调用，都必须用配对实验证明边际价值。
-7. 如果复杂度不能带来可测量收益，就保持 Primary-only。
-
-## 38. 最终统一口径
-
-专项架构的核心不是增加多少节点，而是建立清晰的医学问题边界、唯一结果所有者和可证伪实验。
-
-首期以一次完整 Study 联合主读为生产基线；专项用于报告结构、失败归因和评测分层。只有一个明确 Focus、充分覆盖、冻结配置和实验资格全部满足时，才允许一次专项复核。
-
-当前方案具有简洁、可回滚和可评测的优点，但也存在静默漏诊无法触发专项、Primary 自我路由偏差、Prompt 过载、多专项病例受限和失败关闭影响可用性等缺陷。这些缺陷必须通过实验和阶段门禁处理，而不能被文档措辞掩盖。
+| 当前主读路径只有准备、联合主读、定稿 | `apps/backend/core/pipeline.py` 中的 `compile_profile_contract（编译流程合同）` |
+| 当前专项家族路由固定主读定稿 | `apps/backend/services/runtime/stages/xray/family_routing.py` 中的 `XRayFamilyRoutingStageHandler（X 光专项家族路由处理器）` |
+| 检查准备当前只验证修订标识和清单摘要 | `apps/backend/services/runtime/stages/common/study_preparation.py` 中的 `StudyPreparationStageHandler（检查准备处理器）` |
+| 定稿阶段当前主要透传结果 | `apps/backend/services/runtime/stages/common/decision_finalization.py` 中的 `DecisionFinalizationStageHandler（结果定稿处理器）` |
+| 当前唯一 XRay（X 光）主读提示词身份 | `apps/backend/services/ai_control/service/prompt_source.py` 中的 `NACOS_PROMPT_KEY_MAP（配置中心提示词键映射）` 和 `NACOS_XRAY_PROMPT_VARIANT_MAP（配置中心 X 光提示词变体映射）` |
+| 当前注册 20 个模型表 | `apps/backend/models/__init__.py` |
+| 报告缺少状态版本 | `apps/backend/models/report.py` 和 `apps/backend/schemas/report.py` |
+| C1.1 非法医学状态组合明确失败 | `apps/backend/services/runtime/medical_status_contract.py` 中的 `project_persisted_medical_status（投影持久医学状态）`，以及 `apps/backend/services/runtime/service/report_service.py` 中报告写入前校验 |
+| P1-A/P1-B 自动对账与未知有界终止 | `apps/backend/services/runtime/service/ai_attempt_reconcile_service.py`、`apps/backend/workers/imaging_worker/ai_attempt_reconcile.py` 和 `apps/backend/workers/imaging_worker/celery_app.py` |
+| D2 临床上下文冻结 | `apps/backend/schemas/task.py` 中的 `TaskClinicalContext（任务临床上下文）`、`apps/backend/core/ai/clinical_context.py` 中的 `freeze_clinical_context（冻结临床上下文）` |
+| C2 v2 独立结构合同与配置切换 | `prompts/xray/complete_medical_result.v2.schema.json`、`apps/backend/core/ai/xray_result_contract.py`、`apps/backend/core/pipeline.py` 和 `apps/backend/services/ai_control/service/config_compiler.py` |
+| v2 结果写入报告的嵌套路径 | `apps/backend/services/runtime/stages/xray/joint_primary_reader.py` → `decision_finalization.py` → `imaging_execution_service.py` → `report_service.py` |
+| 本地 E2E 和启动器当前缺口 | `scripts/dev/run_e2e_local.py` 与 `scripts/dev/run_local_chain.sh` |
+| 真实单图最小链验收 | Task `4b692c564eca4074a6113dbd92feb193`、Report `efd9977002a84e839304843af3626f9c`，以及 `.agent-handoff/validation.md` 中相应记录 |
+| 真实两视图工程验收 | `.agent-handoff/validation.md` 中“真实 E1-MV（第一阶段多视图工程验证）”记录 |
+| 当前阻断项和禁止误报口径 | `.agent-handoff/snapshot.md` 与 `.agent-handoff/risks.md` |
+
+---
+
+## 20. 最终决策
+
+### 现在
+
+采用 `Primary-only（仅主读）`：一次读取完整 `Study（检查）`，作为唯一运行和医学评测基线。架构改造级别选择 `local correction（局部修正）`，保留现有 API/Service/DalBase/Model（接口/业务服务/统一数据访问/模型）分层和异步主链。
+
+第一阶段只追求一个清楚、可验收的工程目标：上传已有 X 光影像 → AI（人工智能）识别 → 第一份 `final Report（最终报告）` → `current/history（当前/历史）` 查询。该链已有一次真实成功证据，下一步是让它在单一进程所有者环境中连续、确定性复跑。
+
+### 以后
+
+只保留 `Primary + Conditional Targeted（主读 + 条件专项复核）` 这一种增益候选。必须先完成可信 `M1 Medical Baseline（M1 医学基线）`，再围绕一个有失败证据的 `Focus（专项关注点）` 做受控实验。
+
+### 不做
+
+- 不按器官默认多次调用；
+- 不做多模型投票或结果拼接；
+- 不让报告层创造医学结论；
+- 不用 Python（编程语言）规则补写、推断或修改医学结果；
+- 不把工程链成功当作医学准确率提升；
+- 不在没有独立留出集证据时启用专项复核。
+
+> 对同事的最终统一口径：**现在先把一次完整主读做成可信基线；以后只有证据证明某个明确盲点值得复核，才最多增加一次受控专项复核。**

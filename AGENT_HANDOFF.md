@@ -38,13 +38,16 @@
 
 ## 当前指针
 
-- 最后更新：2026-08-26
+- 最后更新：2026-08-30
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`（含已发布但尚未导入/激活的 XRay 猫/犬 Primary Nacos 候选）
-- 下一动作：`.agent-handoff/backlog.md`
+- 当前状态：`.agent-handoff/snapshot.md`（v3.3 路线图与 79/79 路由、96 Request 已静态资格化；核心/工具代码已通过 192 个测试并分组推送，真实 2–5 图 Runtime E2E 本轮未运行）
+- 下一动作：`.agent-handoff/backlog.md`（先按 E0–E8 完成猫/狗 × 2/3/4/5 真实诊断 E2E；通过后默认 R4A–R4D → M1 → Primary/Targeted，分割仅为用户显式选择的可选支线）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
-- 当前后续 XRay 实施权威：`docs/refactor/24-current-runtime-audit-and-next-development-guide.md`
+- 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）
+- 前置裁决：`docs/refactor/28-xray-evidence-driven-development-guide.md`（C1 实施前裁决）；27 号仅保留候选设计背景
+- 全部 AI 能力盘点：`docs/refactor/25-ms-image-complete-ai-capability-inventory.md`
+- Primary 主链缺口清单：`docs/refactor/26-ms-image-primary-chain-incomplete-capability-checklist.md`
 - 完整 XRay 架构参考：`docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md`
 - 完整 XRay 能力合同：`docs/refactor/21-xray-complete-capability-chain-and-session-prompt.md`
 - 新会话说明：`docs/refactor/08-new-session-handoff.md`

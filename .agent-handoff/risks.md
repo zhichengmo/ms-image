@@ -1,37 +1,56 @@
 # 风险、阻断与未知项
 
+## 2026-08-30 — 当前 2–5 图 Runtime 全链风险
+
+- **提交后仍有明确排除的本地文件**：`.agent-handoff/archive/`、tracked archive index 和旧根目录 Postman 保持未提交；它们不是当前运行资产。后续禁止用 `git add -A` 把这些历史/重复资产混入。
+- **leakage token 子串匹配可能过宽**：`apps/backend/core/ai/prompting/leakage.py` 当前对所有字符串匹配 `path/score/gold/truth` 等禁止 token 子串；中文合同测试通过，但合法英文 clinical context 可能被误伤。未获产品语义证据前不临时放宽或增加医学规则，应在真实英文上游接入前做定向合同评审。
+
+- **旧 v3.1 摘要仍可能误导后续执行**：`66 个接口/91 个 Item/localhost:8000/postman/...` 已被 v3.3 取代；当前总账是 79 个项目路由，canonical Collection 是 `docs/postman/ms-image-xray-complete.postman_collection.json` 的 96 个 Request。
+- **Catalog 20 资产不是当前 v2 Runtime Prompt 来源**：v2 Worker 直接渲染 immutable Config 的单份 `prompt_content`；若把 Catalog 模块数当成运行 Prompt 数、Nacos 发布数或每阶段 Prompt 身份，会再次制造错误实现和验收口径。
+- **Task Snapshot 不保存完整 Prompt 正文**：完整 Prompt 合同在 immutable Config 行，Snapshot 只绑定 Config identity 与多项 SHA；后续 E2E 必须通过 Config detail + Snapshot SHA 证据链验证，不能在 Snapshot 中寻找不存在的 Prompt key/content 字段。
+- **最大 5 图尚未由服务端强制**：Study/Series 当前只有下限校验，未证明第 6 张 `prepare-upload` 会被拒绝；这是 E1 的 P0 缺口。
+- **现有 E2E 仍是单图**：`scripts/dev/run_e2e_local.py` 的 Study/Series expected、上传循环、ready 数和证据断言仍固定为 1；既有 `--repeat` 不能替代同 Study 多图。
+- **真实 2/3/4/5 图矩阵未运行**：历史猫狗链路成功只能证明当时特定病例与配置，不能替代本轮动态数量合同的验收。
+- **发送全部影像不等于逐图完成评估**：当前 receipt 能证明一个 Logical Call 携带 N 张图，但结果 Schema 没有 `image_assessments` 全输入覆盖要求；不得把 source refs 数量或模型自由文本当作逐图覆盖证据。
+- **projection 可信度依赖调用方**：当前体位由调用方在 `prepare-upload` 声明，不是 DICOM 自动提取或 AI 像素识别；错误声明会沿 Image、Manifest、Snapshot、Prompt 和 SourceRef 被一致冻结。
+- **当前环境状态 UNKNOWN**：本轮未启动或检查 Runtime、Relay、Worker、RabbitMQ、OSS、Provider；不得把文档完成误报为链路完成。
+- **Config 5 图预算待精确回读**：目标 cat/dog active Config 应为 `max_input_images=5`，Provider 发送前还需最终 `image_count <= 5` 门禁；当前运行值未在本轮动态确认。
+- **Postman 已交付但未执行真实 E2E**：`docs/postman/ms-image-xray-complete.postman_collection.json` 已覆盖 79/79 项目 HTTP 路由，含 Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9 和 4 个根探针；另有 5 个 OSS `noauth` PUT。Collection 已通过 OpenAPI、Schema、query、鉴权和敏感信息静态校验，但未填写真实 Token、Provider Secret 或真实影像，也未运行 Collection Runner/Newman，不能据此宣称 Runtime E2E PASS。
+- **Evaluation 不能替代 Runtime 等价实验 Runner**：当前 Evaluation Worker 使用 `FakeEvaluationScorer`，不执行候选 Prompt、Config、Pipeline、Gateway 或 Provider；9 个 Evaluation 接口虽已实现并纳入总账，但 M1、Prompt A/B、Provider A/B 和医学准确率仍未资格化。
+- **器官分割当前只是 PROPOSED 文档合同**：仓库没有可执行的 Segmentation API、Job/Artifact/Outbox、Worker 或 Provider，不能宣称已具备分割展示能力。
+- **分割关键参数 UNKNOWN**：目标器官 label set、模型及版本、输入尺寸/格式、mask/overlay 编码、坐标系、partial success 和前端透明度语义均待 S0 冻结。
+- **`ORGAN_SEG_*` 未接线**：`.env.example` 出现的器官分割变量尚未接入 `apps/backend/core/config.py` 或实际运行链，不能作为功能存在证据。
+- **分割隔离必须守住**：若未来把 mask/overlay 输入医学 Prompt、让分割状态驱动 Task/Report，或让分割失败阻塞 final Report，将破坏当前诊断事实 owner 和独立失败域。
+- **Report 治理风险不阻塞首份报告**：revision 1 final/current/history 是 P0 终点；publish、void、第二 revision/supersede 的 `state_version` 风险仍为 P1。
+- **Evaluation 与医学准确率不在当前阻断链**：Gold、Scorer、Failure Bank、Holdout 和 candidate runner 仍未资格化，但必须等 2–5 图 Runtime E2E 通过后再推进。
+
 ## 当前阻断
 
-- D5 代码基础已完成；2026-08-25 已脱敏验证 Redis PING、RabbitMQ 仅连接、主 MySQL `SELECT 1` 和 OSS Bucket 信息读取成功，但没有声明队列、发送消息、写 OSS 或执行完整 Worker Runtime，因此仍是 `FULL_RUNTIME_NOT_QUALIFIED（完整运行时未资格化）`。
-- 主库 `ms_image` 已按当前 `Base.metadata` 重建为 20 张 Model 表并标记 `alembic_version=20260824_02`；当前所有业务表为 0 行。Schema 已存在，但 Prompt/Connection/ModelPool/Config/Task 等运行数据尚未建立，因此仍不能运行完整 Worker 链。
+- D5 代码基础、Primary happy-path、真实 duplicate delivery、cancel/late-result、P1-A 自动调度和 P1-B unknown 持久有界终止均已完成，当前核心诊断执行链可标记 `CORE_WORKER_RUNTIME_QUALIFIED`。用户决定 Runtime/Admin JWT 与 Artifact signing 暂不实施，它们不再作为当前功能链阻断。
+- 公网/生产安全仍为 `PRODUCTION_API_SECURITY_NOT_QUALIFIED`：Runtime JWT 生产信任/轮换、Admin JWT 与 Artifact 签名生命周期均延期。该结论不影响内部 Task→Report 运行，但禁止据此宣称公网或合规上线安全已通过。
+- 主库 `ms_image` 已按当前 `Base.metadata` 重建为 20 张 Model 表，P1-B 正式追加迁移后为 `alembic_version=20260828_01`；canonical Prompt、Connection、单 lane ModelPool、active Config、ready Study/Image、冻结 Task/Outbox/Attempt/Report 的真实 happy-path 事实均已建立。
 - 本次空库使用 `Base.metadata.create_all + alembic stamp head` 快速对齐当前 Model，并未证明 Alembic 从零升级链可以完整重放；未来变更仍须审阅正式迁移边界。
 - 2026-08-26 P1 synthetic probe 已证明当前进程可对隔离对象进行 AES256 写入、HEAD、直读 GET、同机 signed GET 与 cleanup；但 Provider 外部网络是否能访问相同 signed URL 仍为 `UNKNOWN`，不能把本机读取误报为 Provider/Worker 完整链资格化。
 - 用户已明确当前 Model 注册表即保留边界，不再主观筛选 Model 表用途；后续禁止继续删除当前 Model 对应表。旧数据只在备份中，若需恢复必须先恢复到临时库并做显式导入映射。
 - `ms_image_eval（评测库）` 当前不可连接/不存在，Evaluation Plane（评测面）不能运行。
-- AI 请求运行合同已改为与 `ms-ai-fast` 一致的 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY -> GatewayClient` 直连；旧 `AI_GATEWAY_*` 开关、环境引用 Secret Resolver 和 Provider 原始响应 OSS response store 已从生产链删除。本机 2026-08-26 非敏感 Settings 核验显示 `.env` 与实际读取的 `.env-01` 均无此成对非空配置，`settings.ai_platform_configured=False`；真实 imaging Worker 未安全注入这两个现有 Platform 配置前，不能执行或宣称 Worker Platform 资格化。
+- AI 请求运行合同已改为与 `ms-ai-fast` 一致的 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY -> GatewayClient` 直连；旧 `AI_GATEWAY_*` 开关、环境引用 Secret Resolver 和 Provider 原始响应 OSS response store 已从生产链删除。2026-08-27 已从 `ms-ai-fast/.env` 向资格化 Worker 成对注入并完成 Primary happy-path；正式部署启动器的长期配置管理仍需单独固化。
 - Runtime RS256 公钥/Secret 与 Admin HS256 Secret 均未配置；保护接口和管理控制面不能被视为可用。旧项目公钥只有在确认新服务继续信任相同 issuer/audience 后才能迁移。
-- `secret_ref` 仍存在于既有 Control Plane 模型、Schema 与 Config 哈希输入中，但不再参与 Worker Provider 鉴权；彻底删除需要模型/字段/迁移授权。当前风险是遗留元数据可能误导后续实现，必须以 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY` 为唯一运行凭据合同。
-- 当前 OpenAI-compatible Provider（OpenAI 兼容模型提供方）没有已确认的原请求查询 API；`UnsupportedProviderAttemptLookup（不支持查询的安全实现）` 会重排 unknown Attempt（未知尝试），不会盲目重发。真实查询合同确认前，unknown 可能长期待对账。
-- 目标 Nacos namespace 现有非医疗 smoke Prompt和历史 XRay `cat@1.0.0`、`dog@1.0.0`、`default@1.0.0` 发布物；新代码合同只接受 canonical `xray_primary/common`，但 `ms-image.x-ray.primary.common.zh-CN` 尚未发布、导入、编译或激活。历史发布物不得进入新 Task，任何 Nacos 回读也不能替代完整 Worker 或医学资格。
+- `secret_ref` 只剩既有 MySQL `NOT NULL` 物理列和 ORM 兼容占位；API Schema、Connection SHA、Config Snapshot、Audit 与 DAL 更新合同均已移除。彻底删除物理列仍需字段/迁移授权；运行凭据唯一合同是 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`。
+- 当前 OpenAI-compatible Provider（OpenAI 兼容模型提供方）没有已确认的原请求查询 API；默认 `UnsupportedProviderAttemptLookup（不支持查询的安全实现）` 现在由 P1-B 在 3 次/10800 秒任一边界 fail-closed 为 `provider_result_unresolved`，不会永久重排或盲目重发。真实 Provider 原请求 lookup 支持与 SLA 仍为 `UNKNOWN`。
+- 目标 Nacos namespace 现有非医疗 smoke Prompt和历史 XRay `cat@1.0.0`、`dog@1.0.0`、`default@1.0.0` 发布物；新代码合同只接受 canonical `xray_primary/common`。canonical `1.0.0` 已发布、回读、导入并编译进 active `xray_diagnose` Config；历史发布物不得进入新 Task，active Config 也不能替代完整 Worker 或医学资格。
 - `ms-ai-platform` 当前需手工启动 8062 才能承接 `ms-ai-fast`；没有已确认的常驻进程管理时会在 TCP connect 层失败。
 - Platform 模型池中的 qwen 端点受 API Key IP restriction 返回 403；当前 gpt-5-mini 后备可成功，但会增加失败日志和延迟，池健康并非全绿。
-- 当前库已 stamp 到 `20260824_02`，但没有执行从零 migration replay；后续新增字段/表时仍需正式迁移审阅与用户授权，不能把 stamp 当作迁移链验证。
+- 当前库已从 `20260824_02` 正式 upgrade 到 `20260828_01`，但仍没有执行从零 migration replay；本次追加迁移通过不能替代 bootstrap 迁移链验证。
 
 ## 完整能力实施风险
 
-- 24 号文档是当前事实与下一开发动作权威；22 号保留完整架构参考，23 号保留历史阶段背景。剩余风险是后续实现或汇报再次把“代码存在”误写成“完整运行或医学发布通过”。
-- 22/23 号文档已经统一 FamilyRouting（家族路由）只能输出 `primary_final/targeted_review`，不得产生医学状态；剩余风险是当前代码仍固定直达，版本化路由结构尚未实现。
-- v2 Targeted Prompt command 的 `family_key/focus_key` 传递断点已修复并有正反例测试；Targeted 当前仍不可达，真正启用必须等待 M2 医学证据和版本化路由合同。
 - `StudyPreparation（检查准备）` 当前代码和测试已确认只做技术准备，不产生医学状态；未来扩展对象/格式/数量/Provider 能力/预算检查时，仍须禁止 Python 决定 `non_diagnostic（影像不可诊断）`。
 - 当前五个 Family 已在文档中降级为 `v1 routing vocabulary（首版路由词汇）`；真实医学分母仍不足，后续不得把它们直接固化为永久本体或新增第六 Family。
 - Prompt 已改为 Shared Medical Core + Primary/Targeted Frozen Entry（共享医学核心加主读/专项冻结入口）；Targeted 携带 Primary 先验仍有锚定风险，是否拆成不同模板必须通过单变量 Paired A/B 决定。
 - Targeted structured message contract 已在 Config 编译与冻结重放时强制携带 `PRIMARY_RESULT_JSON`；这只证明运行结构完整，不证明医学专项复核有效或准确率提高。
-- unknown reconcile 已有状态机和 Worker 骨架，但默认 Provider lookup 为 unsupported，当前可无限重排；完整“最大等待时间 + 最大对账次数”需要可靠持久事实，建议评审现有 Attempt 最小 `first_unknown_at/reconcile_count` 字段，未经授权不迁移。
-- 完成定义已在文档中拆为核心诊断链、医学基线和可选能力逐项资格；剩余风险是实现和发布流程尚未按这三层生成可验证状态证据。
-
+- P1-B 已用 `first_unknown_at/reconcile_count`、claim CAS 和正式迁移关闭默认 unsupported 无限重排；3 次/10800 秒是冻结工程 fail-closed 初值，不是 Provider SLA。若未来支持真实 lookup 或发布 v2 policy，必须版本化评审，不能原地改变 v1 未完成 Attempt 的含义。
+- P1-A 的唯一 owner 只在仓库/本地部署边界内固定为 Celery Beat singleton；目标生产平台若已有外部 CronJob/scheduler，必须保持 Beat schedule flag 与 `scheduler` profile 关闭。双 owner 会制造重复周期消息，虽然 DB CAS 防止双 claim，仍会放大队列和日志噪声。
 - 22 号文档中 FamilyRouting（家族路由）的 family_key/focus_keys/reason_codes/contract_version（家族键/关注点键/原因码/合同版本）属于目标合同，不是当前已实现字段；下一会话必须先核对现有 Stage Schema（阶段结构合同），不能把文档目标误写成代码事实。
-- `FamilyRouting（专项家族路由）` 当前固定 `primary_final（主读直接定稿）`；真正路由必须保持确定性、不读图、不调用模型、不创造 Finding（影像发现），并且只能产生唯一 Family/Focus（专项家族/关注点）。
-- `TargetedReview（专项复核）` 已有 Handler（处理器）但当前不会进入；启用前必须证明同病例相对 Primary-only（仅主读）的净收益，不能以“多一次调用”假设更准确。
 - 当前 Config（配置）合同严格限制一条 lane（通道）和 `max_attempts=1（最大尝试次数为 1）`；放宽必须版本化并保持旧 Config 和未完成 Task 可重放。
 - 当前 `ai_call_attempt_record（物理 AI 尝试表）` 没有 `lane_key（通道键）`。E4 自动降级前需再次确认最小字段方案；不新增 Lane 表或冗余 Winner 字段。
 - 多 Attempt（物理尝试）若错误分类、总预算、deadline（截止时间）或 unknown 对账不严，会造成重复计费和重复医学结果。
@@ -42,54 +61,121 @@
 
 ## 现有工程风险
 
-- 共享 MySQL 已验证基础连接，但尚未验证迁移兼容、due 查询、CAS（比较交换）、锁、唯一约束、Attempt 幂等重放、Winner 并发、重复消费和 Stage lease（阶段租约）恢复。
-- Task 取消、迟到 Attempt、Stage 取消和 Report 幂等已通过离线合同测试，但真实 MySQL 行锁顺序、并发 CAS 和事务回滚仍未在共享非生产链验证。
-- Report Notification（报告通知）尚无已确认 destination/consumer/event key；在合同缺失前不能声称通知幂等闭环。
-- OSS image signer 已有隔离对象的短期 GET 验证，但 Provider 外部网络可达性、域名/对象范围约束、最短必要 TTL 和只读权限仍需在完整任务链中取得非敏感证据；当前代码不再保存 Provider 原始响应对象。
-- D5 Stage Worker（阶段工作进程）组合测试是有限 Fake/Mock（伪实现/模拟）集成，不证明真实 Outbox → Broker → Celery → Worker → Report 链路。
-- Config v2 与 v1 兼容链并存；v1 非终态 Task 清零前删除旧路径会破坏历史执行。
-- 当前工作树包含大量用户与此前会话的未提交/未跟踪改动；禁止 `reset`、`clean`、`checkout`、`restore`、`stash` 和 `git add -A`，提交必须显式列文件。
-- Prompt/Nacos/Gateway/Provider 分段在线成功、单元测试和有限 Mock integration（模拟集成）均不等于医学准确率提高。
+- 工作树仍保留明确排除的历史/重复资产；继续禁止 destructive Git 命令和 `git add -A`。
+- Config/Profile/Stage v1 与 v2 必须长期并存，直至 v1 非终态 Task 清零并获得显式清理授权；删除旧路径会破坏历史冻结重放。
+- Session cancel 只表示取消请求已接受，Task 仍需由 Worker 安全收敛；跨连接 create/cancel/complete 时序仍应在发布环境复验。
+- 调用方只通过轮询 Task/Report 获取结果，必须遵守 caller scope、退避、总超时和终态停止；当前不增加 callback/notification。
+- 当前真实 E2E 只证明工程链与单病例结构化输出，不能替代多病例 Provider 结构稳定性或医学准确率。
 
 ## 已确认边界
 
-- 七项能力属于完整目标，但当前阶段均未因此自动启用；必须按 `P0-A（已完成） -> P0-B + Q0 + Q1 -> E1 -> M1 -> Primary Prompt A/B -> 第二模型最小资格化 -> Model A/B -> M2 -> Retry -> Fallback -> Race` 的依赖顺序逐项通过 Gate（门禁）。
-- 本轮完成 P0-A Prompt command 业务代码修正并扩展现有测试文件；没有修改数据库字段、运行环境或新增迁移/独立测试脚本。
-- 24 号文档和会话 Prompt 已同步，17/19/20/21/23 号历史/目标文档也已添加事实边界；Primary Nacos 候选已发布但尚未导入、编译、激活或冻结，文档或 Nacos 发布完整不等于运行合同完成。
-- 不恢复 `file_asset（公共文件资产表）`；不新增平行 Repository/CRUDBase/DatabaseService（仓储层/数据访问基类/数据库服务）。
-- `AI_PLATFORM_API_KEY`、Signed URL（签名地址）和 Provider 原始响应正文不得写入数据库、Nacos、Task Snapshot、审计或日志；数据库当前只保存 Provider Request ID、规范化结构化结果、响应 SHA 和 Attempt 审计事实，不保存原始响应对象引用。
-- Provider/OSS 网络 I/O 位于数据库事务外；数据库访问继续统一走 `DalBase（数据访问基类）` 和实体 DAL（数据访问层）。
-- 当前仍保持 `MEDICAL_ACCURACY_UNKNOWN（医学准确率未知） / MEDICAL_RELEASE_NO_GO（医学发布禁止放行）`。
+- 不恢复 `file_asset`，不复制 `ms-ai-fast` 的档案迁移，不新增平行 Repository/CRUDBase/DatabaseService。
+- `AI_PLATFORM_API_KEY`、Signed URL 和 Provider 原始响应正文不得进入数据库、Nacos、Task Snapshot、审计或日志；数据库只保存脱敏 receipt、Provider Request ID、规范化结果、响应 SHA 和 Attempt 审计事实。
+- Provider/OSS 网络 I/O 保持在数据库事务外；数据库访问统一走 `DalBase` 和实体 DAL。
+- `species=cat|dog` 仍由上游显式提供并冻结；ms-image 不回查宠物档案、不猜测物种。上游档案到 `POST /tasks` 的真实继承仍未资格化。
+- 当前保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
 
-## 2026-08-25 — 当前核心 AI 出站与正式 Worker（工作进程）边界
+## 2026-08-27 — 统一服务数据模型风险
 
-- 当前 Connection（连接）合同已经按用户决定允许并规范化 HTTP/HTTPS Provider（模型提供方）地址；非医疗 Nacos（配置中心）Prompt 已通过 `ms-image` 自身 Gateway（网关）真实调用 `http://8.149.245.40:8060/api/v1`，因此“HTTP 地址被 HTTPS-only 合同阻断”是历史事实，不是当前阻断。
-- 2026-08-26 已进一步按用户决策删除旧 Secret Resolver、加密 response store、Gateway adapter/composition 整条生产链，并直接复用 `ms-ai-fast` 语义的 `GatewayClient`。仍未完成 Provider Attempt Lookup（模型尝试查询）与同一冻结任务的完整资格化；任何单次 Gateway 冒烟都不等于 Task/Worker/Outbox/Report 或医学链合格。
+- **会话语义冲突**：两个仓库都叫 `session_record`，但一个是业务会话聚合，另一个是消息明细；直接合表会导致一行粒度、唯一约束、状态和查询语义全部冲突。
+- **Task 伪通用风险**：当前 `task_record` 与创建服务强制依赖 Study/Revision；简单把字段改 nullable 而不建立明确的 case/subject/input 合同，会产生大量无效组合和运行分支。
+- **错误尝试映射风险**：fast `ai_task_attempt` 是 Worker/Celery 执行尝试，不是 Provider 网络发送；映射成 `ai_call_attempt_record` 会污染重试、计费、对账和 Winner 事实。
+- **过早抽象风险**：未确认全量迁入 `ai_doc/ai_pic/ai_video/ai_voice` 前新增通用病例、消息、媒体和输入绑定表，可能造成第二套未被真实链消费的模型。
 
-## 2026-08-25 — 核心 AI 链已验证后的剩余边界
+## 2026-08-27 — Primary 控制面激活后的风险
 
-- 新增 Nacos Prompt `ms-image.xray.ai-gateway-e2e.default.zh-CN@1.0.0` 是非医疗 E2E smoke；不得导入为 Primary Prompt 或作为任何医学准确率依据。
-- 历史核心网络烟测曾使用临时 Secret 映射；该实现已被 2026-08-26 用户决策覆盖。当前生产代码只从 Worker 进程 Settings 读取 `AI_PLATFORM_OPENAI_BASE_URL` 与 `AI_PLATFORM_API_KEY`，完整 Worker Runtime 仍须证明实际启动器加载配置以及冻结任务全链事实。
-- Platform 已至少一次返回满足严格 Schema 的结果；模型偶发不遵从结构化输出时，Gateway 的 fail-closed Schema 拒绝仍是预期正确行为，不能用 Python 修补医学/结构化结果。
-- 2026-08-26 P0 只读审计进一步确认：`ms_image` 中已存在且有数据的 `ai_prompt_template`、`ai_api_connection`、`ai_model_pool`、`session_record` 与当前 Runtime ORM/`20260824_01` 的同名表定义不兼容；该 migration 会直接 create 同名表。未先确定新 Runtime 数据库或获审阅的兼容迁移，直接 `alembic upgrade head` 必然高风险，当前禁止执行。
-- 2026-08-26 代码审计确认 Provider 原始响应 OSS store 的运行调用已删除，但 `response_object_ref_json` 仍在 AI Call/Attempt Model、DAL allowed fields 和未部署 migration 中作为遗留声明。它当前未被 Service/Worker 写入，却可能误导未来部署；应在 P0 数据库方案和字段迁移授权后统一消除或明确兼容。
+- canonical Prompt、Connection、ModelPool 与 active Config 已是真实数据库事实；后续再次把“缺 Prompt/未激活 Config”列为当前阻断会误导开发。
+- 2026-08-27 已真实完成正式 Worker 配置注入、ready Study、冻结 Task/Outbox、Provider 外部 OSS 读取、同一 Task 到 Report 的 Primary happy-path、completed duplicate delivery、cancel-before-provider、provider-sent late-result cancellation、cancelled late-result duplicate delivery，以及 unknown unsupported/lease 恢复；2026-08-28 又完成 P1-A 自动调度与 P1-B 持久有界终止。当前核心 Worker Runtime 已资格化；P1-C 只保留为延期的生产安全风险。
+- 本轮 API/Compiler 已清除 `secret_ref` 业务链，但物理兼容列仍存在；未经迁移授权不得删除列，也不得重新把它接回鉴权或 Snapshot。
 
-- **宠物档案迁移误用风险（2026-08-26）**：`ms-ai-fast` 的 `20260706_0001` 不是单表迁移，直接复制会创建/冲突 `pet_profile_record`、`medical_record`、`session_record` 等 fast 业务表；其 BIGINT ID、`user_uuid`、TINYINT `pet_type` 也不符合 ms-image Runtime 目标合同。只能以其语义为参考，在独立 Runtime DB 上写 ms-image 原生 revision；当前未获授权，不生成、不执行。
+## 2026-08-27 — 本地无 Docker 全链路后的风险
 
-## 2026-08-26 — 当前数据库重建后的风险
+- `scripts/dev/keys/` 含 dev RSA 私钥，虽已 gitignore，但仍在本地磁盘与工作区；任何提交、压缩归档或分享该目录都会泄露 JWT 签名能力。运行完 e2e 后建议保留公钥、按需删除私钥，或定期重生成。
+- `AI_PLATFORM_*` 仅从 ms-ai-fast/.env 进程注入；若 ms-ai-fast/.env 轮换密钥，本地脚本会自动取得新值（无需改代码），但任何把该对配置写入 ms-image `.env`/Nacos/数据库的尝试都必须禁止。
+- 本地 API 使用 dev JWT（`imaging:run` scope）且无租户/来源校验，仅限本机 127.0.0.1 8443/8010 访问；不得绑定 0.0.0.0 或用于生产/共享环境。
+- 8080 端口无冲突但 8000 被 ms-ai-fast 占用，本地运行 API 固定用 8010（脚本约定）；若未来 ms-ai-fast 释放 8000，需同步更新脚本端口或明确 `MS_IMAGE_LOCAL_API_PORT`。
 
-- 当前 20 张 Model 表结构均存在，但全部 0 行；Prompt、Connection、ModelPool、Config、Session/Study/Image/Task 等数据仍需按正式链创建，不能把建表等同于 Runtime 资格化。
-- 旧业务数据没有恢复到当前库，只存在全量备份与清理 metadata 中；若未来需要旧 Prompt/连接/会话数据，应先恢复到临时库，再通过受审计的转换导入，禁止直接覆盖新结构。
-- `pet_profile` / `medical_record` 不在当前 Model 注册表中，本轮也不需要创建：当前合同由调用方在 Task 接口显式传 `species=cat|dog`。若未来改为档案自动选择，必须另行完成 Model -> Schema -> DalBase CRUD -> Service 设计并获得表/迁移授权。
+## 2026-08-27 — C1 后合同风险
 
-## 2026-08-26 — 接口传物种与单一 Prompt 风险
+- **C1.1 已关闭新写入边界缺口**：缺失、未知和冲突组合会在 Report 创建前 fail-closed；Report 列/content 漂移在 DAL 前拒绝。冻结 v1 Stage 仍使用 `produced/not_produced`，不得据此删除旧 handler/profile。
+- C1.1 的真实 E2E 只证明状态合同和工程链成立；本轮 Provider 给出的 `review_required` 不是 Gold 或医学准确率证据。
+- 存量旧 Task/Report 仍含 `produced`；未经数据修正授权不得回填，进入 M1 前必须排除或按获批 write set 确定性修复。
+- 逐图 projection D1 真实两视图 E1-MV 工程链已完成；D2 clinical context v1 代码和冻结合同也已完成，但既有真实任务是否包含有意义、无标签泄漏的上游临床上下文仍取决于调用方。Provider 能按 Snapshot v3 发送全部冻结 Image，不证明模型理解投照位、临床上下文或医学准确率提升。
+- legacy ready Study 现已可按 stored SHA 创建 Snapshot v2 Task，新 D1 Study 创建 v3；这解决运行兼容，不等于把 legacy 数据升级为逐图 D1 血缘。未经存量修正授权仍不得回填或改写 Revision。
+- 2026-08-28 曾有新旧两组 Celery Worker 混合消费同一 `imaging.image.validate` 队列；现已由 atomic launcher lock、API/Relay/Worker/Beat 启动前预检和严格 `consumer_count=1` 门禁关闭 launcher 路径。残余风险仅是绕过 launcher 手工启动同队列进程；任何复跑仍以 readiness consumer=1 为准。
+- Runtime API、Relay 与单一 Worker 已于 C1.1 验收前精确重启并加载当前源码；后续代码再变更时仍必须重启并先排除重复 Worker，不能用源码级验证替代在线进程生效确认。
+- DeepSeek 报告的 `object_version_id` 写入顺序根因与当前源码/数据不符：`complete_validation()` 先 CAS 写完整对象事实并回读，再调用 recompute；当前 8 张 ready Image 的 object_version_id 均为 NULL。删除 `object_version_id` 会削弱冻结对象身份，且不能解决 legacy 与 D1 item 结构不同造成的 SHA 差异。
+- 上游没有已核实的权威 projection code 集；首版不执行医学枚举、大小写或字符白名单，只保留 trim、非空、现有 `VARCHAR(64)` 长度、显式 `UNKNOWN` 和来源冻结。未来取得真实 payload/DICOM 字典后如需收紧，应走明确的版本化变更，不能把 LAT/VD/DV/LL 文档示例冒充完整临床本体。
+- 自由文本字段白名单不能自动阻断医学标签泄漏；M1/A-B 必须审计 clinical context 的来源和诊断时点，Gold 或未来报告衍生上下文会使实验作废。
+- 27 号文档内部同时存在“零表/零迁移”和新增 Study 列/segmentation 表、撤销与继续调用 fixed-bank、两步与一步 diagnoses 等冲突；后续只按 29 号 post-C1 指南实施，28 号保留前置裁决，不能将 27 号清单整体转成任务。
 
-- `diagnose` 现在会在接口边界拒绝缺失或非 `cat/dog` 的 species；调用方必须完成物种识别，服务端不从档案继承、不猜测。传错物种仍会把错误上下文稳定冻结，因此调用方输入质量必须纳入上线验收。
-- `species` 参与 Task request snapshot/hash；同一 requester/request_id/task_type 改变物种会触发幂等冲突，这是防止请求漂移的预期行为。
-- `common` exact-only 消除了猫狗 Prompt 身份分叉，但 common Prompt 尚未发布/导入/激活；旧 cat/dog/default 发布物不得被错误复用或 fallback。
-- 共用 Prompt 只降低工程复杂度，不能替代医学验证；仍保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
+## 2026-08-27 — API 与数据库审计新增风险
 
-## 2026-08-26 — 宠物档案统一继承复核
+- **Report 状态接口伪完成**：publish/void 路由、Service 和 DAL 均存在，但 Report 无 `state_version` 列/属性，真实 CAS 会失败；现有 Fake DAL 测试未覆盖该 ORM/物理合同。
+- **Report 交付语义仍未完全一致**：新增 current 接口只返回 `final/published`，合法空 pointer 返回 null，pointer 漂移 fail-closed；但 history 和按已知 ID 仍可读取 `void/superseded`，publish 不控制可见性，void 后 Task 仍 completed 且没有 reason/actor/audit。current 接口完成不能替代 Report 治理修复。
+- **Evaluation 分库漂移**：运行时强制独立 `ms_image_eval`，metadata/Alembic 却混用主库；当前目标库不存在，主库四张空表会让“表存在”掩盖运行不可用。
+- **迁移不可重放**：当前 revision 链不是完整 baseline；P1-B 只验证了 `20260824_02 -> 20260828_01` 追加 upgrade 和降级事实保护，仍不能证明新环境从空库部署。
+- **列表接口范围膨胀**：Task/Image/Study/Session page、Report view/stage detail 都有产品价值，但不应与 C1/P1/D1/M1 一次开发；必须按真实消费者和权限/分页合同逐项打开。
+- **Series 自动回归覆盖缺口**：`POST /series` revision 漂移已修复，并以真实数据库回滚事务验证；现有 backend 测试集没有该 Service 的自动合同用例，按用户约束未新增测试文件，后续修改 StudyService 时需保留定向验证。
+- **Task retry 字段只有读合同**：`TaskResponse.next_retry_at` 已暴露，但 Runtime 没有写入 Task `retry_wait/next_retry_at`；当前重试事实归 Stage/Outbox/Attempt，调用方不能期待该字段已驱动 Task 级自动重试。
+- **Image page 大 Series 性能未资格化**：`GET /images/page` 默认 current 和历史查询均使用已有 logical-version 索引、没有全表扫描，但稳定排序出现 `Using filesort`；当前真实库每个 Series 最大仅 1 条，不能据此证明高实例数 DICOM Series 延迟达标。先在生产等量级数据复测，再决定是否授权排序复合索引迁移。
+- **Task page 大 Session 性能未资格化**：`GET /tasks/page` 已复用 requester/study/session-created 索引并通过真实小样本正确性验证，但 Session 跨多 Study、叠加 status/type/time 条件时的执行计划与尾延迟尚未按生产等量级验证；在取得证据前不新增索引或迁移。
+- **Session cancelled 不是 Task 全部收敛**：该状态只表示取消请求已原子接受；queued/running/retry_wait Task 仍由 Worker 在安全边界推进为终态，调用方必须继续轮询，不能在 cancel 响应后立即假定无执行活动。
+- **终态 Session 的既有 Task 重放仍受原幂等合同约束**：已有 business key 不会被 Session 状态门禁直接拒绝，但仍需当前 Study revision、active Config、Snapshot/hash 与原 Task 一致；调用方不能把终态 Session 当成绕过幂等内容校验的缓存读取接口。
+- **readiness 剩余边界**：公共 Runtime readiness 已不再依赖 Evaluation；AI Control 已有独立 health/readiness。但 Runtime Admin 聚合 readiness 仍保留全平面 503 合同，Admin operations 尚不能在 Evaluation DB 不可用时返回分平面 degraded 数据，Evaluation Control 仍缺独立探针。
+- **AI Control 当前只剩 JWT 配置未就绪**：本机未配置 `ADMIN_SECRET_KEY`，所以 readiness 真实返回 503；这是正确 fail-closed，不是代码失败。Nacos 地址/namespace/凭据已加载，真实 Prompt Client OPTIONS/GET capability、登录和主库探针均通过；临时注入合格 JWT key 的同进程 smoke 为 200/全部 ready。
+- **Nacos Prompt namespace 漂移已纠正**：先前 `.env` 的 `NACOS_PROMPT_NAMESPACE_ID` 指向另一 namespace，导致 canonical Prompt 404；用户确认 `image-dev` namespace 后已对齐，latest/`1.0.0` 均可精确读取。通用 `NACOS_NAMESPACE_ID` 保持原值，避免擅自改变 Config/Discovery 边界；已运行的 AI Control 进程仍需重启才会加载新环境值。
+- **derived Image provenance 不可信**：`source_manifest` 当前只要求非空，没有验证源 Image owner、版本或 hash；不能直接把 segmentation role 当成已完成合同。
+- **Control validate 语义过强**：Connection/ModelPool/Config validated 只证明静态结构/hash，不能作为 Provider 网络、凭据或模型能力资格证据。
+- **Prompt import 长事务**：已有 DB replay/read 后才调用 Nacos，网络等待可能持有主库事务快照；需显式拆分短事务。
+- **接口完成度误报**：79 个路由已盘点不等于全部可运行，后续仍须分层报告静态、运行和医学资格。
 
-- `ms-image` 当前仅在 Task 请求接收并冻结 `species`；没有按 `session_id` 查询档案的 Model/DAL/Service，也不应让 Worker 增加该查询。`ms-ai-fast` 已有 `medical_record.session_id -> pet_profile_id -> pet_profile.pet_type`，但尚未验证其把规范化 `cat|dog` 调用到 `ms-image POST /tasks` 的真实集成。
-- 因此当前的工程缺口是**上游集成/输入事实资格化**，不是缺少 `ms-image` 宠物表。直接复制 fast 的迁移会引入 BIGINT、外键和 `file_asset`，违背当前 Runtime 约束；未经单独授权不得实施。
+## 2026-08-28 — 真实 D1 E1-MV 修复后的剩余风险
+
+- **Provider fence 阻断已关闭**：仅兼容唯一完整小写 `json` fence，随后仍执行冻结 Schema。Provider 若返回前后说明、无标签、多 fence、非法 JSON 或 Schema 不合格内容仍会 fail-closed，这是预期行为。
+- **失败发送 receipt 已关闭代码缺口**：确定响应解析失败会写 Attempt/无 Winner Call 的 `ai-image-receipt.v2`、manifest 与数量；真实本轮 Task 走成功路径，失败双写由现有测试文件的组合合同验证，未额外制造线上失败 Task。
+- **启动器缺省与单 owner 缺口已关闭**：`${PYTHONPATH:-}`、atomic lock、stale-lock 处理、重复进程预检、Beat 禁用、Relay heartbeat、readiness 与 consumer=1 门禁已动态验证；第二个 launcher 只拒绝、不停止现有实例，正常 SIGTERM 只回收本 launcher 的进程和锁。
+- **Provider v2 技术引用仍有偶发不稳定**：一次 synthetic 批次第 2 轮真实进入 `provider_result_source_fact_mismatch`，后端正确 fail-closed，随后从新批次连续三轮成功。当前不能推断具体 Provider 根因，也不能用静默重试或 Python 补写 source refs 掩盖；下一阶段应先量化发生率并保留 receipt/error_code 证据。
+- **本轮医学输出非 Gold**：数据侧 `NOR` 的精确业务释义没有数据集内字典，且本轮没有可信 Gold/评分器；Provider 输出 `abnormal` 不能用于准确率、标签纠正或发布结论。
+
+## 2026-08-28 — 当前未提交改动架构审查风险
+
+- **Connection/Platform 地址一致性保护缺失（中，当前未触发）**：跨仓核对确认 `GatewayClient + AI_PLATFORM_*` 是用户明确要求按 `ms-ai-fast` 复制的唯一可执行出站合同；`ms-ai-fast` 没有 Connection 冻结表。当前数据库唯一 validated Connection `base_url` 与 `ms-ai-fast/.env` Platform URL 完全一致，`ms-image` 未注入 Platform 配置时 runtime gate fail-closed，因此没有实际发错地址证据。剩余风险是 Runtime 未自动比较 frozen Connection URL 与进程 URL，未来部署配置漂移时审计元数据可能失真。
+- **Compose Secret 最小权限不足（条件性高）**：共享 `.env-01` anchor 会注入 app/admin/AI Control/Evaluation/Worker 等多个进程。当前本地 `.env-01` 未发现 `AI_PLATFORM_OPENAI_BASE_URL/API_KEY` 键，因此没有证据表明本机已泄露；正式部署一旦把 Provider key 放入该文件，控制面容器也会持有它。
+- **`api_format` 校验过晚（中）**：Connection Schema/Service 只做非空、长度和 URL 规范化，Config 可 validate/activate；Runtime 到 Gateway payload 构造时才限制 `chat/chat-completions/openai-chat-completions`。错误配置会从控制面成功状态延迟成 Attempt 失败。
+- **Runtime 反向依赖 AI Control service 实现（中）**：`AIRequestService` 直接 import `AIConfigCompiler` 与 `AIControlValidationError`。编译器当前虽为纯验证器且不访问可变来源，但包依赖仍违反跨平面只共享无状态 contract/core 的既有原则，后续控制面重构可能直接影响 Runtime import/startup。
+- `TargetedReview` 仍不是默认多调用：global `3.0.0` 继续 Primary-only；只有显式 `XRAY_TARGETED_EXPERIMENT_SCOPE_KEY=full-chain-local-v1` 才选择已资格化的 `4.0.0` experiment 链。不得将工程可达误报为医学效果通过。
+- Runtime Provider readiness 静态 `not_implemented` 是已有明确决策的非 required 观察字段，不进入公共 online engineering `ready`；它仍需未来独立资格化，但本轮不列为新增实现缺陷。
+
+## 2026-08-28 — C2 CompleteMedicalResult v2 剩余风险
+
+- **C2 工程合同已通过，医学准确率仍未知**：真实单病例证明 v2 Prompt/Schema/receipt/Report 链可运行，不证明正常/异常准确率、召回率、假阳性率或发布资格；状态保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
+- **Provider v2 结构稳定性未形成多病例基线**：当前只有一个明确登记的 C2 真实成功病例；Schema/引用负例由自动合同覆盖，但 Provider 在不同病例、图像数量和输出长度下的 parse/schema 失败率仍为 `UNKNOWN`，应先用固定病例工程重放量化，再在 M1 中评估医学表现。
+- **最小主链与 Report 治理必须分口径**：第一份 `final` Report 可生成并读取，不依赖 `state_version`；publish、void、第二 revision/supersede 的真实 CAS 会失败。汇报时不能说“Report 全部完成”，也不能误说“首份报告主链必崩”。
+
+## 2026-08-29 — 全链 Prompt 资格化后的当前风险
+
+- **工程跑通不等于医学优化完成**：猫狗 Targeted 完整链已资格化，但没有可信 Gold、人工仲裁、真实医学 Scorer、分母或 Holdout；不得声称准确率提升或医学发布可用。
+- **数据集配对与真值来源未证明**：可见 43,931 张 JPG 与同数量 JSON，但简单 basename/dirname 规则无法证明唯一配对；`ABN/NOR`、Disease 与 annotation 无数据字典、专家来源、盲读/仲裁或病例级 split 证据，必须保持为非 Gold。
+- **Evaluation 外壳不等于 M1 可运行**：Job/Run/Artifact/export/paired A/B 骨架可复用，但当前 Worker 使用非医学 Fake scorer，隔离 `ms_image_eval` 不可用且 metadata/Alembic/readiness 尚未拆分资格化。
+- **Targeted 候选仍由 Primary 模型生成**：FamilyRouting v2 只校验受控 Family/Focus 和 Finding 引用，不能判断候选的医学必要性；候选率、有效复核率、锚定效应和不安全翻转率均为 `UNKNOWN`。
+- **`4.0.0` 不可原地调整**：它已发布、导入、激活并被真实 Task 冻结；后续优化必须使用新版本，否则会破坏审计和重放语义。
+- **Targeted SourceRef 复制仍有真实波动**：2026-08-29 当前唯一 owner 下新跑 5 个 Task，其中 3 个进入 Targeted；猫/狗各 1 个 Targeted completed/final，另1 个狗 Targeted 因 `provider_result_source_manifest_sha256_mismatch` fail-closed。这不是 Prompt 缺失或路由不可达，但证明 Provider 技术引用稳定性未达到确定性验收；不得将当前 2/3 小样本外推为真实失败率。
+
+## 2026-08-28/29 — 保留的兼容与证据风险
+
+- **冻结 v1 不得原地修改**：`complete_medical_result.schema.json` 是历史 v1 合同；v2 能力只能通过独立 Schema/Profile/Handler/Config 演进。
+- **legacy Snapshot 必须 fail-closed**：缺逐图 projection/manifest 的旧 Task 继续使用 v1 Config；未经存量修正授权不得伪造 v3 或回填历史来源。
+- **SourceRef 只是技术血缘**：一致的 image/series/projection/manifest 不证明 Finding 医学成立，也不证明模型关注区域准确。
+- **历史狗失败细项永久 UNKNOWN**：旧 Task 未保存不合格 Provider 结构，不能从后续成功反推具体失败字段；未来只按现有三个脱敏错误码统计。
+- **Prompt 发布物与本地载体分离**：已发布版本不可原地编辑；`.md` 扩展名不是运行身份，不得复制正文制造第二事实源。
+
+## 2026-08-29 — 历史 Evaluation 路线风险（当前延后）
+
+- **正式 baseline 缺失**：尚无绑定 Git、Prompt/Config/Schema/Connection 与运行证据的 `xray-baseline-manifest.v1`；继续医学实验会不可归因。
+- **R4A 是 Evaluation 运行前硬阻断**：当前仅有 Evaluation URL 库名隔离，metadata/Alembic/readiness 尚未独立；目标库不存在或主库残留空表都可能让“接口存在”伪装成“Evaluation 可运行”。
+- **R4D Runner 未实现**：当前 Evaluation Worker 不执行 Prompt、Config、Pipeline、Gateway 或 Provider；任何现有 Run/Artifact 不能作为候选 Prompt/Model/Targeted 线上等价证据。
+- **Gold/Scorer 未建立**：sidecar、文件名、现有 Provider 输出和 `FakeEvaluationScorer` 都不是医学真值；在 R4B/R4C 前准确率、净收益和发布结论必须保持 UNKNOWN/NO-GO。
+- **Provider/Connection A/B 不可归因**：当前冻结身份与真正执行目标之间仍有合同缺口，不能仅修改环境变量或 ModelPool 名称后宣称单变量 Provider/Connection 实验。
+- **Report 治理只有局部可用**：首次 finalization/current/history 可用，publish/void/第二 revision/supersede 因 `state_version` 合同缺失不可用；后续实现涉及表字段和迁移，必须另行授权。
+- **Retry 发送事实不足**：当前只有 `prepared` 持久化事实，缺实际 `sending/sent` 写入路径；在补齐前不能可靠区分 definitely-not-sent 与 sent/outcome-unknown，也不能安全自动重发。

@@ -1,7 +1,7 @@
 # MS-Image 重构文档包
 
 状态：`CURRENT_REFACTOR_GUIDE`（当前重构导航）
-更新日期：2026-08-25
+更新日期：2026-08-27
 适用范围：后续重构会话、架构评审、开发拆分和团队沟通。
 设计母文：[MS-Image 最终架构、数据库与完整链路设计](../ms-image-final-architecture-and-database-design.md)
 术语表：[MS-Image 英文术语中英对照](../术语中英对照.md)
@@ -36,6 +36,9 @@
 | 22 | [22-xray-full-ai-prompt-chain-development-guide.md](22-xray-full-ai-prompt-chain-development-guide.md) | 完整架构参考：逐 Service（服务）、逐 Stage（阶段）的目的、输入、处理、输出、落表和失败语义；其中的实现状态须由 24 号文档和当前源码复核 | 完整链路背景、架构讲解 |
 | 23 | [23-xray-next-phase-correction-and-implementation-guide.md](23-xray-next-phase-correction-and-implementation-guide.md) | 历史阶段目标与修正背景：三类权威边界、P0 合同修正、完整链路、逐阶段输入输出/Gate/回滚与旧新会话提示；不作为当前运行事实或实施次序权威 | 历史阶段回溯、架构评审 |
 | 24 | [24-current-runtime-audit-and-next-development-guide.md](24-current-runtime-audit-and-next-development-guide.md) | 当前代码、配置、数据库与真实 AI 网络实测的审计结论；明确已实现/已资格化/已医学验证边界，给出 P0/P1/E1/M1/Q3/Q4/M2/R1/R2/R3 的后续开发与停止门禁 | 当前后续开发、新会话、技术负责人、架构评审 |
+| 28 | [28-xray-evidence-driven-development-guide.md](28-xray-evidence-driven-development-guide.md) | 对 27 号 API 与链路方案的源码核验结论；明确不整体照搬，采用保留入口的内部模块化重构，并按状态合同、结果 Schema、逐图血缘、医学基线和单变量实验推进 | 当前 XRay 实施决策、开发拆分、架构评审 |
+| 29 | [29-xray-post-c1-development-guide.md](29-xray-post-c1-development-guide.md) | C1 已实施后的当前开发权威：补 C1.1 异常边界，完整定义 P1-A/B/C、逐图血缘、多视图重放、结果 v2、临床上下文、M1、轮询/报告/分割产品阶段和验收门禁 | 当前 XRay 开发、新会话、实施评审、运行与医学资格化 |
+| 30 | [30-xray-interface-by-interface-audit-and-development-checklist.md](30-xray-interface-by-interface-audit-and-development-checklist.md) | 历史逐接口审计范围；列出 KEEP/FIX/BLOCKED/ADD/DEFER、数据库支撑、缺失接口、逐项 write set 与验收顺序。项目当前完整总账以 v3.3 路线图的 79 个 HTTP 路由为准 | 接口逐项补齐、现有逻辑修复、数据库与迁移评审 |
 
 ## 2. 按任务阅读
 
@@ -48,13 +51,15 @@
 | 决定重构代码基线和 preserve/replace 范围 | 13 -> 06 -> 08 |
 | 设计或修改表 | 03 -> 母文第 5、6、14 章 -> 07 |
 | 开发在线业务 | 02 -> 04 -> 05 -> 06 |
-| 开发 XRay（X 光）链路 | 24 -> 当前源码与测试 -> 10 -> 04 的 Stage 合同 -> 03 的表导航 -> 17（早期 AI/Prompt 合同追溯）-> 母文第 6、8、15、16 章 |
+| 开发 XRay（X 光）链路 | 29 -> 24 -> 当前源码与测试 -> 10 -> 04 的 Stage 合同 -> 03 的表导航；28/27 只用于追溯本轮方案裁决 |
 | 接入 CT/MRI（计算机断层/磁共振） | 01 的多模态边界 -> 02 -> 母文第 9 章 |
-| 调整 Prompt（提示词）或模型 | 24 -> 当前源码与测试 -> 19/20（架构/历史参考）-> 14 -> 06 的医学门禁 -> 07；17 只用于追溯早期最小运行合同 |
+| 调整 Prompt（提示词）或模型 | 29 的 M1/A/B Gate -> 24 -> 当前源码与测试 -> 19/20（架构/历史参考）-> 14 -> 06 的医学门禁 -> 07；M1 前不开始模型优化 |
 | 理解当前 Prompt/Config/AI Runtime（提示词/配置/AI 运行时）实现 | 24 -> 当前源码与测试 -> 19/20（架构/历史参考） |
 | 补齐 Targeted、多 Attempt、多 Provider、自动降级、双 lane 与医学 Prompt 完整能力 | 24 -> 21 -> `AGENT_HANDOFF.md`（代理交接入口）-> 当前源码 -> 当前阶段相关测试 |
 | 按逐层输入/输出合同实施完整 AI 与 Prompt 链路 | 24 -> 22 -> `AGENT_HANDOFF.md`（代理交接入口）-> 当前源码 -> 当前阶段相关测试 |
-| 开启当前后续开发或新会话 | 24 -> `AGENT_HANDOFF.md`（代理交接入口）-> 当前阶段源码和现有测试 |
+| 开启当前后续开发或新会话 | 29 -> `AGENT_HANDOFF.md`（代理交接入口）-> 24 -> 当前阶段源码和现有测试 |
+| 评审或实施 27 号 XRay API/链路方案 | 29 -> 28 -> 24 -> 当前源码与现有测试；27 仅保留候选设计背景 |
+| 一个接口一个接口检查、修复和补齐 | 30 -> 29 -> 当前接口/Service/DAL/Model 源码；涉及医学证据时再读 24 |
 | 设计 QJ 接入、公共/专项模型或 Service 收敛 | 24 -> 16 -> 17（早期 AI/Stage 合同追溯）-> 04 -> 05 -> 15；精确字段再查设计母文 |
 | 仅评审 QJ 借鉴是否适用、暂不实施 | 18 -> 16 -> 17（涉及 AI/Stage 时）-> 当前源码；输出 Adopt/Adapt/Reject/Defer 矩阵 |
 | 开启 D5 Primary-only Runtime（仅主读运行时）资格化会话 | 24 -> `AGENT_HANDOFF.md`（代理交接入口）-> 当前源码 |
@@ -83,7 +88,7 @@
 
 ## 4. 当前一句话状态
 
-当前源码已经具备 Session/Study/Series/Image（会话/检查/序列/影像）、Task/Stage/Outbox/Worker（任务/阶段/事务发件箱/工作进程）、Prompt Import/Config Snapshot（提示词导入/配置冻结）、Logical Call/Physical Attempt（逻辑调用/物理尝试）、Gateway Adapter（网关适配器）、Secret Resolver（密钥解析器）、OSS Attempt Image Signer（OSS 尝试影像签名器）、Encrypted Response Store（加密响应存储器）、unknown Attempt reconcile（未知尝试对账）、Report（报告）和 Evaluation（评测）代码骨架；Nacos Prompt（Nacos 提示词）、Gateway Adapter（网关适配器）到 Platform/Provider（平台/模型提供方）的核心 AI 网络实测已经通过，但完整 XRay Worker Runtime（X 光工作进程运行时）尚未在共享非生产真实 MySQL、OSS、Broker/Worker（消息代理/工作进程）、Secret 和 Provider 上完成资格化。因此统一状态是 `D5_CODE_FOUNDATION_COMPLETE / MS_IMAGE_CORE_AI_NETWORK_CHAIN_PASSED / FULL_WORKER_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。本节只作导航摘要；当前实现事实、下一动作和运行资格以 24 号文档、当前 worktree（工作树）与 `.agent-handoff/snapshot.md` 为准；23 号保留旧阶段目标，22 号保留完整架构背景，21 号保留完整能力范围。
+当前源码已经具备 Session/Study/Series/Image（会话/检查/序列/影像）、Task/Stage/Outbox/Worker（任务/阶段/事务发件箱/工作进程）、Prompt Import/Config Snapshot（提示词导入/配置冻结）、Logical Call/Physical Attempt（逻辑调用/物理尝试）、Gateway Adapter（网关适配器）、unknown Attempt reconcile（未知尝试对账）、Report（报告）和 Evaluation（评测）主链基础；真实上传到 Provider/Report 的 Primary happy-path、重复投递、取消/迟到结果和 unknown lease 恢复已有运行证据，C1 也已使新 Report/Task happy-path 不再持久化 `produced`。但 C1 异常组合尚待 C1.1 加固，自动 reconcile、unknown 持久有界终止、JWT/Artifact signing 生命周期仍未完整资格化，医学 Gold/M1/Holdout 尚未建立。因此统一状态是 `C1_HAPPY_PATH_IMPLEMENTED / FULL_WORKER_RUNTIME_NOT_QUALIFIED / MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。当前实施次序以 29 号文档、当前工作树和 `.agent-handoff/snapshot.md` 为准；28/27 号保留前置评审和候选设计背景。
 
 ## 5. 文档维护合同
 
