@@ -50,10 +50,9 @@ MEDICAL_RELEASE_NO_GO
 
 ## Immediate Next Actions
 
-1. 完成当前证据与 handoff 提交并推送分支；运行进程和 owner lock 已清理。
-2. 下一独立阶段按 R4A–R4D 顺序建设 Evaluation DB/metadata/Alembic、Dataset 治理、Gold/Scorer 和 Runtime 等价 Runner。
-3. R4A–R4D 完成后建立 M1；只有 M1/Holdout 和正式医学 scorer 就绪后才开始 Primary/Targeted 单变量 Prompt 优化。
-4. Harness 每轮结束存在 aiomysql connection `Event loop is closed` 析构告警，退出码与 evidence 不受影响；后续可单独修复连接关闭，不回写本次资格结果。
+1. 下一独立阶段按 R4A–R4D 顺序建设 Evaluation DB/metadata/Alembic、Dataset 治理、Gold/Scorer 和 Runtime 等价 Runner。
+2. R4A–R4D 完成后建立 M1；只有 M1/Holdout 和正式医学 scorer 就绪后才开始 Primary/Targeted 单变量 Prompt 优化。
+3. Harness 每轮结束存在 aiomysql connection `Event loop is closed` 析构告警，退出码与 evidence 不受影响；后续可单独修复连接关闭，不回写本次资格结果。
 
 ## Active Files
 

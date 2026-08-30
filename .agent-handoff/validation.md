@@ -24,6 +24,7 @@
 | Post-matrix topology | PASS | active Config identity 无漂移；Runtime ready、consumer=1、queue=0、dead-letter=0 |
 | Runtime/AI Control cleanup | PASS | 8002/8010 未监听，ms-image API/Relay/Worker/Beat=0，owner lock absent；imaging queue consumer/messages/unacked=0 |
 | Harness teardown | PASS WITH WARNING | 8 次均 exit 0 且 evidence PASS；每次结束出现 aiomysql connection `Event loop is closed` 析构告警，未影响业务或证据 |
+| Git delivery | PASS | 资格 evidence 与 handoff 提交 `bc4fb47` 已推送到 `origin/codex/xray-2to5-runtime-qualification`；archive 与旧根目录 Postman 未进入提交 |
 
 ## 记录规则
 

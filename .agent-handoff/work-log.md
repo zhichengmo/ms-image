@@ -286,3 +286,4 @@
 - 8 份脱敏 evidence 写入 `docs/evidence/xray-2to5-runtime/20260830T130608Z/`；Config/Prompt SHA 前后无漂移，敏感 key/value 扫描通过。
 - 回归通过：`234 passed, 41 warnings`，Ruff、compileall、E2E help/非法参数、launcher shell、四种 Compose 配置与 JSON/diff 检查均 PASS。
 - Harness 结束存在非阻塞 aiomysql event-loop 析构告警；本切片只记录风险。最终已停止本轮 launcher/AI Control，8002/8010、ms-image 进程、lock 和 imaging queue consumer/messages 均清理。
+- 显式暂存 8 份 evidence 与当前 handoff 文件，未使用 `git add -A`；提交 `bc4fb47` 已推送当前分支，archive 与旧根目录 Postman 保持未提交。
