@@ -1,0 +1,18 @@
+{
+  "contract_version": "xray-e2e-case.v1",
+  "case_key": "engineering-candidate-dog-04",
+  "grouping_status": "engineering_candidate",
+  "grouping_method": "dataset_family+species+mission+birth+sex+date",
+  "source_group_fingerprint_sha256": "e689ffb4a8a1196deb2f0c9a52ba005a583727583ec1d27ee324a9cbb0fa6469",
+  "species": "dog",
+  "modality_type": "xray",
+  "series": [{
+    "series_key": "series-1",
+    "images": [
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150701_IF_0014_NOR_Mu05_20211213_0309.jpg", "sha256": "97095e8a8b7ee4cf3582e955e8596dc69f5da3ba7c1788f5c904ea037b5be5a3", "size_bytes": 125045, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 1, "projection": "UNKNOWN"},
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150701_IF_0014_NOR_Mu05_20211213_0311.jpg", "sha256": "9f5b2b1e8f8fecd239d91f4c49fc2b0940eef1d239f690817f5a22845a6a1a55", "size_bytes": 72047, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 2, "projection": "UNKNOWN"},
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150701_IF_0014_NOR_Mu06_20211213_0273.jpg", "sha256": "80640b5c8ee7a472d42322d95a738d437c93d0ff37d5777477845fc262c9d6ed", "size_bytes": 106607, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 3, "projection": "UNKNOWN"},
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150701_IF_0014_NOR_Mu06_20211213_0274.jpg", "sha256": "af8703cbfbe7227ebd30e4b4c12213e93272234f87ba128f85a4cd34922b305b", "size_bytes": 95758, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 4, "projection": "UNKNOWN"}
+    ]
+  }]
+}

@@ -1587,3 +1587,65 @@ def test_xray_prompt_commands_reject_missing_species_in_v2_snapshot() -> None:
         build_primary_ai_request_command(task=task, stage=primary_stage)
     with pytest.raises(PromptContractError, match="xray_species_snapshot_invalid"):
         build_targeted_ai_request_command(task=task, stage=targeted_stage)
+
+
+def test_xray_runtime_config_requires_exact_five_image_budget() -> None:
+    capability = {
+        "supports_images": True,
+        "supports_json_schema": True,
+        "max_input_images": 5,
+        "max_context_tokens": 8192,
+    }
+    lane = {
+        **VALID_LANE,
+        "generation_params": {
+            **VALID_LANE["generation_params"],
+            "max_output_tokens": 1024,
+        },
+    }
+    budget = {
+        "contract_version": "ai-budget-policy.v1",
+        "max_prompt_chars": 10000,
+        "max_input_images": 4,
+        "max_total_calls": 1,
+        "max_total_attempts": 1,
+        "task_deadline_ms": 120000,
+        "reserve_before_send": True,
+    }
+
+    with pytest.raises(
+        AIControlValidationError,
+        match="config_xray_image_budget_invalid",
+    ):
+        AIConfigCompiler._validate_budget(
+            budget_policy=budget,
+            prompt_content="prompt",
+            lane=lane,
+            capability=capability,
+            required_logical_calls=1,
+            xray_image_contract_required=True,
+        )
+
+    budget["max_input_images"] = 5
+    AIConfigCompiler._validate_budget(
+        budget_policy=budget,
+        prompt_content="prompt",
+        lane=lane,
+        capability=capability,
+        required_logical_calls=1,
+        xray_image_contract_required=True,
+    )
+
+    capability["max_input_images"] = 4
+    with pytest.raises(
+        AIControlValidationError,
+        match="config_xray_connection_image_capability_invalid",
+    ):
+        AIConfigCompiler._validate_budget(
+            budget_policy=budget,
+            prompt_content="prompt",
+            lane=lane,
+            capability=capability,
+            required_logical_calls=1,
+            xray_image_contract_required=True,
+        )

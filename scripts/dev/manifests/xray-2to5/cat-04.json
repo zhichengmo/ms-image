@@ -1,0 +1,18 @@
+{
+  "contract_version": "xray-e2e-case.v1",
+  "case_key": "engineering-candidate-cat-04",
+  "grouping_status": "engineering_candidate",
+  "grouping_method": "dataset_family+species+mission+birth+sex+date",
+  "source_group_fingerprint_sha256": "587c46e53e76dc08e96438e1e6f10e0b1ebcded8794edd73d7d56f810e98c084",
+  "species": "cat",
+  "modality_type": "xray",
+  "series": [{
+    "series_key": "series-1",
+    "images": [
+      {"path": "胸腔数据/胸腔部分数据/1/VS1_CAT/C_61_20050915_IF_0020_NOR_Ch01_20200916_0003.jpg", "sha256": "43a4a81b1eafe5efec98c2958379c490b0b12e0ea3ee368a335cd127650f2957", "size_bytes": 150078, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 1, "projection": "UNKNOWN"},
+      {"path": "胸腔数据/胸腔部分数据/1/VS1_CAT/C_61_20050915_IF_0020_NOR_Ch03_20200916_0064.jpg", "sha256": "073ffc3d28f5494f7f1085eb18275f36d498859a2bd5e24eaf8f7128f368359d", "size_bytes": 144652, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 2, "projection": "UNKNOWN"},
+      {"path": "胸腔数据/胸腔部分数据/1/VS1_CAT/C_61_20050915_IF_0020_NOR_Ch03_20200916_0065.jpg", "sha256": "3459c9a7a0a7299a79bd08416e7d6cbbdf966d0c5015e79beafea074f1d15d23", "size_bytes": 144652, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 3, "projection": "UNKNOWN"},
+      {"path": "胸腔数据/胸腔部分数据/1/VS1_CAT/C_61_20050915_IF_0020_NOR_Ch03_20200916_0461.jpg", "sha256": "c71f38c8457d4fad49d392286aef10ba5fe16f77e6a1afdb9892c828214a45b7", "size_bytes": 144644, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 4, "projection": "UNKNOWN"}
+    ]
+  }]
+}

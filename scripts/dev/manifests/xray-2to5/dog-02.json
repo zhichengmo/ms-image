@@ -1,0 +1,16 @@
+{
+  "contract_version": "xray-e2e-case.v1",
+  "case_key": "engineering-candidate-dog-02",
+  "grouping_status": "engineering_candidate",
+  "grouping_method": "dataset_family+species+mission+birth+sex+date",
+  "source_group_fingerprint_sha256": "fa44dd9c4c3d85be53b0c71964836da24090c3ffee2f8f21b82e0cb8a3801dc5",
+  "species": "dog",
+  "modality_type": "xray",
+  "series": [{
+    "series_key": "series-1",
+    "images": [
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150702_IF_0030_NOR_Mu01_20211214_1539.jpg", "sha256": "71791da3124dfb5641590528ddda94aca1c7ca728abc67ef83c1990163a0f33c", "size_bytes": 117860, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 1, "projection": "UNKNOWN"},
+      {"path": "肌肉骨骼数据/1/VS2_DOG/D_62_20150702_IF_0030_NOR_Mu04_20211214_0274.jpg", "sha256": "ca346ed68bf17200bfca19c802fe2b33d696220792d76150bb414cd08c2bbe2e", "size_bytes": 225001, "file_format": "jpeg", "content_type": "image/jpeg", "sequence_no": 2, "projection": "UNKNOWN"}
+    ]
+  }]
+}

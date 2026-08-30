@@ -4631,3 +4631,666 @@ async def test_admin_aggregate_readiness_keeps_evaluation_plane(monkeypatch) -> 
     assert checked_domains == ["imaging", "evaluation"]
     assert result["components"]["evaluation_database"]["ready"] is False
     assert result["components"]["evaluation_broker"]["ready"] is True
+
+
+@pytest.mark.parametrize("image_count", (0, 1, 6))
+def test_xray_study_schema_rejects_out_of_range_counts(image_count: int) -> None:
+    from apps.backend.schemas.study import StudyCreate
+
+    with pytest.raises(ValidationError, match="xray_study_image_count_out_of_range"):
+        StudyCreate(
+            session_id="session_1",
+            modality_type="xray",
+            metadata_schema_version="imaging.metadata.v1",
+            expected_image_count=image_count,
+        )
+
+
+@pytest.mark.parametrize("image_count", (2, 3, 4, 5))
+def test_xray_study_schema_accepts_qualified_counts(image_count: int) -> None:
+    from apps.backend.schemas.study import StudyCreate
+
+    payload = StudyCreate(
+        session_id="session_1",
+        modality_type="xray",
+        metadata_schema_version="imaging.metadata.v1",
+        expected_image_count=image_count,
+    )
+
+    assert payload.expected_image_count == image_count
+
+
+def test_non_xray_study_schema_preserves_existing_count_contract() -> None:
+    from apps.backend.schemas.study import StudyCreate
+
+    payload = StudyCreate(
+        session_id="session_1",
+        modality_type="ct",
+        metadata_schema_version="imaging.metadata.v1",
+        expected_image_count=0,
+    )
+
+    assert payload.expected_image_count == 0
+
+
+def test_xray_diagnostic_manifest_excludes_derived_images() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import (
+        build_xray_diagnostic_series_manifest,
+    )
+
+    def image(image_id: str, *, role: str, kind: str, sequence_no: int):
+        return SimpleNamespace(
+            id=image_id,
+            series_id="series_1",
+            logical_image_key=f"logical-{image_id}",
+            image_version_no=1,
+            sequence_no=sequence_no,
+            image_role=role,
+            image_kind=kind,
+            file_format="jpeg",
+            projection="UNKNOWN",
+            technical_metadata_json={
+                "projection_provenance": {
+                    "source": "caller_declared",
+                    "schema_version": "xray-projection.v1",
+                }
+            },
+            storage_profile="primary",
+            object_key=f"images/{image_id}.jpg",
+            object_version_id=None,
+            sha256=str(sequence_no) * 64,
+            size_bytes=10,
+            content_type="image/jpeg",
+            status="ready",
+        )
+
+    original = image("original", role="original", kind="instance", sequence_no=1)
+    derived = image("derived", role="segmentation", kind="instance", sequence_no=2)
+
+    manifest = build_xray_diagnostic_series_manifest([original, derived])
+
+    assert len(manifest.items) == 1
+    assert manifest.items[0]["image_id"] == "original"
+
+
+@pytest.mark.anyio
+async def test_xray_image_admission_rejects_sixth_original_slot() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.image_service import (
+        ImageService,
+        ImageStateConflictError,
+    )
+
+    class ImageDal:
+        async def list_occupying_diagnostic_slots_for_study(self, study_id: str):
+            assert study_id == "study_1"
+            return [
+                SimpleNamespace(series_id="series_1", logical_image_key=f"image-{i}")
+                for i in range(5)
+            ]
+
+    service = object.__new__(ImageService)
+    service.image_dal = ImageDal()
+    study = SimpleNamespace(id="study_1", modality_type="xray")
+    payload = SimpleNamespace(image_role="original", image_kind="instance")
+
+    with pytest.raises(
+        ImageStateConflictError,
+        match="xray_study_image_capacity_exceeded",
+    ):
+        await service._admit_xray_diagnostic_slot(study=study, payload=payload)
+
+
+@pytest.mark.anyio
+async def test_xray_image_admission_does_not_count_derived_image() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.image_service import ImageService
+
+    class ImageDal:
+        async def list_occupying_diagnostic_slots_for_study(self, study_id: str):
+            raise AssertionError("derived image must not query diagnostic capacity")
+
+    service = object.__new__(ImageService)
+    service.image_dal = ImageDal()
+    await service._admit_xray_diagnostic_slot(
+        study=SimpleNamespace(id="study_1", modality_type="xray"),
+        payload=SimpleNamespace(image_role="segmentation", image_kind="instance"),
+    )
+
+
+@pytest.mark.parametrize("image_count", (0, 1, 6))
+def test_ai_request_rejects_out_of_range_xray_image_count(image_count: int) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestStateConflict,
+    )
+
+    config = SimpleNamespace(
+        modality_type="xray",
+        task_type="diagnose",
+        profile_key="xray_primary_v2",
+    )
+    task = SimpleNamespace(
+        request_snapshot_json={
+            "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        }
+    )
+
+    with pytest.raises(
+        AIRequestStateConflict,
+        match="ai_call_xray_image_count_out_of_range",
+    ):
+        AIRequestService._require_xray_image_count(
+            config=config,
+            task=task,
+            image_count=image_count,
+        )
+
+
+@pytest.mark.parametrize("image_count", (2, 3, 4, 5))
+def test_ai_request_accepts_qualified_xray_image_count(image_count: int) -> None:
+    from types import SimpleNamespace
+
+    config = SimpleNamespace(
+        modality_type="xray",
+        task_type="diagnose",
+        profile_key="xray_primary_v2",
+    )
+    task = SimpleNamespace(
+        request_snapshot_json={
+            "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        }
+    )
+
+    AIRequestService._require_xray_image_count(
+        config=config,
+        task=task,
+        image_count=image_count,
+    )
+
+
+@pytest.mark.anyio
+async def test_network_boundary_rejects_xray_count_before_signing() -> None:
+    class Signer:
+        async def sign(self, *, attempt_plan, ttl_seconds):
+            raise AssertionError("invalid X-Ray count must fail before image signing")
+
+    with pytest.raises(
+        GatewayContractError,
+        match="ai_call_xray_image_count_out_of_range",
+    ):
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan={
+                "xray_image_contract_required": True,
+                "image_count_requested": 1,
+                "image_url_ttl_seconds": 60,
+            },
+            image_signer=Signer(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("existing_counts", "new_count", "study_count"),
+    (([1], 1, 2), ([1], 2, 3), ([2], 3, 5)),
+)
+@pytest.mark.anyio
+async def test_xray_series_budget_accepts_qualified_multi_series_totals(
+    existing_counts: list[int], new_count: int, study_count: int
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.study import SeriesCreate
+    from apps.backend.services.runtime.service.study_service import StudyService
+
+    created = SimpleNamespace(id="series_new", expected_image_count=new_count)
+
+    class SeriesDal:
+        async def get_by_key_for_update(self, **kwargs):
+            return None
+
+        async def list_for_study(self, study_id: str):
+            assert study_id == "study_1"
+            return [
+                SimpleNamespace(expected_image_count=value)
+                for value in existing_counts
+            ]
+
+        async def create_idempotent(self, values):
+            assert values["expected_image_count"] == new_count
+            return created
+
+    async def owned_study(**kwargs):
+        return SimpleNamespace(
+            id="study_1",
+            session_id="session_1",
+            modality_type="xray",
+            expected_image_count=study_count,
+            status="ingesting",
+        )
+
+    async def owned_session(**kwargs):
+        return SimpleNamespace(status="processing")
+
+    async def advance_revision(**kwargs):
+        return kwargs["study"]
+
+    service = object.__new__(StudyService)
+    service.series_dal = SeriesDal()
+    service._owned_study_for_update = owned_study
+    service._owned_session = owned_session
+    service._advance_study_revision = advance_revision
+    service._series_response = lambda row: row
+
+    result = await service.create_series(
+        payload=SeriesCreate(
+            study_id="study_1",
+            series_key="series-new",
+            metadata_schema_version="imaging.metadata.v1",
+            expected_image_count=new_count,
+        ),
+        requester_id="requester_1",
+    )
+
+    assert result is created
+
+
+@pytest.mark.parametrize(
+    ("existing_counts", "new_count", "study_count"),
+    (([3], 3, 5), ([5], 1, 5), ([], 0, 2), ([], 6, 5)),
+)
+@pytest.mark.anyio
+async def test_xray_series_budget_rejects_invalid_or_excess_total(
+    existing_counts: list[int], new_count: int, study_count: int
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.study import SeriesCreate
+    from apps.backend.services.runtime.service.study_service import (
+        StudyService,
+        StudyStateConflictError,
+    )
+
+    class SeriesDal:
+        async def get_by_key_for_update(self, **kwargs):
+            return None
+
+        async def list_for_study(self, study_id: str):
+            return [
+                SimpleNamespace(expected_image_count=value)
+                for value in existing_counts
+            ]
+
+        async def create_idempotent(self, values):
+            raise AssertionError("invalid Series budget must fail before create")
+
+    async def owned_study(**kwargs):
+        return SimpleNamespace(
+            id="study_1",
+            session_id="session_1",
+            modality_type="xray",
+            expected_image_count=study_count,
+            status="ingesting",
+        )
+
+    async def owned_session(**kwargs):
+        return SimpleNamespace(status="processing")
+
+    service = object.__new__(StudyService)
+    service.series_dal = SeriesDal()
+    service._owned_study_for_update = owned_study
+    service._owned_session = owned_session
+
+    expected_error = (
+        "xray_series_image_count_out_of_range"
+        if new_count in {0, 6}
+        else "xray_study_series_budget_exceeded"
+    )
+    with pytest.raises(StudyStateConflictError, match=expected_error):
+        await service.create_series(
+            payload=SeriesCreate(
+                study_id="study_1",
+                series_key="series-new",
+                metadata_schema_version="imaging.metadata.v1",
+                expected_image_count=new_count,
+            ),
+            requester_id="requester_1",
+        )
+
+
+@pytest.mark.anyio
+async def test_xray_series_idempotent_replay_precedes_budget_counting() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.study import SeriesCreate
+    from apps.backend.services.runtime.service.study_service import StudyService
+
+    existing = SimpleNamespace(id="series_existing")
+
+    class SeriesDal:
+        async def get_by_key_for_update(self, **kwargs):
+            return existing
+
+        async def list_for_study(self, study_id: str):
+            raise AssertionError("idempotent replay must not recount Series budget")
+
+    async def owned_study(**kwargs):
+        return SimpleNamespace(
+            id="study_1",
+            session_id="session_1",
+            modality_type="xray",
+            expected_image_count=2,
+            status="ingesting",
+        )
+
+    async def owned_session(**kwargs):
+        return SimpleNamespace(status="processing")
+
+    service = object.__new__(StudyService)
+    service.series_dal = SeriesDal()
+    service._owned_study_for_update = owned_study
+    service._owned_session = owned_session
+    service._assert_series_match = lambda row, values: None
+    service._series_response = lambda row: row
+
+    result = await service.create_series(
+        payload=SeriesCreate(
+            study_id="study_1",
+            series_key="series-existing",
+            metadata_schema_version="imaging.metadata.v1",
+            expected_image_count=2,
+        ),
+        requester_id="requester_1",
+    )
+
+    assert result is existing
+
+
+def _image_prepare_payload(*, multipart: bool):
+    from apps.backend.schemas.image import (
+        ImagePrepareMultipartRequest,
+        ImagePrepareUploadRequest,
+    )
+
+    values = {
+        "series_id": "series_1",
+        "logical_image_key": "logical_6",
+        "sequence_no": 6,
+        "image_role": "original",
+        "image_kind": "instance",
+        "metadata_schema_version": "imaging.metadata.v1",
+        "file_format": "jpeg",
+        "expected_sha256": "a" * 64,
+        "expected_size_bytes": 10,
+        "declared_content_type": "image/jpeg",
+        "projection": "UNKNOWN",
+    }
+    if multipart:
+        return ImagePrepareMultipartRequest(**values, expected_part_count=1)
+    return ImagePrepareUploadRequest(**values)
+
+
+@pytest.mark.parametrize("multipart", (False, True))
+@pytest.mark.anyio
+async def test_xray_prepare_locks_study_and_rejects_sixth_slot(
+    multipart: bool,
+) -> None:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.image_service import (
+        ImageService,
+        ImageStateConflictError,
+    )
+
+    calls: list[str] = []
+
+    class SeriesDal:
+        async def get_by_id(self, series_id: str):
+            return SimpleNamespace(id=series_id, study_id="study_1")
+
+    class StudyDal:
+        async def get_by_id_for_update(self, study_id: str):
+            calls.append(study_id)
+            return SimpleNamespace(
+                id=study_id,
+                session_id="session_1",
+                modality_type="xray",
+                status="ingesting",
+            )
+
+    class ImageDal:
+        async def get_ready_logical(self, **kwargs):
+            return None
+
+        async def get_latest_logical(self, **kwargs):
+            return None
+
+        async def list_occupying_diagnostic_slots_for_study(self, study_id: str):
+            return [
+                SimpleNamespace(series_id="series_1", logical_image_key=f"key-{i}")
+                for i in range(5)
+            ]
+
+        async def create_idempotent(self, values):
+            raise AssertionError("sixth slot must fail before Image create")
+
+    async def owned_session(**kwargs):
+        return SimpleNamespace(status="processing")
+
+    service = object.__new__(ImageService)
+    service.series_dal = SeriesDal()
+    service.study_dal = StudyDal()
+    service.image_dal = ImageDal()
+    service._owned_session = owned_session
+    method = (
+        service.prepare_multipart_upload
+        if multipart
+        else service.prepare_direct_upload
+    )
+
+    with pytest.raises(
+        ImageStateConflictError,
+        match="xray_study_image_capacity_exceeded",
+    ):
+        await method(
+            payload=_image_prepare_payload(multipart=multipart),
+            requester_id="requester_1",
+            storage_profile="primary",
+            upload_expires_at=datetime.now(timezone.utc),
+        )
+
+    assert calls == ["study_1"]
+
+
+@pytest.mark.parametrize("multipart", (False, True))
+@pytest.mark.anyio
+async def test_xray_prepare_idempotent_uploading_replay_does_not_recount_capacity(
+    multipart: bool,
+) -> None:
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import (
+        PROJECTION_SOURCE_CALLER,
+        build_projection_metadata,
+    )
+    from apps.backend.services.runtime.service.image_service import ImageService
+
+    payload = _image_prepare_payload(multipart=multipart)
+    latest = SimpleNamespace(
+        id="image_1",
+        state_version=0,
+        status="uploading",
+        series_id=payload.series_id,
+        source_image_id=payload.source_image_id,
+        logical_image_key=payload.logical_image_key,
+        source_manifest_json=payload.source_manifest,
+        sequence_no=payload.sequence_no,
+        image_role=payload.image_role,
+        image_kind=payload.image_kind,
+        metadata_schema_version=payload.metadata_schema_version,
+        storage_profile="primary",
+        file_format=payload.file_format,
+        upload_mode="multipart" if multipart else "direct_put",
+        expected_part_count=getattr(payload, "expected_part_count", None),
+        expected_sha256=payload.expected_sha256,
+        expected_size_bytes=payload.expected_size_bytes,
+        declared_content_type=payload.declared_content_type,
+        projection=payload.projection,
+        technical_metadata_json=build_projection_metadata(
+            payload.technical_metadata,
+            source=PROJECTION_SOURCE_CALLER,
+        ),
+    )
+
+    class SeriesDal:
+        async def get_by_id(self, series_id: str):
+            return SimpleNamespace(id=series_id, study_id="study_1")
+
+    class StudyDal:
+        async def get_by_id_for_update(self, study_id: str):
+            return SimpleNamespace(
+                id=study_id,
+                session_id="session_1",
+                modality_type="xray",
+                status="ingesting",
+            )
+
+    class ImageDal:
+        async def get_ready_logical(self, **kwargs):
+            return None
+
+        async def get_latest_logical(self, **kwargs):
+            return latest
+
+        async def refresh_upload_expiry(self, **kwargs):
+            return latest
+
+        async def list_occupying_diagnostic_slots_for_study(self, study_id: str):
+            raise AssertionError("idempotent replay must not recount capacity")
+
+    async def owned_session(**kwargs):
+        return SimpleNamespace(status="processing")
+
+    service = object.__new__(ImageService)
+    service.series_dal = SeriesDal()
+    service.study_dal = StudyDal()
+    service.image_dal = ImageDal()
+    service._owned_session = owned_session
+    service._response = lambda image: image
+    method = (
+        service.prepare_multipart_upload
+        if multipart
+        else service.prepare_direct_upload
+    )
+
+    result = await method(
+        payload=payload,
+        requester_id="requester_1",
+        storage_profile="primary",
+        upload_expires_at=datetime.now(timezone.utc),
+    )
+
+    assert result is latest
+
+
+@pytest.mark.parametrize("image_count", (1, 6))
+def test_task_gate_rejects_anomalous_new_xray_study(image_count: int) -> None:
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    with pytest.raises(
+        TaskStateConflictError,
+        match="xray_task_image_count_out_of_range",
+    ):
+        TaskService._require_xray_task_image_count(
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key="xray_primary_v2",
+            image_count=image_count,
+        )
+
+
+@pytest.mark.parametrize("image_count", (2, 3, 4, 5))
+def test_task_gate_accepts_qualified_new_xray_study(image_count: int) -> None:
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    TaskService._require_xray_task_image_count(
+        modality_type="xray",
+        task_type="diagnose",
+        profile_key="xray_primary_v2",
+        image_count=image_count,
+    )
+
+
+@pytest.mark.parametrize(
+    ("modality_type", "task_type", "profile_key"),
+    (("ct", "diagnose", "xray_primary_v2"), ("xray", "replay", "zero_model_replay")),
+)
+def test_new_image_count_gates_preserve_non_xray_and_replay_paths(
+    modality_type: str, task_type: str, profile_key: str
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    TaskService._require_xray_task_image_count(
+        modality_type=modality_type,
+        task_type=task_type,
+        profile_key=profile_key,
+        image_count=1,
+    )
+    AIRequestService._require_xray_image_count(
+        config=SimpleNamespace(
+            modality_type=modality_type,
+            task_type=task_type,
+            profile_key=profile_key,
+        ),
+        task=SimpleNamespace(
+            request_snapshot_json={
+                "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+            }
+        ),
+        image_count=1,
+    )
+
+
+def test_ai_request_preserves_historical_v2_xray_snapshot_count() -> None:
+    from types import SimpleNamespace
+
+    AIRequestService._require_xray_image_count(
+        config=SimpleNamespace(
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key="xray_primary_v2",
+        ),
+        task=SimpleNamespace(
+            request_snapshot_json={
+                "snapshot_contract_version": "task-request-snapshot.v2",
+            }
+        ),
+        image_count=1,
+    )
+
+
+@pytest.mark.anyio
+async def test_network_boundary_rejects_expanded_image_count_mismatch() -> None:
+    class Signer:
+        async def sign(self, *, attempt_plan, ttl_seconds):
+            return (object(),)
+
+    with pytest.raises(GatewayContractError, match="ai_call_image_count_mismatch"):
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(
+                xray_image_contract_required=True,
+                image_count_requested=2,
+            ),
+            image_signer=Signer(),
+        )
