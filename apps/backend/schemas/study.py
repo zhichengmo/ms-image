@@ -1,8 +1,12 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from apps.backend.core.imaging.xray_contract import (
+    is_xray_modality,
+    require_xray_study_image_count,
+)
 from apps.backend.schemas.imaging_common import normalize_required_text, normalize_utc_datetime
 
 
@@ -76,6 +80,12 @@ class StudyCreate(BaseModel):
     @classmethod
     def normalize_acquired_at(cls, value: datetime | None) -> datetime | None:
         return normalize_utc_datetime(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_xray_image_count(self) -> "StudyCreate":
+        if is_xray_modality(self.modality_type):
+            require_xray_study_image_count(self.expected_image_count)
+        return self
 
 
 class StudyUpdate(BaseModel):

@@ -18,6 +18,11 @@ from apps.backend.core.imaging.manifest import (
     canonical_json_bytes,
     projection_fact_from_image,
 )
+from apps.backend.core.imaging.xray_contract import (
+    XRAY_STUDY_MAX_IMAGE_COUNT,
+    is_xray_diagnostic_image_values,
+    is_xray_modality,
+)
 from apps.backend.crud.image import ImageDal
 from apps.backend.crud.object_reconcile_cursor import ObjectReconcileCursorDal
 from apps.backend.crud.outbox import OutboxDal
@@ -409,7 +414,7 @@ class ImageService:
         series = await self.series_dal.get_by_id(payload.series_id)
         if series is None:
             raise ImageNotFoundError("series_not_found")
-        study = await self.study_dal.get_by_id(series.study_id)
+        study = await self.study_dal.get_by_id_for_update(series.study_id)
         if study is None:
             raise ImageNotFoundError("study_not_found")
         session = await self._owned_session(
@@ -443,6 +448,8 @@ class ImageService:
             return self._response(refreshed)
         if latest is not None and latest.status == "validating":
             raise ImageStateConflictError("image_validation_in_progress")
+
+        await self._admit_xray_diagnostic_slot(study=study, payload=payload)
 
         image_version_no = 1 if latest is None else latest.image_version_no + 1
         image_id = new_opaque_id()
@@ -509,7 +516,7 @@ class ImageService:
         series = await self.series_dal.get_by_id(payload.series_id)
         if series is None:
             raise ImageNotFoundError("series_not_found")
-        study = await self.study_dal.get_by_id(series.study_id)
+        study = await self.study_dal.get_by_id_for_update(series.study_id)
         if study is None:
             raise ImageNotFoundError("study_not_found")
         session = await self._owned_session(
@@ -542,6 +549,8 @@ class ImageService:
             return self._response(refreshed)
         if latest is not None and latest.status == "validating":
             raise ImageStateConflictError("image_validation_in_progress")
+
+        await self._admit_xray_diagnostic_slot(study=study, payload=payload)
 
         image_version_no = 1 if latest is None else latest.image_version_no + 1
         image_id = new_opaque_id()
@@ -1596,6 +1605,25 @@ class ImageService:
         if refreshed is None:
             raise ImageStateConflictError("image_validation_result_missing")
         return self._response(refreshed)
+
+    async def _admit_xray_diagnostic_slot(self, *, study: Any, payload: Any) -> None:
+        if not is_xray_modality(study.modality_type) or not (
+            is_xray_diagnostic_image_values(
+                image_role=payload.image_role,
+                image_kind=payload.image_kind,
+            )
+        ):
+            return
+        occupying = await self.image_dal.list_occupying_diagnostic_slots_for_study(
+            study.id
+        )
+        logical_slots = {
+            (image.series_id, image.logical_image_key) for image in occupying
+        }
+        if len(logical_slots) >= XRAY_STUDY_MAX_IMAGE_COUNT:
+            raise ImageStateConflictError(
+                "xray_study_image_capacity_exceeded"
+            )
 
     async def _owned_image(self, *, image_id: str, requester_id: str) -> Image:
         image = await self.image_dal.get_by_id(image_id.strip())

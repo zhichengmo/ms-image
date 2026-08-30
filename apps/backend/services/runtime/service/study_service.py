@@ -11,6 +11,13 @@ from apps.backend.core.imaging.manifest import (
     ManifestContractError,
     build_series_manifest,
     build_study_manifest,
+    build_xray_diagnostic_series_manifest,
+)
+from apps.backend.core.imaging.xray_contract import (
+    XRAY_STUDY_MAX_IMAGE_COUNT,
+    is_xray_modality,
+    require_xray_series_image_count,
+    require_xray_study_image_count,
 )
 from apps.backend.crud.image import ImageDal
 from apps.backend.crud.series import SeriesDal
@@ -97,6 +104,11 @@ class StudyService:
         )
         if session.status not in {"open", "processing"}:
             raise StudyStateConflictError("session_not_accepting_studies")
+        if is_xray_modality(payload.modality_type):
+            try:
+                require_xray_study_image_count(payload.expected_image_count)
+            except ValueError as exc:
+                raise StudyStateConflictError(str(exc)) from exc
 
         source_study_id = self._source_study_id(payload)
         existing = await self.study_dal.get_by_source(
@@ -182,6 +194,33 @@ class StudyService:
         if existing is not None:
             self._assert_series_match(existing, values)
             return self._series_response(existing)
+        if is_xray_modality(study.modality_type):
+            try:
+                study_expected = require_xray_study_image_count(
+                    study.expected_image_count
+                )
+                series_expected = require_xray_series_image_count(
+                    payload.expected_image_count
+                )
+            except ValueError as exc:
+                raise StudyStateConflictError(str(exc)) from exc
+            existing_series = await self.series_dal.list_for_study(study.id)
+            try:
+                declared_total = sum(
+                    require_xray_series_image_count(item.expected_image_count)
+                    for item in existing_series
+                )
+            except ValueError as exc:
+                raise StudyStateConflictError(
+                    "xray_study_series_budget_exceeded"
+                ) from exc
+            if (
+                declared_total + series_expected > study_expected
+                or declared_total + series_expected > XRAY_STUDY_MAX_IMAGE_COUNT
+            ):
+                raise StudyStateConflictError(
+                    "xray_study_series_budget_exceeded"
+                )
         created = await self.series_dal.create_idempotent(values)
         if created is None:
             existing = await self.series_dal.get_by_key_for_update(
@@ -239,6 +278,14 @@ class StudyService:
             raise StudyStateConflictError("study_series_missing")
         if any(series.status != "ready" for series in series_rows):
             raise StudyStateConflictError("study_series_not_ready")
+        is_xray = is_xray_modality(study.modality_type)
+        if is_xray:
+            try:
+                require_xray_study_image_count(study.expected_image_count)
+                for series in series_rows:
+                    require_xray_series_image_count(series.expected_image_count)
+            except ValueError as exc:
+                raise StudyStateConflictError(str(exc)) from exc
         if any(
             series.expected_image_count is not None
             and series.actual_image_count != series.expected_image_count
@@ -246,10 +293,30 @@ class StudyService:
         ):
             raise StudyStateConflictError("study_series_count_conflict")
         for series in series_rows:
-            images = await self.image_dal.list_for_series(series.id)
+            images = (
+                await self.image_dal.list_diagnostic_for_series(series.id)
+                if is_xray
+                else await self.image_dal.list_for_series(series.id)
+            )
             if any(image.status in {"uploading", "validating"} for image in images):
                 raise StudyStateConflictError("study_image_in_progress")
+            if is_xray:
+                ready_images = [image for image in images if image.status == "ready"]
+                try:
+                    manifest = build_xray_diagnostic_series_manifest(ready_images)
+                except ManifestContractError as exc:
+                    raise StudyStateConflictError(str(exc)) from exc
+                if (
+                    len(manifest.items) != series.actual_image_count
+                    or manifest.sha256 != series.manifest_sha256
+                ):
+                    raise StudyStateConflictError("study_series_count_conflict")
         actual_count = sum(series.actual_image_count for series in series_rows)
+        if is_xray:
+            try:
+                require_xray_study_image_count(actual_count)
+            except ValueError as exc:
+                raise StudyStateConflictError(str(exc)) from exc
         if (
             study.expected_image_count is not None
             and actual_count != study.expected_image_count
@@ -299,9 +366,17 @@ class StudyService:
         if study is None:
             raise StudyNotFoundError("study_not_found")
 
-        ready_images = await self.image_dal.list_ready_for_series(series.id)
+        ready_images = (
+            await self.image_dal.list_ready_diagnostic_for_series(series.id)
+            if is_xray_modality(study.modality_type)
+            else await self.image_dal.list_ready_for_series(series.id)
+        )
         try:
-            series_manifest = build_series_manifest(ready_images)
+            series_manifest = (
+                build_xray_diagnostic_series_manifest(ready_images)
+                if is_xray_modality(study.modality_type)
+                else build_series_manifest(ready_images)
+            )
         except ManifestContractError as exc:
             raise StudyStateConflictError(str(exc)) from exc
         actual_count = len(series_manifest.items)
@@ -358,6 +433,10 @@ class StudyService:
             item.status == "ready" for item in series_rows
         )
         if has_invalid_series:
+            completeness = "conflict"
+        elif is_xray_modality(study.modality_type) and (
+            total_images > XRAY_STUDY_MAX_IMAGE_COUNT
+        ):
             completeness = "conflict"
         elif (
             study.expected_image_count is not None

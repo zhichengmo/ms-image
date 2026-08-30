@@ -1,6 +1,7 @@
 import hashlib
 import json
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,11 @@ from apps.backend.core.imaging.manifest import (
     build_series_manifest,
     build_series_manifest_legacy,
     build_study_manifest,
+    build_xray_diagnostic_series_manifest,
+)
+from apps.backend.core.imaging.xray_contract import (
+    require_xray_study_image_count,
+    requires_xray_runtime_image_contract,
 )
 from apps.backend.core.pipeline import (
     ZERO_MODEL_PROFILE,
@@ -161,8 +167,25 @@ class TaskService:
         first_definition = contract["stages"][0]
 
         series = await self.series_dal.list_for_study(study.id)
-        ready_images = await self.image_dal.list_ready_for_series_ids(
-            [item.id for item in series]
+        xray_image_contract_required = requires_xray_runtime_image_contract(
+            modality_type=study.modality_type,
+            task_type=payload.task_type,
+            profile_key=profile_key,
+        )
+        ready_images = (
+            await self.image_dal.list_ready_diagnostic_for_series_ids(
+                [item.id for item in series]
+            )
+            if xray_image_contract_required
+            else await self.image_dal.list_ready_for_series_ids(
+                [item.id for item in series]
+            )
+        )
+        self._require_xray_task_image_count(
+            modality_type=study.modality_type,
+            task_type=payload.task_type,
+            profile_key=profile_key,
+            image_count=len(ready_images),
         )
         run_mode = "replay" if payload.task_type == "replay" else "validation_only"
         report_required = payload.task_type == "diagnose"
@@ -299,6 +322,27 @@ class TaskService:
         if event is None:
             raise TaskStateConflictError("first_stage_event_conflict")
         return self._response(task)
+
+    @staticmethod
+    def _require_xray_task_image_count(
+        *,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        image_count: int,
+    ) -> None:
+        if not requires_xray_runtime_image_contract(
+            modality_type=modality_type,
+            task_type=task_type,
+            profile_key=profile_key,
+        ):
+            return
+        try:
+            require_xray_study_image_count(image_count)
+        except ValueError as exc:
+            raise TaskStateConflictError(
+                "xray_task_image_count_out_of_range"
+            ) from exc
 
     @classmethod
     def _config_key_for_task(
@@ -526,7 +570,17 @@ class TaskService:
                         series_id = study_item["series_id"]
                         row = rows_by_id[series_id]
                         ready_images = images_by_series[series_id]
-                        image_manifest = build_series_manifest(ready_images)
+                        image_manifest = (
+                            build_xray_diagnostic_series_manifest(ready_images)
+                            if requires_xray_runtime_image_contract(
+                                modality_type=getattr(
+                                    study, "modality_type", None
+                                ),
+                                task_type=task_type,
+                                profile_key=profile_key,
+                            )
+                            else build_series_manifest(ready_images)
+                        )
                         legacy_manifest = build_series_manifest_legacy(ready_images)
                         if len(image_manifest.items) != row.actual_image_count:
                             raise TaskStateConflictError(

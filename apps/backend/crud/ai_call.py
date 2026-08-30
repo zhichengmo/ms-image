@@ -49,6 +49,14 @@ class AICallDal(DalBase):
             v_return_none=True,
         )
 
+    async def list_for_task(self, task_id: str) -> list[AICall]:
+        return await self.get_datas(
+            limit=0,
+            task_id=task_id,
+            v_order_field="created_at",
+            v_return_objs=True,
+        )
+
     async def operational_snapshot(self) -> dict[str, Any]:
         counts = {
             status: await self.get_count(status=status)

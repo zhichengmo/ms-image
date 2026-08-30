@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, load_only
 
 from apps.backend.core.crud import DalBase
+from apps.backend.core.imaging.xray_contract import (
+    XRAY_DIAGNOSTIC_IMAGE_KIND,
+    XRAY_DIAGNOSTIC_IMAGE_ROLE,
+    XRAY_OCCUPYING_IMAGE_STATUSES,
+)
 from apps.backend.models.image import Image
+from apps.backend.models.series import Series
 
 
 class ImageDal(DalBase):
@@ -93,6 +99,61 @@ class ImageDal(DalBase):
             v_where=[
                 self.model.series_id.in_(normalized),
                 self.model.status == "ready",
+            ],
+            v_order_field="sequence_no",
+            v_return_objs=True,
+        )
+
+    async def list_ready_diagnostic_for_series(self, series_id: str) -> list[Image]:
+        return await self.get_datas(
+            limit=0,
+            series_id=series_id,
+            status="ready",
+            image_role=XRAY_DIAGNOSTIC_IMAGE_ROLE,
+            image_kind=XRAY_DIAGNOSTIC_IMAGE_KIND,
+            v_order_field="sequence_no",
+            v_return_objs=True,
+        )
+
+    async def list_ready_diagnostic_for_series_ids(
+        self, series_ids: list[str]
+    ) -> list[Image]:
+        normalized = sorted({item.strip() for item in series_ids if item.strip()})
+        if not normalized:
+            return []
+        return await self.get_datas(
+            limit=0,
+            v_where=[
+                self.model.series_id.in_(normalized),
+                self.model.status == "ready",
+                self.model.image_role == XRAY_DIAGNOSTIC_IMAGE_ROLE,
+                self.model.image_kind == XRAY_DIAGNOSTIC_IMAGE_KIND,
+            ],
+            v_order_field="sequence_no",
+            v_return_objs=True,
+        )
+
+    async def list_diagnostic_for_series(self, series_id: str) -> list[Image]:
+        return await self.get_datas(
+            limit=0,
+            series_id=series_id,
+            image_role=XRAY_DIAGNOSTIC_IMAGE_ROLE,
+            image_kind=XRAY_DIAGNOSTIC_IMAGE_KIND,
+            v_order_field="sequence_no",
+            v_return_objs=True,
+        )
+
+    async def list_occupying_diagnostic_slots_for_study(
+        self, study_id: str
+    ) -> list[Image]:
+        return await self.get_datas(
+            limit=0,
+            v_join=[(Series, self.model.series_id == Series.id)],
+            v_where=[
+                Series.study_id == study_id,
+                self.model.image_role == XRAY_DIAGNOSTIC_IMAGE_ROLE,
+                self.model.image_kind == XRAY_DIAGNOSTIC_IMAGE_KIND,
+                self.model.status.in_(XRAY_OCCUPYING_IMAGE_STATUSES),
             ],
             v_order_field="sequence_no",
             v_return_objs=True,

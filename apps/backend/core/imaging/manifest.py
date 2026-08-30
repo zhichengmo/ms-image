@@ -14,6 +14,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from apps.backend.core.imaging.xray_contract import is_xray_diagnostic_image
+
 
 class ManifestContractError(ValueError):
     pass
@@ -281,6 +283,16 @@ def build_series_manifest(images: Iterable[Any]) -> CanonicalManifest:
     return manifest_sha256(items)
 
 
+def build_xray_diagnostic_series_manifest(
+    images: Iterable[Any],
+) -> CanonicalManifest:
+    """Build a D1 manifest from diagnostic original X-Ray instances only."""
+
+    return build_series_manifest(
+        image for image in images if is_xray_diagnostic_image(image)
+    )
+
+
 def validate_frozen_series_manifest(
     items: Any,
     *,
@@ -502,6 +514,7 @@ __all__ = [
     "build_series_manifest",
     "build_series_manifest_legacy",
     "build_study_manifest",
+    "build_xray_diagnostic_series_manifest",
     "canonical_json_bytes",
     "manifest_sha256",
     "normalize_projection",

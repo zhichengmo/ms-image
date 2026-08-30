@@ -34,6 +34,10 @@ from apps.backend.core.ai.prompting.renderer import (
     PromptRenderer,
 )
 from apps.backend.core.ai.xray_result_contract import COMPLETE_MEDICAL_RESULT_V2
+from apps.backend.core.imaging.xray_contract import (
+    XRAY_STUDY_MAX_IMAGE_COUNT,
+    requires_xray_runtime_image_contract,
+)
 from apps.backend.core.pipeline import (
     PipelineContractError,
     StageRegistry,
@@ -285,6 +289,7 @@ class AIConfigCompiler:
         lane: Mapping[str, Any],
         capability: Mapping[str, Any],
         required_logical_calls: int,
+        xray_image_contract_required: bool = False,
     ) -> None:
         try:
             budget = BudgetPolicyContract.model_validate(budget_policy)
@@ -301,6 +306,13 @@ class AIConfigCompiler:
         max_context_tokens = capability.get("max_context_tokens")
         if not isinstance(max_images, int) or not isinstance(max_context_tokens, int):
             raise AIControlValidationError("config_connection_capability_invalid")
+        if xray_image_contract_required:
+            if normalized["max_input_images"] != XRAY_STUDY_MAX_IMAGE_COUNT:
+                raise AIControlValidationError("config_xray_image_budget_invalid")
+            if max_images < XRAY_STUDY_MAX_IMAGE_COUNT:
+                raise AIControlValidationError(
+                    "config_xray_connection_image_capability_invalid"
+                )
         if normalized["max_input_images"] > max_images:
             raise AIControlValidationError("config_image_budget_exceeds_connection")
         if normalized["max_total_calls"] < required_logical_calls:
@@ -464,6 +476,14 @@ class AIConfigCompiler:
             lane=model_lanes[0],
             capability=capabilities[0],
             required_logical_calls=self._required_logical_calls(compiled_pipeline),
+            xray_image_contract_required=(
+                requires_xray_runtime_image_contract(
+                    modality_type=source["modality_type"],
+                    task_type=source["task_type"],
+                    profile_key=source["profile_key"],
+                )
+                and source["profile_key"] == XRAY_PRIMARY_PROFILE_V2
+            ),
         )
 
         model_snapshot = {
@@ -667,6 +687,14 @@ class AIConfigCompiler:
             },
             required_logical_calls=self._required_logical_calls(
                 config.compiled_pipeline_json
+            ),
+            xray_image_contract_required=(
+                requires_xray_runtime_image_contract(
+                    modality_type=config.modality_type,
+                    task_type=config.task_type,
+                    profile_key=config.profile_key,
+                )
+                and config.profile_key == XRAY_PRIMARY_PROFILE_V2
             ),
         )
         gateway_profile_raw = getattr(config, "gateway_profile_json", None)

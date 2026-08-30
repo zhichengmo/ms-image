@@ -65,6 +65,10 @@ from apps.backend.core.imaging.manifest import (
     build_series_manifest_legacy,
     validate_frozen_study_series,
 )
+from apps.backend.core.imaging.xray_contract import (
+    require_xray_study_image_count,
+    requires_xray_runtime_image_contract,
+)
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.services.ai_control.service.config_compiler import AIConfigCompiler
 from apps.backend.services.ai_control.service.errors import AIControlValidationError
@@ -343,6 +347,11 @@ class AIRequestService:
 
         manifest_sha = self._stage_manifest_sha256(stage=stage)
         image_count = self._v2_image_count(task=task)
+        self._require_xray_image_count(
+            config=config,
+            task=task,
+            image_count=image_count,
+        )
         if image_count > max_input_images:
             raise AIRequestStateConflict("ai_call_image_budget_exceeded")
 
@@ -965,6 +974,11 @@ class AIRequestService:
 
         manifest_sha = self._stage_manifest_sha256(stage=stage)
         image_count = self._v2_image_count(task=task)
+        self._require_xray_image_count(
+            config=config,
+            task=task,
+            image_count=image_count,
+        )
         if image_count > max_input_images:
             raise AIRequestStateConflict("ai_call_image_budget_exceeded")
 
@@ -1198,6 +1212,11 @@ class AIRequestService:
         self._ensure_task_accepts_new_attempt(task)
         if call.winner_attempt_id is not None:
             raise AIRequestStateConflict("ai_call_winner_already_selected")
+        self._require_xray_image_count(
+            config=config,
+            task=task,
+            image_count=call.image_count_requested,
+        )
         image_inputs = await self._load_attempt_image_inputs(
             task=task,
             expected_manifest_sha256=call.requested_image_manifest_sha256,
@@ -1224,6 +1243,10 @@ class AIRequestService:
             "image_manifest_sha256": call.requested_image_manifest_sha256,
             "image_count_requested": call.image_count_requested,
             "image_inputs": image_inputs,
+            "xray_image_contract_required": self._xray_image_contract_required(
+                config=config,
+                task=task,
+            ),
             "snapshot_contract_version": (task.request_snapshot_json or {}).get(
                 "snapshot_contract_version"
             ),
@@ -1238,11 +1261,32 @@ class AIRequestService:
         image_signer: AttemptImageSigner | None = None,
     ) -> dict[str, Any]:
         """Boundary B: call ms-ai-platform from frozen facts with no DB access."""
+        xray_image_contract_required = (
+            network_plan.get("xray_image_contract_required") is True
+        )
+        if xray_image_contract_required:
+            try:
+                require_xray_study_image_count(
+                    network_plan.get("image_count_requested")
+                )
+            except ValueError as exc:
+                raise GatewayContractError(
+                    "ai_call_xray_image_count_out_of_range"
+                ) from exc
         signer = image_signer or build_oss_attempt_image_signer()
         images = await signer.sign(
             attempt_plan=network_plan,
             ttl_seconds=int(network_plan["image_url_ttl_seconds"]),
         )
+        if len(images) != network_plan.get("image_count_requested"):
+            raise GatewayContractError("ai_call_image_count_mismatch")
+        if xray_image_contract_required:
+            try:
+                require_xray_study_image_count(len(images))
+            except ValueError as exc:
+                raise GatewayContractError(
+                    "ai_call_xray_image_count_out_of_range"
+                ) from exc
         gateway_request = GatewayRequest(
             attempt_id=str(network_plan["attempt_id"]),
             logical_call_id=str(network_plan["logical_call_id"]),
@@ -1788,6 +1832,34 @@ class AIRequestService:
         if not isinstance(manifest_sha, str) or len(manifest_sha) != 64:
             raise AIRequestStateConflict("ai_call_manifest_missing")
         return manifest_sha
+
+    @staticmethod
+    def _xray_image_contract_required(*, config: Any, task: Any) -> bool:
+        snapshot = task.request_snapshot_json or {}
+        return (
+            snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V3
+            and requires_xray_runtime_image_contract(
+                modality_type=config.modality_type,
+                task_type=config.task_type,
+                profile_key=config.profile_key,
+            )
+        )
+
+    @staticmethod
+    def _require_xray_image_count(
+        *, config: Any, task: Any, image_count: int
+    ) -> None:
+        if not AIRequestService._xray_image_contract_required(
+            config=config,
+            task=task,
+        ):
+            return
+        try:
+            require_xray_study_image_count(image_count)
+        except ValueError as exc:
+            raise AIRequestStateConflict(
+                "ai_call_xray_image_count_out_of_range"
+            ) from exc
 
     @staticmethod
     def _v2_image_count(*, task: Any) -> int:
