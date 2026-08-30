@@ -2,13 +2,13 @@
 
 ## Current State
 
-- Last updated: 2026-08-30（猫狗 2–5 图 Runtime 代码与静态资格化完成，真实 8 病例被 Config budget Gate 阻断）
+- Last updated: 2026-08-30（猫狗 2–5 图 Runtime 代码、Config 预算和真实 8 病例工程资格化全部完成）
 - Workspace root: `/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - Branch: `codex/xray-2to5-runtime-qualification`
 - Base/HEAD before this slice: `d4a216a899f2f8937e5a7039e9c4cee9b30fc45b`
-- Objective: 在不新增 REST、表字段、迁移、医学 Prompt、Evaluation、Report CAS 或分割能力的前提下，把新 X-Ray diagnose Runtime 收紧为 2–5 张诊断原图，并以猫/狗各 2/3/4/5 图完成真实工程资格化。
-- Current status: 代码、8 个 engineering candidate manifest、多图 Harness 和静态回归已完成；唯一运行拓扑已动态合格。猫狗 global Primary active Config 的冻结 `max_input_images=20`，不满足新合同要求的 `5`，因此真实 8 病例未启动并记录为 `BLOCKED`。
-- Current local processes: 资格化 topology smoke 后已正常停止；API/Relay/Worker/Beat 均为 0，8010 未监听，`/tmp/ms-image-local-chain-8010.lock` 已释放。
+- Objective: 已在不新增 REST、表字段、迁移、医学 Prompt、Evaluation、Report CAS 或分割能力的前提下，把新 X-Ray diagnose Runtime 收紧为 2–5 张诊断原图，并以猫/狗各 2/3/4/5 图完成真实工程资格化。
+- Current status: `xray_diagnose_cat@3.0.1` 与 `xray_diagnose_dog@3.0.1` 已按 compile-preview → create → validate → activate 生命周期发布，唯一变化为 Config version 和 `max_input_images=5`；8 个 engineering candidate 病例均真实完成 Task/Report/receipt 验收。
+- Current local processes: 本轮 Runtime launcher 与独立 AI Control 已正常停止；8002/8010 未监听，ms-image API/Relay/Worker/Beat 均为 0，owner lock 不存在，imaging queue consumer/messages/unacked 均为 0。
 
 ## Completed In This Slice
 
@@ -24,12 +24,12 @@
 
 ## Dynamic Gate Evidence
 
-- 唯一 launcher topology：API 1、Relay 1、Worker parent 1、Worker child 1、Beat 0、broker consumer 1。
-- Runtime readiness：database/Redis/imaging broker/worker 均 ready，HTTP 200；launcher 正常退出后仅清理自有进程和 lock。
-- 猫 global Primary：`xray_diagnose_cat@3.0.0`，active，`xray_primary_v2`，Config SHA `392558b06ada121bdb943bf9ae053f821bf48ee8f11c432ad35dd4a8db366e94`，budget=20。
-- 狗 global Primary：`xray_diagnose_dog@3.0.0`，active，`xray_primary_v2`，Config SHA `c19dea28f13b62dc0bbd23315bd9800a466aeb510b1f5a17c62db00ac167325c`，budget=20。
-- 两者使用的 Connection 均为 validated、frozen SHA 对账一致、capability max_input_images=20；阻塞事实只在 Config budget 不等于 5。
-- 未创建 Task、未调用 Provider、未写控制面、未修改或覆盖 3.0.0。
+- AI Control health/readiness：database、control-plane JWT、Nacos 全部 ready；临时 HS256 Secret/Token 仅在进程内使用，未写盘或输出。
+- 猫 global Primary：`xray_diagnose_cat@3.0.1`，active，`xray_primary_v2/global/global`，budget=5，Config SHA `f505355a645fb9cd3cee06a80f667c61062c3b20c13a4af5b23c61c822056f92`，Prompt SHA `fdfe1d48feb51aaf13314d35e86b4e8758ffeb77a524f9a6ebee366034453017`。
+- 狗 global Primary：`xray_diagnose_dog@3.0.1`，active，`xray_primary_v2/global/global`，budget=5，Config SHA `1eec6839cd58aff7c746f93aff4085d5289e842c4a42484f8a21b56d42ca4c92`，Prompt SHA `33bee408116866ee44f96785da6a1d2154890c26116142dc7600915cda982405`。
+- 两者复用各自 3.0.0 的 Prompt/ModelPool/Schema/Pipeline/Connection；Connection validated 且 capability max_input_images=20。旧 3.0.0 仅退役，未覆盖或删除。
+- 唯一 launcher topology：API 1、Relay 1、Worker parent 1、Worker child 1、Beat 0、broker consumer 1；8 格结束后队列与 dead-letter 均为 0，Config SHA 无漂移。
+- 猫/狗各 2、3、4、5 图共 8 格均为 Task completed、Report final、C2 v2、receipt v2，receipt image count 等于 N；脱敏 evidence 位于 `docs/evidence/xray-2to5-runtime/20260830T130608Z/`。
 
 ## Current Qualification
 
@@ -40,44 +40,36 @@ XRAY_2TO5_E2E_HARNESS_STATIC_QUALIFIED
 UNIQUE_LOCAL_RUNTIME_TOPOLOGY_QUALIFIED
 BACKEND_TESTS_234_PASSED
 
-XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_BLOCKED
-BLOCKER=GLOBAL_PRIMARY_CONFIG_MAX_INPUT_IMAGES_20_NOT_5
-REAL_8_CASE_MATRIX_NOT_RUN
+XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED
+REAL_8_CASE_MATRIX_8_OF_8_PASSED
 MEDICAL_ACCURACY_UNKNOWN
 MEDICAL_RELEASE_NO_GO
 ```
 
-不得记录 `XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED`，直到 8 格全部通过。
+该资格仅证明工程链，不证明病例分组权威性、逐图医学评估覆盖或诊断准确率。
 
 ## Immediate Next Actions
 
-1. 经用户确认后，通过现有 AI Control 创建不可变 `xray_diagnose_cat@3.0.1` 与 `xray_diagnose_dog@3.0.1`：复用各自 3.0.0 的 Prompt/ModelPool/Connection/Schema/Profile，只把 budget `max_input_images` 改为 5；compile/validate 后再 activate global/global。不得覆盖 3.0.0。
-2. 重新只读确认猫狗 active global Primary 的 profile、budget=5、Connection capability>=5、Config SHA，并在 8 轮期间冻结这两个 SHA。
-3. 用唯一 launcher 启动 `1 API + 1 Relay + 1 Worker parent/child + 0 Beat + consumer=1`。
-4. 依次执行 cat 2/3/4/5、dog 2/3/4/5，命令必须带 `--expected-config-key`、`--expected-prompt-sha256`、`--verify-runtime-receipt`、`--evidence-dir`；任一格失败立即停止，不静默重试。
-5. 8 格全部 PASS 后才记录 `XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED`，然后进入 R4A–R4D/M1，而不是直接宣称医学准确。
+1. 完成当前证据与 handoff 提交并推送分支；运行进程和 owner lock 已清理。
+2. 下一独立阶段按 R4A–R4D 顺序建设 Evaluation DB/metadata/Alembic、Dataset 治理、Gold/Scorer 和 Runtime 等价 Runner。
+3. R4A–R4D 完成后建立 M1；只有 M1/Holdout 和正式医学 scorer 就绪后才开始 Primary/Targeted 单变量 Prompt 优化。
+4. Harness 每轮结束存在 aiomysql connection `Event loop is closed` 析构告警，退出码与 evidence 不受影响；后续可单独修复连接关闭，不回写本次资格结果。
 
 ## Active Files
 
-- `apps/backend/core/imaging/xray_contract.py`
-- `apps/backend/core/imaging/manifest.py`
-- `apps/backend/crud/image.py`
-- `apps/backend/crud/ai_call.py`
-- `apps/backend/schemas/study.py`
-- `apps/backend/services/runtime/service/study_service.py`
-- `apps/backend/services/runtime/service/image_service.py`
-- `apps/backend/services/runtime/service/task_service.py`
-- `apps/backend/services/runtime/service/ai_request_service.py`
-- `apps/backend/services/ai_control/service/config_compiler.py`
-- `scripts/dev/run_e2e_local.py`
-- `scripts/dev/manifests/xray-2to5/*.json`
-- `apps/backend/tests/test_ai_gateway_attempt_contracts.py`
-- `apps/backend/tests/test_ai_prompt_control_plane_contracts.py`
+- `docs/evidence/xray-2to5-runtime/20260830T130608Z/*.json`
+- `.agent-handoff/snapshot.md`
+- `.agent-handoff/validation.md`
+- `.agent-handoff/work-log.md`
+- `.agent-handoff/backlog.md`
+- `.agent-handoff/risks.md`
+- `.agent-handoff/decisions.md`
 
 ## Validation Summary
 
 - Pre-change baseline: `192 passed, 38 warnings`。
 - Final backend: `234 passed, 41 warnings`。
 - Ruff、compileall、E2E `--help`/非法参数、`bash -n`、`docker compose config --quiet`、`git diff --check` 全部 PASS。
-- 8 manifests 已按真实数据根回读文件、SHA256、大小、格式、content type 和 projection。
-- Docker Desktop daemon 当前未运行，但本机 MySQL/RabbitMQ/Redis 与 launcher topology/readiness 均动态合格；这不是当前阻塞原因。
+- 8 manifests 已按真实数据根回读文件、SHA256、大小、格式、content type 和 projection；8/8 真实 E2E 均通过。
+- AI Control Config 生命周期、Runtime readiness、Config/Prompt SHA 冻结、receipt 图像计数与 identity、Report current/history/C2 v2 均动态合格。
+- 每轮 Harness 完成后出现非阻塞 aiomysql 析构告警；无业务失败、无 evidence 漂移，已记录为后续工程清理风险。

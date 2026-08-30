@@ -1,0 +1,48 @@
+[
+  {
+    "qualification_status": "PASS",
+    "run": 1,
+    "case_key": "engineering-candidate-cat-03",
+    "grouping_status": "engineering_candidate",
+    "case_manifest_sha256": "38841fca34f05d80ac35477c768c5a5dd67e4946d3cf968b90971a8b4983ecc9",
+    "species": "cat",
+    "image_count": 3,
+    "series_count": 1,
+    "session_id": "e0d33ffbd5e24461b2167309a38880dd",
+    "study_id": "b1c2b94c18ae4245b7e4052b99db1ac2",
+    "revision_id": "ba9ec8984afe4443a44367c4f9d8ecd7",
+    "series_ids": [
+      "3686e901d5744b24adb87773f283b87e"
+    ],
+    "image_ids": [
+      "b4dc9e2afc4d41be80b63b462b298772",
+      "291a928c9fdd4764a457dedba648eb31",
+      "c815457c598b42a986fd5f7d02f4855c"
+    ],
+    "image_sha256": [
+      "451b54e86f0e59c89d16e8f30bf0dc91c9fd50169036034cb6edd5db3b3223c0",
+      "d161d2521dad1498613ebdfd8d125a67f1365019a48d0846f8ad06851497015d",
+      "1df152b2f7e166e0faeb7bef8b30bdcff8d1d74c14049870ba4f198b5df99384"
+    ],
+    "task_id": "817f5a06dd2e423b847f9e764f127889",
+    "task_status": "completed",
+    "medical_status": "abnormal",
+    "context_sha256": "11439f8e180b9b7fcb9df3ba9d678928f6d55620de4716694d0727f4fd79ac21",
+    "series_manifest_sha256": {
+      "3686e901d5744b24adb87773f283b87e": "83ba289da422263a9feb4b187846dd69a5ca29cdb10331ae548ebfe815995ee1"
+    },
+    "config_key": "xray_diagnose_cat",
+    "config_sha256": "f505355a645fb9cd3cee06a80f667c61062c3b20c13a4af5b23c61c822056f92",
+    "prompt_content_sha256": "fdfe1d48feb51aaf13314d35e86b4e8758ffeb77a524f9a6ebee366034453017",
+    "report_id": "ad44e11aaf9c4b15a8ddc31f22315d22",
+    "report_status": "final",
+    "content_sha256": "0997e8bde26e50550285fae3aa4e63d5c9dd82b7ecd99e0abc4d53e7f305b386",
+    "result_schema_version": "xray-complete-medical-result.v2",
+    "source_ref_count": 3,
+    "finding_count": 3,
+    "ai_call_id": "dece8b2a638649f8badd1598f5be6b94",
+    "receipt_contract_version": "ai-image-receipt.v2",
+    "receipt_image_count": 3,
+    "sent_image_manifest_sha256": "3d28c36d9553006a79db3e9ac342abbc0e57df209bddbba4bb8f276e34474124"
+  }
+]

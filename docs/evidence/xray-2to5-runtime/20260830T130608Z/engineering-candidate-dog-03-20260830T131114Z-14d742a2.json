@@ -1,0 +1,48 @@
+[
+  {
+    "qualification_status": "PASS",
+    "run": 1,
+    "case_key": "engineering-candidate-dog-03",
+    "grouping_status": "engineering_candidate",
+    "case_manifest_sha256": "9acaf7ae18af29bcd0b3e373808744768d0e11be7e740c62f48e69810e3b86c9",
+    "species": "dog",
+    "image_count": 3,
+    "series_count": 1,
+    "session_id": "2f9a963630bc4d56993e61a6ac8ff646",
+    "study_id": "6f280dcfbc70464bbd1b36be9d554bbf",
+    "revision_id": "f6d053a1eb104f89b67af2fe0758474b",
+    "series_ids": [
+      "769508c597154bfd87e63652fe41b23f"
+    ],
+    "image_ids": [
+      "542ea8888561486db71b221a04fa6fb5",
+      "ee650744d6314a10ae0260860f547e8b",
+      "bff1bf5bd23143e5942b09a64c25ff93"
+    ],
+    "image_sha256": [
+      "f51f071cd75143ff59507c09c7944005bb378fb6fd0ac6d4ee15a9b150007747",
+      "ab54b5c7f17bef8a062130a59987fec358e0baf13608cfcd6bef6bcc1f35f803",
+      "a14402f6279e88628b4c5eca3aec016873c5a08ae2e9c86d49318aee0a52c3e8"
+    ],
+    "task_id": "c3e1c8b67c70490c96027f633011772f",
+    "task_status": "completed",
+    "medical_status": "abnormal",
+    "context_sha256": "f14a3d66c01ab2772becee9c0b856e0ac13fc69f8ebecdaaf561b72efc8229ca",
+    "series_manifest_sha256": {
+      "769508c597154bfd87e63652fe41b23f": "6590a260373838f98c8d56c19d22b3d6dd0a9bb6aa8b4995d2265189164ac282"
+    },
+    "config_key": "xray_diagnose_dog",
+    "config_sha256": "1eec6839cd58aff7c746f93aff4085d5289e842c4a42484f8a21b56d42ca4c92",
+    "prompt_content_sha256": "33bee408116866ee44f96785da6a1d2154890c26116142dc7600915cda982405",
+    "report_id": "03a34b1103514d48afed3619ce677363",
+    "report_status": "final",
+    "content_sha256": "b3a9667f65117cde30a6074e978ffd9e5f31eed96bd44a6b516f6f99f9b030f1",
+    "result_schema_version": "xray-complete-medical-result.v2",
+    "source_ref_count": 3,
+    "finding_count": 3,
+    "ai_call_id": "35c094381fea488ea9d14c2c9a328788",
+    "receipt_contract_version": "ai-image-receipt.v2",
+    "receipt_image_count": 3,
+    "sent_image_manifest_sha256": "ffa5433eb359320aa04830c62fbc9a4fd0fafdf58e91ea3059291b290ee777a3"
+  }
+]

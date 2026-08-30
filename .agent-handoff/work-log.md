@@ -1,14 +1,5 @@
 # 当前工作日志
 
-## 2026-08-28 — AI Control Nacos readiness 真实配置复核与修正
-
-- 确认用户更新后的 `.env` 已被新 `Settings` 读取：Nacos 地址、Prompt namespace、通用 namespace 和凭据均非空；此前“optional disabled”是配置更新前的旧事实。
-- 真实只读探针确认 Nacos 登录、Config Client、Prompt Admin list 和 Prompt Client route 均可达；目标部署仅不支持 `/v1/console/health/readiness`，因此原 readiness 是探针选型造成的假阴性。
-- 将 Nacos 探针改为对实际 `/v3/client/ai/prompt` 执行无业务数据 OPTIONS，并要求响应声明 GET；不读取、写入或绑定任意 Prompt 正文。
-- 真实 AI Control readiness 现为 database ready、Nacos ready、Control-plane JWT misconfigured；临时仅在进程内注入合格 JWT key 后 endpoint 返回 200/全部 ready，未改 `.env`。
-- 当前配置 namespace 下 canonical XRay Prompt latest/`1.0.0` 精确读取仍为 404；只读遍历 Prompt namespace 的 212 条 Admin metadata 也没有该 key。记录为未来 re-import 风险，不让可变业务数据拖垮服务 readiness；Worker 使用已冻结数据库 Config，不运行时回读 Nacos。
-- 扩展既有控制面测试文件；未新增表、字段、迁移、测试脚本、医学或 projection 规则。
-
 ## 2026-08-28 — 对齐 `image-dev` Prompt namespace
 
 - 用户通过 Nacos 控制台截图确认 canonical XRay Prompt 位于 `image-dev` namespace，版本 `1.0.0` 在线。
@@ -286,3 +277,12 @@
 - 完整阅读 v3.3 路线图并点验 `StudyCreate/SeriesCreate`、`StudyService`、`ImageService`、`AIRequestService`、`AIConfigCompiler` 与现有 `run_e2e_local.py`。
 - 确认首批顺序为：E0 病例 manifest → E1 服务端 2–5 图门禁 → E3 现有 Harness 多图化 → E2 唯一 owner 真实环境资格化；E4–E8 在这些基础上执行矩阵。
 - 本计划不包含新 REST 接口、数据库字段/迁移、医学 Prompt 优化、Evaluation/M1、Report CAS 或器官分割。
+
+## 2026-08-30 — 猫狗 2–5 图 Runtime 真实矩阵资格化
+
+- AI Control health/readiness 全绿；临时 HS256 Admin Secret/Token 只存在于本轮进程内，未写盘或打印。
+- 猫狗 global Primary `3.0.1` 完成 compile-preview、create、validate、CAS activate；仅将 budget 从 20 收紧为 5，旧 3.0.0 retired 且未覆盖。
+- 唯一拓扑为 API=1、Relay=1、Worker parent/child=1、Beat=0、consumer=1；串行 cat/dog × 2/3/4/5 共 8 格全部 Task completed、Report final、C2 v2、receipt v2，image count=N。
+- 8 份脱敏 evidence 写入 `docs/evidence/xray-2to5-runtime/20260830T130608Z/`；Config/Prompt SHA 前后无漂移，敏感 key/value 扫描通过。
+- 回归通过：`234 passed, 41 warnings`，Ruff、compileall、E2E help/非法参数、launcher shell、四种 Compose 配置与 JSON/diff 检查均 PASS。
+- Harness 结束存在非阻塞 aiomysql event-loop 析构告警；本切片只记录风险。最终已停止本轮 launcher/AI Control，8002/8010、ms-image 进程、lock 和 imaging queue consumer/messages 均清理。

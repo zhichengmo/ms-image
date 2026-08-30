@@ -882,3 +882,14 @@
 | 固定 2–5 Provider gate 只解释新 v3 X-Ray diagnose Snapshot | 历史 v2 Task 的冻结含义不可被新部署改写；新 Task 已由 v3 Snapshot 与 Task gate 保证 | `AIRequestService._xray_image_contract_required`；historical v2 compatibility test |
 | Config Compiler 的 exact-5 budget 只约束 `xray_primary_v2` | 本阶段资格化 global Primary；Targeted 效果实验明确 Out，不顺带改变其历史 Config 合同 | Config compiler source gate；control-plane contract test |
 | active 3.0.0 budget=20 时停止 8 病例，不自动改控制面 | 计划要求 Config 不合格时输出 BLOCKED，并以新不可变版本修正；原地覆盖会破坏历史审计与重放 | 2026-08-30 DB readback；cat/dog Config SHA evidence |
+
+## 2026-08-30 — 猫狗 2–5 图 Runtime 动态资格化决策
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| global Primary 使用不可变 cat/dog `3.0.1`，预算恰为 5 | 新 Runtime/Compiler 合同要求 exact 5；覆盖 3.0.0 会破坏历史 Task 重放与审计 | AI Control compile/create/validate/activate；新旧 Config detail 对账 |
+| Config 版本更新不发布或修改 Prompt | 本阶段只修正工程预算；Prompt、ModelPool、Schema、Pipeline 和 Connection 必须保持单变量不变 | compile preview 与 3.0.0 frozen SHA 对账；8 格 Prompt SHA 一致 |
+| 8 格资格矩阵必须串行、任一失败即停 | 并行矩阵会混淆运行期 Config 漂移和队列所有权，静默重试会掩盖 Provider 合同失败 | `run_e2e_local.py` 逐格 exit/evidence；唯一 consumer readiness |
+| 工程资格证据只保存 opaque ID、数量与 SHA | 资格化需要可审计血缘，但不得持久化 Token、Signed URL、Prompt、Provider 原文或报告正文 | `docs/evidence/xray-2to5-runtime/20260830T130608Z/` 敏感字段和值扫描 |
+| 8/8 PASS 授予工程 Runtime 资格，不授予医学资格 | engineering candidate pairing、receipt N 图和合法 C2 输出都不是 Gold、逐图医学覆盖或准确率证明 | 8 份 evidence；`MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO` |
+| 下一默认阶段为 R4A–R4D → M1，而不是继续改 Prompt | 工程链已经稳定；没有隔离 Evaluation、可信 Dataset/Gold/Scorer 和 Runtime 等价 Runner时无法评价 Prompt 效果 | 路线图 v3.3 与当前 Evaluation Fake scorer 风险 |

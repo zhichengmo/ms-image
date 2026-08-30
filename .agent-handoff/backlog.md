@@ -4,16 +4,16 @@
 
 - [ ] 使用真实环境、真实影像和真实 Provider 执行 Collection Runner/Newman；此项继续归入下方 E0–E8，不由静态交付替代。
 
-## 2026-08-30 — 当前唯一 P0：X-Ray 2–5 图真实 Runtime E2E
+## 2026-08-30 — X-Ray 2–5 图真实 Runtime E2E 已完成
 
 - [x] E1：现有 Schema/Service/AIRequest/Config 链已补齐 `2 <= N <= 5`、多 Series 聚合、第 6 张 direct/multipart prepare、diagnostic original predicate 与 Provider 前 fail-closed。
-- [ ] E2（BLOCKED）：Runtime 唯一 topology、MySQL、Redis、RabbitMQ 已 ready；cat/dog global Primary active Config 的冻结 budget=20，不满足 5。需新建不可变 cat/dog `3.0.1` 后重验；不得覆盖 3.0.0。
+- [x] E2：通过 AI Control 不可变生命周期创建并激活 cat/dog `3.0.1`；仅把 budget 从 20 收紧为 5，旧 3.0.0 retired 且未覆盖。
 - [x] E3：既有 `scripts/dev/run_e2e_local.py` 已支持 case manifest 驱动同 Study 2–5 图、多 Series、receipt 只读核验与脱敏 evidence；未新增第二套 Harness。
-- [ ] E4：跑通 N 次真实 OSS PUT、N 次 complete-upload、N 张异步 validation ready、Series ready 和 Study finalize ready。
-- [ ] E5：跑通 Task、Outbox、Relay、RabbitMQ、Worker、Prompt/Config/ModelPool/Connection、真实 Provider、receipt 与 DecisionFinalization。
-- [ ] E6：得到首份 revision 1 final Report，并验证 `reports/current` 与 `reports/history`。
-- [ ] E7（BLOCKED）：cat/dog × 2/3/4/5 Primary 验收矩阵尚未执行；当前 Config gate 不合格时禁止创建资格 Task。
-- [ ] E8：当前已记录 Config budget 的脱敏 BLOCKED evidence；待 8 格逐一生成 PASS evidence 后才可完成，不得提前转入 Evaluation、Gold、Scorer 或医学 A/B。
+- [x] E4：8 格均完成 N 次真实 OSS PUT/complete-upload、N 张 validation ready、Series ready 和 Study finalize ready。
+- [x] E5：8 格均跑通 Task、Outbox、Relay、RabbitMQ、Worker、冻结 Config/Prompt/ModelPool/Connection、真实 Provider、receipt 与 DecisionFinalization。
+- [x] E6：8 格均得到 revision 1 final Report，并验证 `reports/current`、`reports/history` 与 Task current pointer 一致。
+- [x] E7：cat/dog × 2/3/4/5 Primary 验收矩阵 8/8 PASS；每格 receipt requested/sent identity 与 Snapshot 一致，image count=N。
+- [x] E8：8 份脱敏 PASS evidence 保存到 `docs/evidence/xray-2to5-runtime/20260830T130608Z/`；工程链已资格化。
 - [ ] E8 后增加 `image_assessments` 结果合同：逐图记录 assessment/quality/limitations，并强制 image_id 集合完整覆盖 Task Snapshot 的 N 张输入。
 - [ ] [P2] 在真实英文 clinical context 接入前，审计 leakage 禁止 token 的匹配边界，避免 `path/score/gold/truth` 子串误伤合法上下文；不得借此放宽标签泄漏防护或增加医学判断。
 - [ ] 后续接入 DICOM `ViewPosition` 的确定性提取和来源优先级；不得从文件名、目录或图像尺寸猜测体位，也不得覆盖调用方冻结值而不留冲突证据。

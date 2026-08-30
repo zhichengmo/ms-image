@@ -1,0 +1,46 @@
+[
+  {
+    "qualification_status": "PASS",
+    "run": 1,
+    "case_key": "engineering-candidate-dog-02",
+    "grouping_status": "engineering_candidate",
+    "case_manifest_sha256": "b4c68f3d633fa04d4bf62a05a2fa0a1a17175f668638573d21f3c7dd51737ef1",
+    "species": "dog",
+    "image_count": 2,
+    "series_count": 1,
+    "session_id": "d869ad1c4f024f5ea1621435c49a8d7f",
+    "study_id": "b8fdd084d7a94e94937970436b4a129b",
+    "revision_id": "0bfcb1f03eb14933ba8f3e23f17cfe57",
+    "series_ids": [
+      "f47ba92778d0450e802e908a2c1ee2ee"
+    ],
+    "image_ids": [
+      "c49f78aac7284643bb2e1a786d3cf826",
+      "16ceb3a1586a40878d963add61ea39d8"
+    ],
+    "image_sha256": [
+      "71791da3124dfb5641590528ddda94aca1c7ca728abc67ef83c1990163a0f33c",
+      "ca346ed68bf17200bfca19c802fe2b33d696220792d76150bb414cd08c2bbe2e"
+    ],
+    "task_id": "3b237ebc09154be996981374e5a7e070",
+    "task_status": "completed",
+    "medical_status": "normal",
+    "context_sha256": "6396c1c3d5c85d62c01a34736f92f5209237c76d7edefc93e61aa9c7a6b9c677",
+    "series_manifest_sha256": {
+      "f47ba92778d0450e802e908a2c1ee2ee": "b0e50f0c1ee41dc904c145a9ebcb9e5928ed6d0fdaf661baeac6bea963ea43a5"
+    },
+    "config_key": "xray_diagnose_dog",
+    "config_sha256": "1eec6839cd58aff7c746f93aff4085d5289e842c4a42484f8a21b56d42ca4c92",
+    "prompt_content_sha256": "33bee408116866ee44f96785da6a1d2154890c26116142dc7600915cda982405",
+    "report_id": "897bc3805c4b4ceea3015c71ac87d190",
+    "report_status": "final",
+    "content_sha256": "85d554950435f0bc9698b11e98d339bf225a4c98056c918bb333019729c50969",
+    "result_schema_version": "xray-complete-medical-result.v2",
+    "source_ref_count": 2,
+    "finding_count": 3,
+    "ai_call_id": "e90ce1833e2d4255aabeb676c14fa5d3",
+    "receipt_contract_version": "ai-image-receipt.v2",
+    "receipt_image_count": 2,
+    "sent_image_manifest_sha256": "dc69d8a7b632bcb05b13f44cd26941a90ea03a2e5bfbeb16c3affc05931c29f4"
+  }
+]

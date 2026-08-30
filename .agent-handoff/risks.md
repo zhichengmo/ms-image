@@ -1,10 +1,12 @@
 # 风险、阻断与未知项
 
-## 2026-08-30 — 2–5 图 Runtime 动态资格化阻塞
+## 2026-08-30 — 2–5 图 Runtime 动态资格化后的剩余风险
 
-- **猫狗 global Primary Config budget 漂移（当前硬阻断）**：active `xray_diagnose_cat@3.0.0` 与 `xray_diagnose_dog@3.0.0` 均为 `xray_primary_v2/global/global`，但冻结 `max_input_images=20`；新 Runtime/Compiler 合同要求恰好 5。Connection validated 且 capability=20，所以不是 Connection 或 Provider 配置故障。按不可变发布规则只能创建新的 cat/dog Config 版本（建议 `3.0.1`）并激活，不能覆盖 3.0.0；未获控制面写入确认前 8 病例保持 BLOCKED。
-- **真实 8 病例尚未执行**：代码、manifest、Harness、234 个测试和唯一 topology 都已合格，但没有创建本阶段资格 Task，也没有真实调用 Provider；不得将静态资格化或 topology smoke 写成 2–5 图全链 PASS。
-- **engineering candidate 不是医学病例确认**：8 个 manifest 按五字段技术指纹分组，路径中的 NOR/ABN 未进入 Gold 或 evidence；数据方尚未确认病例关系，结果只可用于工程链资格化。
+- **Config budget 阻断已关闭**：`xray_diagnose_cat@3.0.1` 与 `xray_diagnose_dog@3.0.1` 已 active，冻结 `max_input_images=5`；旧 3.0.0 仅 retired。8 格前后 Config/Prompt SHA 无漂移，Connection validated/capability=20。
+- **真实 8 病例工程资格已完成**：cat/dog × 2/3/4/5 共 8 格均 Task completed、Report final、C2 v2、receipt v2，receipt image count=N；该结论只授予 `XRAY_CAT_DOG_2TO5_ENGINEERING_RUNTIME_QUALIFIED`。
+- **engineering candidate 仍不是医学病例确认**：8 个 manifest 按五字段技术指纹分组，路径中的 NOR/ABN 未进入 Gold 或 evidence；数据方尚未确认病例关系，结果只可用于工程链资格化。
+- **发送 N 图仍不等于逐图医学评估覆盖**：receipt 证明同一 Logical Call 实际发送 N 张冻结图片；当前结果 Schema 没有 `image_assessments` 全输入覆盖要求，不得升级为逐图医学结论。
+- **Harness 连接清理告警**：8 次成功运行结束均出现 aiomysql connection 在 event loop 关闭后析构的告警；退出码、Task/Report 和 evidence 均为 PASS。应在后续非医学工程切片显式关闭只读核验 session/engine，不修改本次历史结果。
 - **历史冻结 Task 兼容已保留**：AIRequest 固定 2–5 门禁只对 v3 X-Ray diagnose Snapshot 生效；v2 frozen Task 不被新数量合同重新解释。未来修改该判断时必须保留此边界。
 
 ## 2026-08-30 — 当前 2–5 图 Runtime 全链风险
@@ -13,8 +15,7 @@
 - **leakage token 子串匹配可能过宽**：`apps/backend/core/ai/prompting/leakage.py` 当前对所有字符串匹配 `path/score/gold/truth` 等禁止 token 子串；中文合同测试通过，但合法英文 clinical context 可能被误伤。未获产品语义证据前不临时放宽或增加医学规则，应在真实英文上游接入前做定向合同评审。
 
 - **Task Snapshot 不保存完整 Prompt 正文**：完整 Prompt 合同在 immutable Config 行，Snapshot 只绑定 Config identity 与多项 SHA；后续 E2E 必须通过 Config detail + Snapshot SHA 证据链验证，不能在 Snapshot 中寻找不存在的 Prompt key/content 字段。
-- **真实 2/3/4/5 图矩阵未运行**：历史猫狗链路成功只能证明当时特定病例与配置，不能替代本轮动态数量合同的验收。
-- **发送全部影像不等于逐图完成评估**：当前 receipt 能证明一个 Logical Call 携带 N 张图，但结果 Schema 没有 `image_assessments` 全输入覆盖要求；不得把 source refs 数量或模型自由文本当作逐图覆盖证据。
+- **真实 2/3/4/5 图矩阵已运行**：本轮 8/8 工程链通过；它仍不能替代多病例医学准确率、正式 Gold、M1 或 Holdout。
 - **projection 可信度依赖调用方**：当前体位由调用方在 `prepare-upload` 声明，不是 DICOM 自动提取或 AI 像素识别；错误声明会沿 Image、Manifest、Snapshot、Prompt 和 SourceRef 被一致冻结。
 - **Postman 已交付但未执行真实 E2E**：`docs/postman/ms-image-xray-complete.postman_collection.json` 已覆盖 79/79 项目 HTTP 路由，含 Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9 和 4 个根探针；另有 5 个 OSS `noauth` PUT。Collection 已通过 OpenAPI、Schema、query、鉴权和敏感信息静态校验，但未填写真实 Token、Provider Secret 或真实影像，也未运行 Collection Runner/Newman，不能据此宣称 Runtime E2E PASS。
 - **Evaluation 不能替代 Runtime 等价实验 Runner**：当前 Evaluation Worker 使用 `FakeEvaluationScorer`，不执行候选 Prompt、Config、Pipeline、Gateway 或 Provider；9 个 Evaluation 接口虽已实现并纳入总账，但 M1、Prompt A/B、Provider A/B 和医学准确率仍未资格化。

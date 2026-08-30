@@ -1,6 +1,6 @@
 # 验证历史
 
-## 2026-08-30 — X-Ray 2–5 图 Runtime 静态与动态 Gate
+## 2026-08-30 — X-Ray 2–5 图 Runtime 最终真实资格化
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -8,16 +8,22 @@
 | Final backend full suite | PASS | `234 passed, 41 warnings` |
 | Ruff | PASS | `python3.12 -m ruff check apps/backend scripts/dev/run_e2e_local.py` |
 | Compileall | PASS | `PYTHONPATH=. python3.12 -m compileall -q apps/backend scripts/dev` |
-| E2E CLI help/invalid args | PASS | 新 3 个参数可见；非法 species 与缺 qualification Config 参数均在业务请求前失败 |
+| E2E CLI help/invalid args | PASS | `--case-manifest/--evidence-dir/--verify-runtime-receipt` 可见；缺 qualification Config 参数、非法 Prompt SHA、`repeat=0` 均在业务请求前以 exit 2 失败 |
 | Manifest readback | PASS | 8/8 文件存在，SHA256/bytes/format/content-type/projection 与 JSON 一致 |
-| Launcher syntax/Compose/diff | PASS | `bash -n`、`docker compose config --quiet`、`git diff --check` |
+| Launcher syntax/Compose | PASS | `bash -n`；default、broker、scheduler、broker+scheduler 四种 `docker compose config --quiet` 均通过 |
 | Unique local topology | PASS | API=1、Relay=1、Worker parent=1、child=1、Beat=0、broker consumer=1 |
 | Runtime readiness | PASS | database/Redis/imaging broker/worker ready，HTTP 200 |
-| Launcher cleanup | PASS | API/Relay/Worker/Beat=0、8010 free、owner lock absent |
-| Cat global Primary Config | BLOCKED | `xray_diagnose_cat@3.0.0`, profile primary v2, active, budget=20, expected=5 |
-| Dog global Primary Config | BLOCKED | `xray_diagnose_dog@3.0.0`, profile primary v2, active, budget=20, expected=5 |
-| Connection capability | PASS | validated, max_input_images=20, frozen Connection SHA matches both Config lanes |
-| Cat/dog 8-case real Provider matrix | NOT RUN | stopped before Task creation because Config budget Gate failed |
+| AI Control health/readiness | PASS | database、临时进程内 control-plane JWT、Nacos 均 ready；Secret/Token 未写盘或打印 |
+| Cat global Primary Config | PASS | 不可变 `xray_diagnose_cat@3.0.1` active，profile primary v2，global/global，budget=5；旧 3.0.0 retired |
+| Dog global Primary Config | PASS | 不可变 `xray_diagnose_dog@3.0.1` active，profile primary v2，global/global，budget=5；旧 3.0.0 retired |
+| Frozen Config identity | PASS | 猫 Config SHA `f505355a...56f92`、Prompt SHA `fdfe1d48...53017`；狗 Config SHA `1eec6839...a4c92`、Prompt SHA `33bee408...2405`；8 格前后无漂移 |
+| Connection capability | PASS | validated，max_input_images=20，满足 Config budget=5；Prompt/ModelPool/Schema/Pipeline/Connection 与各自 3.0.0 对账一致 |
+| Cat 2/3/4/5 real Provider matrix | PASS | 4/4 Task completed、Report final、C2 v2、receipt v2，receipt image count 分别为 2/3/4/5 |
+| Dog 2/3/4/5 real Provider matrix | PASS | 4/4 Task completed、Report final、C2 v2、receipt v2，receipt image count 分别为 2/3/4/5 |
+| Evidence redaction | PASS | 8 份 JSON 只保存 opaque ID、数量与 SHA；敏感 key/value 扫描未发现 Token、Signed URL、绝对影像路径、Prompt/Provider/Report 正文 |
+| Post-matrix topology | PASS | active Config identity 无漂移；Runtime ready、consumer=1、queue=0、dead-letter=0 |
+| Runtime/AI Control cleanup | PASS | 8002/8010 未监听，ms-image API/Relay/Worker/Beat=0，owner lock absent；imaging queue consumer/messages/unacked=0 |
+| Harness teardown | PASS WITH WARNING | 8 次均 exit 0 且 evidence PASS；每次结束出现 aiomysql connection `Event loop is closed` 析构告警，未影响业务或证据 |
 
 ## 记录规则
 

@@ -1,0 +1,50 @@
+[
+  {
+    "qualification_status": "PASS",
+    "run": 1,
+    "case_key": "engineering-candidate-dog-04",
+    "grouping_status": "engineering_candidate",
+    "case_manifest_sha256": "65ecfe4ff8ac0a58f6edd8a856fdaf5925a0ae7b2054d469083b5d70ded68617",
+    "species": "dog",
+    "image_count": 4,
+    "series_count": 1,
+    "session_id": "49f83eb137a5457094417142d7f8b024",
+    "study_id": "68dc434bf569485ab7d36cdf27775091",
+    "revision_id": "c6cf157200bb4821b8974133703dc358",
+    "series_ids": [
+      "4ba2ff6119da440d96564535e77bc739"
+    ],
+    "image_ids": [
+      "54c501737b234bfba405ebd1fd40f9ac",
+      "3b7ee37dfb38472da36423aa2f650b18",
+      "90307197d4964a9fbf7fdd1e73c5c7c8",
+      "c83804d9fd3b473689f115266d47205f"
+    ],
+    "image_sha256": [
+      "97095e8a8b7ee4cf3582e955e8596dc69f5da3ba7c1788f5c904ea037b5be5a3",
+      "9f5b2b1e8f8fecd239d91f4c49fc2b0940eef1d239f690817f5a22845a6a1a55",
+      "80640b5c8ee7a472d42322d95a738d437c93d0ff37d5777477845fc262c9d6ed",
+      "af8703cbfbe7227ebd30e4b4c12213e93272234f87ba128f85a4cd34922b305b"
+    ],
+    "task_id": "bfa3088d151b45029cccb228b67aeb50",
+    "task_status": "completed",
+    "medical_status": "abnormal",
+    "context_sha256": "7184899d3565e599e3b1638216bef98ff4bba462e351ac4877c7267454018cb4",
+    "series_manifest_sha256": {
+      "4ba2ff6119da440d96564535e77bc739": "285a81dd5764da4b030ef55736cd92e49588fd6b9835a81112f9fe4942dead08"
+    },
+    "config_key": "xray_diagnose_dog",
+    "config_sha256": "1eec6839cd58aff7c746f93aff4085d5289e842c4a42484f8a21b56d42ca4c92",
+    "prompt_content_sha256": "33bee408116866ee44f96785da6a1d2154890c26116142dc7600915cda982405",
+    "report_id": "ed85972b746c4a8a9586c69fac5238b2",
+    "report_status": "final",
+    "content_sha256": "1d72810195f6af09d4e82a6e1b30421bb252c6f9d7dd3eb67ac60fea920d9a60",
+    "result_schema_version": "xray-complete-medical-result.v2",
+    "source_ref_count": 4,
+    "finding_count": 3,
+    "ai_call_id": "f2fe6594378f4dc9ae569cc923175c46",
+    "receipt_contract_version": "ai-image-receipt.v2",
+    "receipt_image_count": 4,
+    "sent_image_manifest_sha256": "1ac96f434bf6305362a22f42a73adae80b2abb604b36ea2e8a50adfedc1ed67c"
+  }
+]

@@ -40,8 +40,8 @@
 
 - 最后更新：2026-08-30
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`（v3.3 路线图与 79/79 路由、96 Request 已静态资格化；核心、工具、文档已通过 192 个测试并分组推送，真实 2–5 图 Runtime E2E 本轮未运行）
-- 下一动作：`.agent-handoff/backlog.md`（先按 E0–E8 完成猫/狗 × 2/3/4/5 真实诊断 E2E；通过后默认 R4A–R4D → M1 → Primary/Targeted，分割仅为用户显式选择的可选支线）
+- 当前状态：`.agent-handoff/snapshot.md`（猫/狗 × 2/3/4/5 共 8 格真实 Runtime/Provider E2E 已全部通过；global Primary Config `3.0.1` 已按不可变生命周期激活，预算固定为 5；后端 234 tests 通过）
+- 下一动作：`.agent-handoff/backlog.md`（工程链已资格化；默认进入 R4A Evaluation DB 隔离 → R4B Dataset 治理 → R4C Gold/Scorer → R4D Runtime 等价 Runner → M1，医学 Prompt 优化不得跳过这些前置）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
 - 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）

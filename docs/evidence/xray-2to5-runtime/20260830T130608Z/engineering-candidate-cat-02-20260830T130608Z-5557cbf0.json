@@ -1,0 +1,46 @@
+[
+  {
+    "qualification_status": "PASS",
+    "run": 1,
+    "case_key": "engineering-candidate-cat-02",
+    "grouping_status": "engineering_candidate",
+    "case_manifest_sha256": "ec51de982b18ec1a785733629940ad1b141620f590ad1f6b5049d884c11c9fb0",
+    "species": "cat",
+    "image_count": 2,
+    "series_count": 1,
+    "session_id": "38790bf72d2a4becb1983ac558b4eb1c",
+    "study_id": "aa2a8d6df5eb4ae3af8a92c959846468",
+    "revision_id": "7fcd47a87dcd49c0b76ea4d1be182d55",
+    "series_ids": [
+      "d7d699c4ac36493a8312d551e79ea8f7"
+    ],
+    "image_ids": [
+      "6a212a2ae63f471aa80cf08460c1f308",
+      "0166e8de06344acc9075e8ab671b6010"
+    ],
+    "image_sha256": [
+      "e7d67f1b3e6f77db45d27416fb0e05418649ac1bd356957693165bf30011080e",
+      "507c4c7ca76a39673fe512efaa61345ae72a47733682f5c0a433854985602a08"
+    ],
+    "task_id": "ca93324db64b4cffb9ff01bd4f7affdc",
+    "task_status": "completed",
+    "medical_status": "normal",
+    "context_sha256": "ce4258caaa4c8d698cdccde5170b563a679c24651a2ab756ff3f2546c0386bf5",
+    "series_manifest_sha256": {
+      "d7d699c4ac36493a8312d551e79ea8f7": "34091fa769ba1c040c34c70be5e10e2d7afb5a513214f4ae5be17ad38cb3883b"
+    },
+    "config_key": "xray_diagnose_cat",
+    "config_sha256": "f505355a645fb9cd3cee06a80f667c61062c3b20c13a4af5b23c61c822056f92",
+    "prompt_content_sha256": "fdfe1d48feb51aaf13314d35e86b4e8758ffeb77a524f9a6ebee366034453017",
+    "report_id": "3151d80a474e49b597ca35bade38d97a",
+    "report_status": "final",
+    "content_sha256": "c9783cddae795839b3f20be28ac2010016b272cd948086774a08c0e205718af3",
+    "result_schema_version": "xray-complete-medical-result.v2",
+    "source_ref_count": 2,
+    "finding_count": 0,
+    "ai_call_id": "5ba2deda128b4751a86ac45008683e33",
+    "receipt_contract_version": "ai-image-receipt.v2",
+    "receipt_image_count": 2,
+    "sent_image_manifest_sha256": "4e274c1c6379099660574e8ad086c930fb49b1ac9d69bac2d6dfde2cc3b7ce43"
+  }
+]
