@@ -8,7 +8,7 @@
 - Current status: 路线图与 Postman Collection 已按四套 FastAPI App 的源码/OpenAPI 完成静态资格化。项目总账为 79 个 HTTP 路由：75 个版本化接口（Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9）和 4 个非版本化 `GET /` 根探针；Runtime 病例工程链直接支撑子集仍为 66 个版本化接口。另列 5 个 `PROPOSED_NOT_IMPLEMENTED` 分割目标接口，但不计入 79。
 - Postman artifact: `/Users/mozhicheng/workspace/code/cy-code/ms-image/docs/postman/ms-image-xray-complete.postman_collection.json`，Postman v2.1，96 个 Request；覆盖 79/79 项目路由、5 个 OSS `noauth` PUT 和 12 个多影像槽重复请求。Evaluation Folder 默认跳过，5 个未实现分割接口只作为说明，不创建虚构 Request。
 - Current architecture decision: `existing-entry internal modular correction`。继续复用 `API -> Service -> CRUD(DalBase) -> Model/MySQL` 与 `Task -> Outbox -> Relay -> RabbitMQ -> Worker -> Stage Registry -> Gateway/Provider -> Report`；禁止创建第二套 Runtime、Repository、CRUDBase、DatabaseService、Pipeline 或医学事实源。
-- Current Git evidence: branch `codex/prompt-runtime-ai-gateway`，HEAD `21f103f`；核心合同提交 `c8478e0` 与本地验收工具提交 `21f103f` 已推送到 `origin/codex/prompt-runtime-ai-gateway`。剩余工作树仅保留待提交文档/handoff，以及明确排除的旧 Postman 和 handoff archive；继续禁止 reset/clean/restore。
+- Current Git evidence: branch `codex/prompt-runtime-ai-gateway`；核心合同 `c8478e0`、本地验收工具 `21f103f`、路线图与文档 `52edcde` 均已推送到 `origin/codex/prompt-runtime-ai-gateway`。剩余工作树只保留明确排除的旧 Postman、tracked archive index 和 handoff archive；继续禁止 reset/clean/restore。
 - Current local processes: 本轮未启动或动态核验 Runtime、AI Control、Relay、RabbitMQ、Worker、OSS、Provider 或数据库。
 
 ## Completed In This Slice
@@ -17,7 +17,7 @@
 - 修复 `ImageReconciler` 未传 P1-B `max_reconcile_count/max_unknown_age_seconds` 的运行时 `TypeError` 风险。
 - 修复 Compose 单独启用 `scheduler` Profile 时未启用 imaging worker/RabbitMQ 依赖的问题；本地 launcher 保持不拥有 Beat，唯一 owner 为 Compose scheduler 或外部调度器。
 - 后端全量测试 `192 passed, 38 warnings`；Ruff、compileall、reconcile CLI、launcher shell、E2E CLI help、Postman JSON、四种 Compose profile 和 diff check 全部通过。
-- 已生成并推送 `c8478e0 feat(xray): complete runtime prompt and reconciliation contracts` 与 `21f103f feat(dev): add deterministic local xray chain tooling`。
+- 已生成并推送 `c8478e0 feat(xray): complete runtime prompt and reconciliation contracts`、`21f103f feat(dev): add deterministic local xray chain tooling` 与 `52edcde docs(xray): finalize runtime and medical optimization roadmap`。
 
 - 将路线图更新为 v3.3，新增一页最终执行摘要，明确唯一下一阶段为 `RUNTIME_2_TO_5_IMAGE_DETERMINISTIC_QUALIFICATION`；E0–E8 完成前禁止先做医学 Prompt 优化、Targeted 效果实验、Evaluation M1 或器官分割。
 - 纠正 Prompt 事实：当前 v2 Worker 每个 Logical Call 直接渲染 immutable `AIConfigRecord.prompt_content`；Catalog 20 个模块只是本地资产库存与 v1 provider-disabled 兼容输入，不是 v2 单病例逐个执行的 20 份 Prompt。
@@ -106,5 +106,5 @@ MEDICAL_RELEASE_NO_GO
 - Postman：96 个 Request；50/50 JSON request body 通过对应 OpenAPI Schema，22/22 required query 请求无缺失，91/91 项目请求鉴权与 OpenAPI 一致，5/5 OSS PUT 为 `noauth`；每个项目请求说明均包含用途和 Prompt/Provider 数。
 - Markdown：228 个代码围栏且数量为偶数；`python -m json.tool`、四 App 路由计数和 `git diff --check` 均通过。
 - 提交前动态验证：`PYTHONPATH=. pytest -q apps/backend/tests` 为 `192 passed, 38 warnings`；Ruff、compileall、launcher/E2E CLI、reconcile CLI、Postman JSON 与 Compose default/broker/scheduler/broker+scheduler 均 PASS。
-- Git：`c8478e0` 与 `21f103f` 已成功推送到 `origin/codex/prompt-runtime-ai-gateway`；私钥、`.env`、旧 Postman 与 archive 未进入这两次提交。
+- Git：`c8478e0`、`21f103f`、`52edcde` 已成功推送到 `origin/codex/prompt-runtime-ai-gateway`；私钥、`.env`、旧 Postman 与 archive 未进入这些提交。
 - 真实 E2E：NOT RUN / UNKNOWN；不得把静态资格化写成 Runtime 全链 PASS。

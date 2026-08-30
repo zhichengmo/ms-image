@@ -274,5 +274,5 @@ MEDICAL_RELEASE_NO_GO
 | Postman JSON | PASS | canonical Collection 通过 `python -m json.tool`。 |
 | Whitespace | PASS | `git diff --check` 与两组 cached diff check 通过。 |
 | Secret/path boundary | PASS | cached diff 未发现 Private Key、常见 Token、AWS signed signature；`.env`、`scripts/dev/keys/`、旧根目录 Postman 和 handoff archive 均未暂存。 |
-| Git push | PASS | `c8478e0`、`21f103f` 已推送到 `origin/codex/prompt-runtime-ai-gateway`。 |
+| Git push | PASS | `c8478e0`、`21f103f`、`52edcde` 已推送到 `origin/codex/prompt-runtime-ai-gateway`。 |
 | Runtime E2E | NOT RUN | 本轮目标是检查、提交和推送；没有启动业务进程或重新运行真实 Provider 全链。 |

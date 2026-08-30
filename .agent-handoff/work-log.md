@@ -285,5 +285,5 @@
 - 修复 `docker-compose.yml`：`scheduler` Profile 同时启用 imaging worker 和 RabbitMQ 依赖；保留 Compose scheduler 与外部 scheduler 二选一的唯一 owner 合同。
 - 修正 `USAGE.md`、29 号实施指南与 refactor README 的 Beat owner/接口总账说明。
 - 全量后端测试为 `192 passed, 38 warnings`；Ruff、compileall、shell、CLI、Postman JSON、Compose profile 和 whitespace 检查全部通过。
-- 显式分组提交并推送：核心 Runtime/Prompt/reconcile 为 `c8478e0`，本地确定性启动/E2E/Postman 为 `21f103f`。
+- 显式分组提交并推送：核心 Runtime/Prompt/reconcile 为 `c8478e0`，本地确定性启动/E2E/Postman 为 `21f103f`，路线图/接口文档/durable handoff 为 `52edcde`。
 - 未使用 `git add -A`；未提交 `.env`、`scripts/dev/keys/`、旧根目录 Postman、`.agent-handoff/archive/` 或运行产物。

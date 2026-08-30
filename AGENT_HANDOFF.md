@@ -40,7 +40,7 @@
 
 - 最后更新：2026-08-30
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`（v3.3 路线图与 79/79 路由、96 Request 已静态资格化；核心/工具代码已通过 192 个测试并分组推送，真实 2–5 图 Runtime E2E 本轮未运行）
+- 当前状态：`.agent-handoff/snapshot.md`（v3.3 路线图与 79/79 路由、96 Request 已静态资格化；核心、工具、文档已通过 192 个测试并分组推送，真实 2–5 图 Runtime E2E 本轮未运行）
 - 下一动作：`.agent-handoff/backlog.md`（先按 E0–E8 完成猫/狗 × 2/3/4/5 真实诊断 E2E；通过后默认 R4A–R4D → M1 → Primary/Targeted，分割仅为用户显式选择的可选支线）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
