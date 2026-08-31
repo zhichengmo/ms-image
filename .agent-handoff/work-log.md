@@ -1,13 +1,5 @@
 # 当前工作日志
 
-## 2026-08-28 — 对齐 `image-dev` Prompt namespace
-
-- 用户通过 Nacos 控制台截图确认 canonical XRay Prompt 位于 `image-dev` namespace，版本 `1.0.0` 在线。
-- 只读比较确认 `.env` 中 Prompt/general namespace 均不是用户提供的目标值；显式使用目标 namespace 后，canonical `1.0.0` 与 latest 均成功返回结构化 metadata。
-- 仅修改 `.env` 的 `NACOS_PROMPT_NAMESPACE_ID`；保留通用 `NACOS_NAMESPACE_ID`，不干扰 Config Center 或 Discovery 的既有 namespace。
-- 新 `Settings` 直接读取配置后，`NacosPromptSourceClient.fetch()` 成功取得 canonical `1.0.0`，Nacos readiness 为 ready；整体仍仅被未配置的 `ADMIN_SECRET_KEY` 阻断。
-- 未输出 Prompt 正文或凭据，未写 Nacos、数据库、表、迁移、医学或 projection 规则；现有 AI Control 进程需要重启加载 `.env`。
-
 ## 2026-08-28 — 重写 14 号 XRay 架构选择与专项设计
 
 - 对照当前 Pipeline、FamilyRouting、StudyPreparation、DecisionFinalization、Prompt identity、20 个 ORM Model、Report CAS 和最新 E1-MV/运行风险证据，重写 `docs/refactor/14-xray-specialty-design.md`。
@@ -287,3 +279,16 @@
 - 回归通过：`234 passed, 41 warnings`，Ruff、compileall、E2E help/非法参数、launcher shell、四种 Compose 配置与 JSON/diff 检查均 PASS。
 - Harness 结束存在非阻塞 aiomysql event-loop 析构告警；本切片只记录风险。最终已停止本轮 launcher/AI Control，8002/8010、ms-image 进程、lock 和 imaging queue consumer/messages 均清理。
 - 显式暂存 8 份 evidence 与当前 handoff 文件，未使用 `git add -A`；提交 `bc4fb47` 已推送当前分支，archive 与旧根目录 Postman 保持未提交。
+
+## 2026-08-31 — R4A Evaluation 独立数据库与基础设施烟测
+
+- 从 `e452b34` 建立 `codex/xray-evaluation-r4a`，严格限制在 Evaluation metadata/DB/Alembic/readiness/Compose/Fake scorer 基础设施；未进入 Dataset、Gold、真实 Runner、M1、Prompt 或医学规则。
+- 新增 `EvaluationBaseModel`/`EvaluationRecordBase`，四个 Evaluation ORM 已从在线 `BaseModel.metadata` 完全移出；独立 metadata 精确为四表且保持 opaque `VARCHAR(64)` 单列主键、无 FK/enum/tenant。
+- 新增 `alembic_evaluation.ini`、独立 migration env 与 `20260831_eval_01`；空库、完整 adoption、部分 schema、额外 constraint、空/非空 downgrade 门禁均已真实验证。
+- 新增在线 cleanup revision `20260831_01`；临时库证明非空 fail-closed、空表删除和 downgrade 空结构恢复。正式主库四张历史空表在 0 行复核后删除，主库 revision 现为 `20260831_01`。
+- 正式创建 `ms_image_eval` 并迁移到 `20260831_eval_01`。Evaluation Control `/health`、`/readiness` 真实 200，database/schema/JWT 三项均 ready。
+- 真实启动单 Relay、单 Worker；确认同 broker 的其他 `scheduled` 节点不消费 `evaluation.job.execute`。使用既有 completed Task/Report 导出非医学 smoke Job，Job completed、Run succeeded、5 个 Artifact ready 且 OSS HEAD 均存在。
+- Fake scorer 的 `expected_status` 明确标为 schema sentinel，不读取 Artifact 正文或医学指标；保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
+- 修复两个真实资格化缺陷：Backend 镜像补入 Evaluation Alembic 资产；Evaluation async URL 使用 `URL.create()`，特殊字符密码 round-trip 通过。
+- 停止 Evaluation Control/Relay/Worker，清理临时数据库，运行目录移入系统废纸篓；正式评测库和烟测审计记录保留。
+- 验证：backend `240 passed, 41 warnings`；Ruff、compileall、Evaluation Alembic current/check、Compose 四 profile、81 route/98 Postman、JSON、diff check 通过。Docker daemon 未运行，镜像 build 阻断；在线主库 `alembic check` 仅被既存 `secret_ref` 注释漂移阻断，因此未记录最终 R4A qualification。

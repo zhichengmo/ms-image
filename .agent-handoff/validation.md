@@ -1,5 +1,29 @@
 # 验证历史
 
+## 2026-08-31 — R4A Evaluation 独立数据库资格化
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| Evaluation metadata 隔离 | PASS | 在线 metadata 无 `evaluation_*`；独立 metadata 精确四表 |
+| Evaluation 空库 replay / existing adoption / drift rejection | PASS | 空库 upgrade-downgrade-upgrade、同构 adoption、部分表与额外 CHECK 均按合同处理 |
+| Evaluation 非空 downgrade | PASS | 正式库 1 Job/1 Outbox/1 Run/5 Artifact 时拒绝 `evaluation_schema_downgrade_blocked_by_rows`，revision/数据不变 |
+| 在线 cleanup 非空保护 | PASS | 临时主库有 sentinel 时拒绝且四表/revision 保留 |
+| 在线 cleanup / downgrade | PASS | 0 行时删除四表；downgrade 只恢复四张同构空表 |
+| 正式数据库 revision | PASS | `ms_image=20260831_01` 且无 Evaluation 表；`ms_image_eval=20260831_eval_01` 且精确四表 |
+| Evaluation Control health/readiness | PASS | 两接口 HTTP 200；database/schema/JWT 均 ready |
+| Fake scorer 技术烟测 | PASS | Job completed、Run succeeded、5 Artifact ready；5/5 OSS HEAD 通过；未读医学指标正文 |
+| Backend pytest | PASS | `240 passed, 41 warnings` |
+| Ruff / compileall | PASS | 后端、Evaluation migration 与本轮 revision 通过 |
+| Evaluation Alembic current/check | PASS | head=`20260831_eval_01`；No new upgrade operations |
+| Online Alembic current | PASS | head=`20260831_01` |
+| Online Alembic check | BLOCKED | 既存非 Evaluation 漂移：`ai_api_connection.secret_ref` 物理列注释与 ORM 注释不一致；本阶段未顺带修改 |
+| Compose config | PASS | default、broker、evaluation、broker+evaluation 四种组合 |
+| OpenAPI/Postman | PASS | 81 项目路由、Evaluation 11 versioned、98 Request；JSON 通过 |
+| Docker image build | BLOCKED | Docker daemon 未运行；Dockerfile COPY 资产与 Compose 静态配置已核验 |
+| `git diff --check` | PASS | 无空白错误 |
+
+脱敏证据：`docs/evidence/evaluation-r4a/20260831T023611Z/`。
+
 ## 2026-08-30 — X-Ray 2–5 图 Runtime 最终真实资格化
 
 | Check | Result | Evidence |

@@ -1,0 +1,37 @@
+{
+  "evidence_contract": "evaluation-r4a-database-isolation.v1",
+  "captured_at": "2026-08-31T02:36:11Z",
+  "online_database": {
+    "alembic_revision": "20260831_01",
+    "evaluation_tables": []
+  },
+  "evaluation_database": {
+    "database_name": "ms_image_eval",
+    "alembic_revision": "20260831_eval_01",
+    "tables": [
+      "evaluation_artifact_record",
+      "evaluation_job_record",
+      "evaluation_outbox_record",
+      "evaluation_run_record"
+    ],
+    "row_counts_after_smoke": {
+      "evaluation_artifact_record": 5,
+      "evaluation_job_record": 1,
+      "evaluation_outbox_record": 1,
+      "evaluation_run_record": 1
+    }
+  },
+  "migration_gates": {
+    "empty_database_replay": "passed",
+    "existing_schema_adoption": "passed",
+    "partial_schema_rejected": "passed",
+    "extra_constraint_schema_rejected": "passed",
+    "evaluation_nonempty_downgrade_rejected": "passed",
+    "online_nonempty_cleanup_rejected": "passed",
+    "online_empty_cleanup": "passed",
+    "online_empty_downgrade_restore": "passed"
+  },
+  "temporary_databases_removed": true,
+  "contains_medical_content": false,
+  "contains_secrets": false
+}

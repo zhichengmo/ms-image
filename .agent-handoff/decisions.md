@@ -893,3 +893,15 @@
 | 工程资格证据只保存 opaque ID、数量与 SHA | 资格化需要可审计血缘，但不得持久化 Token、Signed URL、Prompt、Provider 原文或报告正文 | `docs/evidence/xray-2to5-runtime/20260830T130608Z/` 敏感字段和值扫描 |
 | 8/8 PASS 授予工程 Runtime 资格，不授予医学资格 | engineering candidate pairing、receipt N 图和合法 C2 输出都不是 Gold、逐图医学覆盖或准确率证明 | 8 份 evidence；`MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO` |
 | 下一默认阶段为 R4A–R4D → M1，而不是继续改 Prompt | 工程链已经稳定；没有隔离 Evaluation、可信 Dataset/Gold/Scorer 和 Runtime 等价 Runner时无法评价 Prompt 效果 | 路线图 v3.3 与当前 Evaluation Fake scorer 风险 |
+
+## 2026-08-31 — R4A Evaluation 数据所有权与资格边界决策
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Evaluation 四表由独立 `EvaluationBaseModel.metadata` 和独立 Alembic 唯一拥有 | 在线 metadata/Alembic 混入四表会让主库空表掩盖 Evaluation 实际不可运行，并破坏独立部署/回滚 | `evaluation_base.py`、`alembic_evaluation_migrations/`、真实两库表集合 |
+| 既有四表 adoption 必须 exact/fail-closed | 部分表、列/索引/唯一约束或额外 FK/CHECK 都不能被当作同构数据接管 | `validate_evaluation_schema()` 与动态 drift 验证 |
+| 主库 cleanup 只删除 0 行历史表；任何数据先停止 | R4A 不迁移或解释历史 Evaluation 数据，避免跨库静默丢失审计事实 | `20260831_01` 非空 sentinel 门禁与正式 0 行预检 |
+| Evaluation Control readiness 只检查独立 DB、schema revision 与 Control JWT | Runtime/Nacos/Provider 不是 Evaluation Control liveness 的必需依赖；R4A 也不把 Fake scorer 当 Runtime Runner | `/api/v1/readiness` 真实 200 与组件输出 |
+| Fake scorer 烟测只证明基础设施，不读取医学指标 | 当前 scorer 只聚合冻结字段，没有可信 Gold、医学 ontology 或 Runtime 等价候选执行 | Job/Run/Artifact evidence；`MEDICAL_ACCURACY_UNKNOWN` |
+| 在线主库既存注释漂移不混入 R4A migration | 每个切片必须直接服务当前目标；顺手改非 Evaluation 历史列会扩大 migration write set 并降低可审阅性 | 主库 `alembic check` 唯一失败项 |
+| 最终 qualification 必须等待全套验证无阻断 | 代码/烟测 PASS 与完整发布门禁不同；主库 check 和容器 build 未通过时不能虚报全部资格化 | `docs/evidence/evaluation-r4a/20260831T023611Z/validation.json` |

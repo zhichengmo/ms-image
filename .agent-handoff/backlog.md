@@ -1,13 +1,18 @@
 # 待办清单
 
+## 2026-08-31 — R4A 当前收口
+
+- [ ] [BLOCKED] 在线主库 `alembic check` 存在既存 `ai_api_connection.secret_ref` 注释漂移；未经独立范围审阅不混入 R4A migration。
+- [ ] [ENVIRONMENT] Docker daemon 启动后补一次镜像 build 与 `evaluation-migrate` 容器启动验证；不修改业务代码。
+- [ ] 两项关闭后记录计划中的最终 R4A qualification，按明确路径分组提交并推送当前分支。
+- [ ] R4A 最终关闭后进入 R4B Dataset 治理；R4C Gold/Scorer、R4D Runtime 等价 Runner、M1 和 Prompt 继续保持后置。
+
 ## 2026-08-30 — v3.3 最终路线、全接口与 Postman 静态交付已完成
 
 - [ ] 使用真实环境、真实影像和真实 Provider 执行 Collection Runner/Newman；此项继续归入下方 E0–E8，不由静态交付替代。
 
 ## 2026-08-30 — X-Ray 2–5 图真实 Runtime E2E 已完成
 
-- [x] E1：现有 Schema/Service/AIRequest/Config 链已补齐 `2 <= N <= 5`、多 Series 聚合、第 6 张 direct/multipart prepare、diagnostic original predicate 与 Provider 前 fail-closed。
-- [x] E2：通过 AI Control 不可变生命周期创建并激活 cat/dog `3.0.1`；仅把 budget 从 20 收紧为 5，旧 3.0.0 retired 且未覆盖。
 - [x] E3：既有 `scripts/dev/run_e2e_local.py` 已支持 case manifest 驱动同 Study 2–5 图、多 Series、receipt 只读核验与脱敏 evidence；未新增第二套 Harness。
 - [x] E4：8 格均完成 N 次真实 OSS PUT/complete-upload、N 张 validation ready、Series ready 和 Study finalize ready。
 - [x] E5：8 格均跑通 Task、Outbox、Relay、RabbitMQ、Worker、冻结 Config/Prompt/ModelPool/Connection、真实 Provider、receipt 与 DecisionFinalization。

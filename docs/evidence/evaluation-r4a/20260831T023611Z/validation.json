@@ -1,0 +1,27 @@
+{
+  "evidence_contract": "evaluation-r4a-validation.v1",
+  "captured_at": "2026-08-31T02:36:11Z",
+  "checks": {
+    "backend_pytest": "240 passed, 41 warnings",
+    "ruff": "passed",
+    "compileall": "passed",
+    "evaluation_alembic_current": "20260831_eval_01",
+    "evaluation_alembic_check": "passed",
+    "online_alembic_current": "20260831_01",
+    "online_alembic_check": "blocked_by_existing_ai_api_connection_secret_ref_comment_drift",
+    "compose_config_default": "passed",
+    "compose_config_broker": "passed",
+    "compose_config_evaluation": "passed",
+    "compose_config_broker_evaluation": "passed",
+    "openapi_route_count": 81,
+    "evaluation_versioned_route_count": 11,
+    "postman_request_count": 98,
+    "postman_json": "passed",
+    "git_diff_check": "passed",
+    "docker_image_build": "blocked_docker_daemon_not_running"
+  },
+  "qualification_status": "blocked",
+  "qualification_blocker": "online_alembic_check_existing_non_evaluation_comment_drift",
+  "r4a_runtime_smoke": "passed",
+  "contains_secrets": false
+}

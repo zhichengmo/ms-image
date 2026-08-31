@@ -1,5 +1,14 @@
 # 风险、阻断与未知项
 
+## 2026-08-31 — R4A Evaluation 独立数据库收口风险
+
+- **R4A 功能链已真实通过但最终资格标记暂缓**：独立库、revision、readiness、Relay/Worker/Fake scorer/Artifact 全链已完成；在线主库 `alembic check` 被既存 `ai_api_connection.secret_ref` 注释漂移阻断。该漂移不属于 Evaluation，未经独立审阅不得塞入 R4A cleanup revision。
+- **Docker 容器级验证未运行**：本机 Docker daemon 未启动；Compose 四种静态配置和 Dockerfile Evaluation Alembic COPY 已通过，但仍不能声称 `evaluation-migrate` 容器镜像真实启动资格化。
+- **Fake scorer 不是医学 Scorer**：本轮 expected status 只是 schema sentinel；任何 `case_result/failure_summary/metric_summary` 内容都未作为资格证据读取，不能生成 Gold、M1、准确率或发布结论。
+- **正式 Evaluation 数据不可随意 downgrade**：正式库已有 1 Job、1 Outbox、1 Run、5 Artifact；真实 downgrade 已按 `evaluation_schema_downgrade_blocked_by_rows` 拒绝。不得手工删除或绕过门禁。
+- **主库历史 Evaluation 表已删除**：删除前四表均为 0 行；数据不可恢复，downgrade 只可重建空结构。Evaluation 业务事实唯一 owner 现在是 `ms_image_eval`。
+- **凭据生命周期未扩展**：本轮临时 HS256 Secret/Token 仅在已结束的本地进程内存在；未写盘、未提交。R4A 不解决生产 Control Plane 密钥生命周期。
+
 ## 2026-08-30 — 2–5 图 Runtime 动态资格化后的剩余风险
 
 - **Config budget 阻断已关闭**：`xray_diagnose_cat@3.0.1` 与 `xray_diagnose_dog@3.0.1` 已 active，冻结 `max_input_images=5`；旧 3.0.0 仅 retired。8 格前后 Config/Prompt SHA 无漂移，Connection validated/capability=20。
@@ -28,21 +37,12 @@
 
 ## 当前阻断
 
-- D5 代码基础、Primary happy-path、真实 duplicate delivery、cancel/late-result、P1-A 自动调度和 P1-B unknown 持久有界终止均已完成，当前核心诊断执行链可标记 `CORE_WORKER_RUNTIME_QUALIFIED`。用户决定 Runtime/Admin JWT 与 Artifact signing 暂不实施，它们不再作为当前功能链阻断。
-- 公网/生产安全仍为 `PRODUCTION_API_SECURITY_NOT_QUALIFIED`：Runtime JWT 生产信任/轮换、Admin JWT 与 Artifact 签名生命周期均延期。该结论不影响内部 Task→Report 运行，但禁止据此宣称公网或合规上线安全已通过。
-- 主库 `ms_image` 已按当前 `Base.metadata` 重建为 20 张 Model 表，P1-B 正式追加迁移后为 `alembic_version=20260828_01`；canonical Prompt、Connection、单 lane ModelPool、active Config、ready Study/Image、冻结 Task/Outbox/Attempt/Report 的真实 happy-path 事实均已建立。
-- 本次空库使用 `Base.metadata.create_all + alembic stamp head` 快速对齐当前 Model，并未证明 Alembic 从零升级链可以完整重放；未来变更仍须审阅正式迁移边界。
-- 2026-08-26 P1 synthetic probe 已证明当前进程可对隔离对象进行 AES256 写入、HEAD、直读 GET、同机 signed GET 与 cleanup；但 Provider 外部网络是否能访问相同 signed URL 仍为 `UNKNOWN`，不能把本机读取误报为 Provider/Worker 完整链资格化。
-- 用户已明确当前 Model 注册表即保留边界，不再主观筛选 Model 表用途；后续禁止继续删除当前 Model 对应表。旧数据只在备份中，若需恢复必须先恢复到临时库并做显式导入映射。
-- `ms_image_eval（评测库）` 当前不可连接/不存在，Evaluation Plane（评测面）不能运行。
-- AI 请求运行合同已改为与 `ms-ai-fast` 一致的 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY -> GatewayClient` 直连；旧 `AI_GATEWAY_*` 开关、环境引用 Secret Resolver 和 Provider 原始响应 OSS response store 已从生产链删除。2026-08-27 已从 `ms-ai-fast/.env` 向资格化 Worker 成对注入并完成 Primary happy-path；正式部署启动器的长期配置管理仍需单独固化。
-- Runtime RS256 公钥/Secret 与 Admin HS256 Secret 均未配置；保护接口和管理控制面不能被视为可用。旧项目公钥只有在确认新服务继续信任相同 issuer/audience 后才能迁移。
-- `secret_ref` 只剩既有 MySQL `NOT NULL` 物理列和 ORM 兼容占位；API Schema、Connection SHA、Config Snapshot、Audit 与 DAL 更新合同均已移除。彻底删除物理列仍需字段/迁移授权；运行凭据唯一合同是 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`。
-- 当前 OpenAI-compatible Provider（OpenAI 兼容模型提供方）没有已确认的原请求查询 API；默认 `UnsupportedProviderAttemptLookup（不支持查询的安全实现）` 现在由 P1-B 在 3 次/10800 秒任一边界 fail-closed 为 `provider_result_unresolved`，不会永久重排或盲目重发。真实 Provider 原请求 lookup 支持与 SLA 仍为 `UNKNOWN`。
-- 目标 Nacos namespace 现有非医疗 smoke Prompt和历史 XRay `cat@1.0.0`、`dog@1.0.0`、`default@1.0.0` 发布物；新代码合同只接受 canonical `xray_primary/common`。canonical `1.0.0` 已发布、回读、导入并编译进 active `xray_diagnose` Config；历史发布物不得进入新 Task，active Config 也不能替代完整 Worker 或医学资格。
-- `ms-ai-platform` 当前需手工启动 8062 才能承接 `ms-ai-fast`；没有已确认的常驻进程管理时会在 TCP connect 层失败。
-- Platform 模型池中的 qwen 端点受 API Key IP restriction 返回 403；当前 gpt-5-mini 后备可成功，但会增加失败日志和延迟，池健康并非全绿。
-- 当前库已从 `20260824_02` 正式 upgrade 到 `20260828_01`，但仍没有执行从零 migration replay；本次追加迁移通过不能替代 bootstrap 迁移链验证。
+- 当前 R4A 最终资格标记只被两项阻断：在线主库既存 `ai_api_connection.secret_ref` 注释漂移导致 `alembic check` 非零；Docker daemon 未运行导致容器 build/`evaluation-migrate` 启动未验。两者都不得用无关业务改动绕过。
+- 公网/生产安全仍为 `PRODUCTION_API_SECURITY_NOT_QUALIFIED`：Runtime JWT 生产信任/轮换、Admin JWT 与 Artifact 签名生命周期延期；不影响已资格化的内部 Task→Report 和 R4A 技术烟测，但禁止宣称公网或合规上线安全通过。
+- 在线主库已到 `20260831_01`，独立 Evaluation 库已到 `20260831_eval_01`；但主库完整 Alembic 从零 replay 仍未证明。既有环境曾使用 `Base.metadata.create_all + stamp` 对齐，不能把本轮追加 migration 当作完整 bootstrap 证明。
+- Provider 原请求 lookup/SLA 仍为 `UNKNOWN`；P1-B 只保证 unsupported 在 3 次/10800 秒边界内 fail-closed。Platform qwen 端点的 IP restriction 与正式进程管理仍是部署风险，但不属于 R4A。
+- `secret_ref` 仍是主库 `NOT NULL` 兼容占位列，运行凭据唯一合同为 `AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY`；物理列删除或注释修正都需要独立 migration 审阅，不能混入 Evaluation cleanup。
+- 已确认 Model 注册表继续保留；旧数据恢复必须先进入临时库并做显式映射，不得继续主观删表或直接覆盖正式库。
 
 ## 完整能力实施风险
 

@@ -38,10 +38,10 @@
 
 ## 当前指针
 
-- 最后更新：2026-08-30
+- 最后更新：2026-08-31
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`（猫/狗 × 2/3/4/5 共 8 格真实 Runtime/Provider E2E 已全部通过；global Primary Config `3.0.1` 已按不可变生命周期激活，预算固定为 5；后端 234 tests 通过）
-- 下一动作：`.agent-handoff/backlog.md`（工程链已资格化；默认进入 R4A Evaluation DB 隔离 → R4B Dataset 治理 → R4C Gold/Scorer → R4D Runtime 等价 Runner → M1，医学 Prompt 优化不得跳过这些前置）
+- 当前状态：`.agent-handoff/snapshot.md`（R4A Evaluation 独立数据库、metadata/Alembic、readiness 与 Fake scorer 技术烟测已完成；后端 240 tests 通过；最终资格标记被主库既存非 Evaluation 列注释漂移暂缓）
+- 下一动作：`.agent-handoff/backlog.md`（先单独处理或明确豁免在线 `alembic check` 的 `ai_api_connection.secret_ref` 注释漂移并补容器构建验证；R4A 关闭后才进入 R4B Dataset 治理）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
 - 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）

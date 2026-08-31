@@ -1,0 +1,56 @@
+{
+  "evidence_contract": "evaluation-r4a-fake-scorer-smoke.v1",
+  "captured_at": "2026-08-31T02:36:11Z",
+  "job": {
+    "id": "238bc0c3a8914b59a4686f980e7d5a52",
+    "status": "completed"
+  },
+  "run": {
+    "id": "a82a1ccee5f24e02b08c51d4765a08ed",
+    "status": "succeeded"
+  },
+  "artifacts": [
+    {
+      "id": "752f16b8e20a4ed892df691ae26d8dcb",
+      "kind": "input_manifest",
+      "status": "ready",
+      "content_sha256": "e889fb805609f3b7d29b1ba3d6cbc8f5d7aa0ce6f33201be9f147306322d4596",
+      "object_head_verified": true
+    },
+    {
+      "id": "c173df4a317c48f68593517c996eb325",
+      "kind": "sanitization",
+      "status": "ready",
+      "content_sha256": "f55a577bc3e3c5f3fdc0febbef65b5b54598a5b557d53c56b1fc2b0efa27313b",
+      "object_head_verified": true
+    },
+    {
+      "id": "2cf95c461c314965804a674b323bf274",
+      "kind": "case_result",
+      "status": "ready",
+      "content_sha256": "f2deef37f988af5cee82f48ceae02a8a7fff754bfc2691e9d38bc7a6386d7554",
+      "object_head_verified": true
+    },
+    {
+      "id": "d9f7ec1550784f7b93cf1178eb6f3c22",
+      "kind": "failure_summary",
+      "status": "ready",
+      "content_sha256": "16069e67654e2e246a60280d35a563132c31d9cc63dd304d43456f0e058c92e7",
+      "object_head_verified": true
+    },
+    {
+      "id": "caa70fd0e5394e74a9d1eb94161bd4da",
+      "kind": "metric_summary",
+      "status": "ready",
+      "content_sha256": "f476203a2457d77779c784e6d3e9ba1dbda9923a078d62db02b3ad251c1671d3",
+      "object_head_verified": true
+    }
+  ],
+  "expected_status_semantics": "schema_sentinel_not_gold",
+  "fake_scorer_only": true,
+  "artifact_content_read_for_qualification": false,
+  "medical_metric_read_for_qualification": false,
+  "medical_accuracy": "unknown",
+  "medical_release": "no_go",
+  "contains_secrets": false
+}
