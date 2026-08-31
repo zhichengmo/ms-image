@@ -23,6 +23,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # resolve the same way in a container and in local development.
 COPY apps ./apps
 COPY prompts ./prompts
+# Evaluation Control readiness imports the frozen schema contract, and the
+# one-shot evaluation-migrate service runs this Alembic environment directly.
+COPY alembic_evaluation.ini ./alembic_evaluation.ini
+COPY alembic_evaluation_migrations ./alembic_evaluation_migrations
 # Keep only the committed, non-secret qualification artifacts used by Runtime
 # config; do not copy the rest of the repository's artifact archive.
 COPY docs/artifacts/ai-provider-transport-qualification.v1.json ./docs/artifacts/ai-provider-transport-qualification.v1.json

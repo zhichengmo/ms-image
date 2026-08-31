@@ -4,10 +4,10 @@ from sqlalchemy import BigInteger, Index, Integer, JSON, String, UniqueConstrain
 from sqlalchemy.dialects.mysql import DATETIME
 from sqlalchemy.orm import Mapped, mapped_column
 
-from apps.backend.models.imaging_base import ImagingRecordBase
+from apps.backend.models.evaluation_base import EvaluationRecordBase
 
 
-class EvaluationJob(ImagingRecordBase):
+class EvaluationJob(EvaluationRecordBase):
     __tablename__ = "evaluation_job_record"
     __table_args__ = (
         UniqueConstraint("business_key", name="uq_evaluation_job_business_key"),
@@ -137,7 +137,7 @@ class EvaluationJob(ImagingRecordBase):
     )
 
 
-class EvaluationOutbox(ImagingRecordBase):
+class EvaluationOutbox(EvaluationRecordBase):
     __tablename__ = "evaluation_outbox_record"
     __table_args__ = (
         UniqueConstraint("event_key", name="uq_evaluation_outbox_event_key"),
@@ -221,7 +221,7 @@ class EvaluationOutbox(ImagingRecordBase):
     )
 
 
-class EvaluationRun(ImagingRecordBase):
+class EvaluationRun(EvaluationRecordBase):
     __tablename__ = "evaluation_run_record"
     __table_args__ = (
         UniqueConstraint("job_id", "run_no", name="uq_evaluation_run_job_no"),
@@ -289,7 +289,7 @@ class EvaluationRun(ImagingRecordBase):
     )
 
 
-class EvaluationArtifact(ImagingRecordBase):
+class EvaluationArtifact(EvaluationRecordBase):
     __tablename__ = "evaluation_artifact_record"
     __table_args__ = (
         UniqueConstraint(

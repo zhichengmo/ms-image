@@ -116,12 +116,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      mysql-evaluation:
-        condition: service_healthy
+      evaluation-migrate:
+        condition: service_completed_successfully
     volumes:
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/api/v1/readiness')"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -208,8 +208,8 @@ services:
       AI_QUALIFICATION_ARTIFACT_SIGNING_KEY: ${AI_QUALIFICATION_ARTIFACT_SIGNING_KEY:-}
     env_file: *runtime-env-files
     depends_on:
-      mysql-evaluation:
-        condition: service_healthy
+      evaluation-migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
@@ -254,8 +254,8 @@ services:
       BROKER_ENABLED: true
     env_file: *runtime-env-files
     depends_on:
-      mysql-evaluation:
-        condition: service_healthy
+      evaluation-migrate:
+        condition: service_completed_successfully
       rabbitmq:
         condition: service_healthy
 
@@ -286,6 +286,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  evaluation-migrate:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["alembic", "-c", "alembic_evaluation.ini", "upgrade", "head"]
+    environment:
+      <<: *runtime-environment
+      BROKER_ENABLED: false
+    env_file: *runtime-env-files
+    depends_on:
+      mysql-evaluation:
+        condition: service_healthy
+    restart: "no"
 
   redis:
     image: redis:7-alpine

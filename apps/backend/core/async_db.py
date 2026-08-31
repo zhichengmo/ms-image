@@ -1,3 +1,4 @@
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, declared_attr
 from contextlib import asynccontextmanager
@@ -23,9 +24,14 @@ _evaluation_unix_socket = (
     settings.MYSQL_EVALUATION_UNIX_SOCKET.strip()
     or settings.MYSQL_UNIX_SOCKET.strip()
 )
-EVALUATION_DATABASE_URL = (f"mysql+aiomysql://"
-                           f"{_evaluation_user}:{_evaluation_password}@{_evaluation_host}:{_evaluation_port}"
-                           f"/{_evaluation_database}")
+EVALUATION_DATABASE_URL = URL.create(
+    "mysql+aiomysql",
+    username=_evaluation_user,
+    password=_evaluation_password,
+    host=_evaluation_host,
+    port=int(_evaluation_port),
+    database=_evaluation_database,
+)
 
 def _mysql_connect_args(unix_socket: str) -> dict[str, str]:
     """Make every application MySQL session use UTC timestamps."""
@@ -132,6 +138,20 @@ class BaseModel(AsyncAttrs, DeclarativeBase):
 
 # 为了保持向后兼容性，将 Base 作为 BaseModel 的别名
 Base = BaseModel
+
+
+class EvaluationBaseModel(AsyncAttrs, DeclarativeBase):
+    """独立 Evaluation 数据库 metadata 根。"""
+
+    @declared_attr.directive
+    def __tablename__(cls) -> str:
+        model_name = cls.__name__
+        ls = []
+        for index, char in enumerate(model_name):
+            if char.isupper() and index != 0:
+                ls.append("_")
+            ls.append(char)
+        return "".join(ls).lower()
 
 
 class HdBase(AsyncAttrs, DeclarativeBase):
