@@ -1,9 +1,42 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.backend.schemas.imaging_common import normalize_required_text
+
+
+class EvaluationControlHealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["healthy"]
+    service: Literal["evaluation_control"]
+    timestamp: datetime
+
+
+class EvaluationControlReadinessComponent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    required: bool
+    ready: bool
+    state: str = Field(min_length=1, max_length=32)
+    error: str | None = Field(default=None, max_length=80)
+
+
+class EvaluationControlReadinessComponents(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evaluation_database: EvaluationControlReadinessComponent
+    schema_revision: EvaluationControlReadinessComponent
+    control_plane_jwt: EvaluationControlReadinessComponent
+
+
+class EvaluationControlReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    readiness_scope: Literal["evaluation_control"]
+    components: EvaluationControlReadinessComponents
 
 
 class EvaluationArtifactInput(BaseModel):
@@ -169,6 +202,10 @@ class EvaluationArtifactResponse(BaseModel):
 
 
 __all__ = [
+    "EvaluationControlHealthResponse",
+    "EvaluationControlReadinessComponent",
+    "EvaluationControlReadinessComponents",
+    "EvaluationControlReadinessResponse",
     "EvaluationArtifactInput",
     "EvaluationArtifactResponse",
     "EvaluationJobCreate",

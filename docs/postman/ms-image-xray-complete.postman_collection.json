@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "bb6d9075-a2f5-4746-b1eb-ddcb5aeabb88",
     "name": "MS-Image X-Ray 完整工程链与全接口合同",
-    "description": "MS-Image 当前源码合同的完整 Postman Collection（2026-08-30）。\n\n边界：\n1. 覆盖 79 个已实现项目 HTTP 路由：75 个版本化 /api/v1 接口（Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 9）和 4 个非版本化 GET / 根探针。\n2. Runtime 主链提供 1–5 个影像槽；槽存在不等于当前服务端 2–5 图硬门禁或 2/3/4/5 动态矩阵已经资格化。\n3. 所有 HTTP handler 同步病例医学 Prompt 都是 0。POST /tasks 只冻结 Task/Config/Snapshot 并写 Outbox；Worker 后续异步执行 Prompt。\n4. Primary v2：study_preparation=0 Prompt，joint_primary_reader=1 Prompt/1 Provider Logical Call，decision_finalization=0 Prompt；单病例合计 1 Prompt，不随影像张数增加。\n5. Targeted 有合法 candidate 时额外 targeted_review=1 Prompt，因此总计 2；family_routing 本身 0 Prompt。\n6. Prompt CRUD/import/validate 只管理资产，不在 HTTP 请求中渲染病例 Prompt，不调用 Provider。当前 Evaluation Worker 使用 Fake scorer，同样不执行 Runtime Prompt/Gateway/Provider。\n7. Report publish/void 路由存在但 Report.state_version 合同未闭合，默认双重跳过。Evaluation 全组默认跳过，需要独立 Evaluation DB、Artifact 和 control-plane Token。\n8. Segmentation 5 个目标接口尚未实现，仅在 99 Folder 说明，不发送虚构请求。\n\nRunner 说明：pm.execution.setNextRequest 只在 Collection Runner/Newman 中自动轮询；手工 Send 不会循环。建议 Runner delay 至少 1000ms。OSS PUT 使用 noauth。不得在日志中打印 Token、Signed URL、Prompt 正文、Provider 原文、临床上下文正文、Evaluation Artifact 正文或完整报告正文。",
+    "description": "MS-Image 当前源码合同的完整 Postman Collection（2026-08-31）。\n\n边界：\n1. 覆盖 81 个已实现项目 HTTP 路由：77 个版本化 /api/v1 接口（Runtime 29、Runtime Admin 6、AI Control 31、Evaluation Control 11）和 4 个非版本化 GET / 根探针。\n2. Runtime 主链提供 1–5 个影像槽；槽存在不等于当前服务端 2–5 图硬门禁或 2/3/4/5 动态矩阵已经资格化。\n3. 所有 HTTP handler 同步病例医学 Prompt 都是 0。POST /tasks 只冻结 Task/Config/Snapshot 并写 Outbox；Worker 后续异步执行 Prompt。\n4. Primary v2：study_preparation=0 Prompt，joint_primary_reader=1 Prompt/1 Provider Logical Call，decision_finalization=0 Prompt；单病例合计 1 Prompt，不随影像张数增加。\n5. Targeted 有合法 candidate 时额外 targeted_review=1 Prompt，因此总计 2；family_routing 本身 0 Prompt。\n6. Prompt CRUD/import/validate 只管理资产，不在 HTTP 请求中渲染病例 Prompt，不调用 Provider。当前 Evaluation Worker 使用 Fake scorer，同样不执行 Runtime Prompt/Gateway/Provider。\n7. Report publish/void 路由存在但 Report.state_version 合同未闭合，默认双重跳过。Evaluation 业务接口默认跳过；health/readiness 可直接检查独立 Evaluation DB、schema revision 与 control-plane JWT。\n8. Segmentation 5 个目标接口尚未实现，仅在 99 Folder 说明，不发送虚构请求。\n\nRunner 说明：pm.execution.setNextRequest 只在 Collection Runner/Newman 中自动轮询；手工 Send 不会循环。建议 Runner delay 至少 1000ms。OSS PUT 使用 noauth。不得在日志中打印 Token、Signed URL、Prompt 正文、Provider 原文、临床上下文正文、Evaluation Artifact 正文或完整报告正文。",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -4395,8 +4395,36 @@
     },
     {
       "name": "05 Evaluation Control - 离线评测治理",
-      "description": "覆盖当前 Evaluation Control 的 9 个版本化接口。整组默认由 enable_evaluation_requests=false 跳过；启用前必须准备独立 Evaluation DB、有效 control-plane Token、真实 OSS Artifact 或可导出的 Runtime Task/Report。当前 Worker 使用 FakeEvaluationScorer 对冻结事实做确定性聚合，不执行 Runtime Prompt、Gateway 或 LLM Provider，因此本 Folder 全部为 0 医学 Prompt / 0 Provider Call，也不代表 M1 或医学准确率资格。",
+      "description": "覆盖当前 Evaluation Control 的 11 个版本化接口。health/readiness 为公开技术探针；其余 9 个业务接口默认由 enable_evaluation_requests=false 跳过。启用前必须准备独立 Evaluation DB、有效 control-plane Token、真实 OSS Artifact 或可导出的 Runtime Task/Report。当前 Worker 使用 FakeEvaluationScorer 对冻结事实做确定性聚合，不执行 Runtime Prompt、Gateway 或 LLM Provider，因此本 Folder 全部为 0 医学 Prompt / 0 Provider Call，也不代表 M1 或医学准确率资格。",
       "item": [
+        {
+          "name": "检查 Evaluation Control 服务健康",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {"type": "noauth"},
+            "url": "{{evaluation_control_base_url}}/health",
+            "description": "用途：Evaluation Control 进程健康。医学 Prompt=0；Provider=0。"
+          },
+          "response": [],
+          "event": [
+            {"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });", "const payload = pm.response.json();", "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"]}}
+          ]
+        },
+        {
+          "name": "检查 Evaluation Control 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {"type": "noauth"},
+            "url": "{{evaluation_control_base_url}}/readiness",
+            "description": "用途：检查独立 Evaluation DB、schema revision 和 control-plane JWT。医学 Prompt=0；Provider=0。"
+          },
+          "response": [],
+          "event": [
+            {"listen": "test", "script": {"type": "text/javascript", "exec": ["pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });", "const payload = pm.response.json();", "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"]}}
+          ]
+        },
         {
           "name": "创建 Evaluation Job（需真实 Artifact）",
           "request": {

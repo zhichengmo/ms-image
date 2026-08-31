@@ -295,6 +295,117 @@ async def test_ai_control_readiness_endpoint_returns_503(monkeypatch) -> None:
     assert b'"readiness_scope":"ai_control"' in response.body
 
 
+@pytest.mark.anyio
+async def test_evaluation_control_readiness_requires_database_schema_and_jwt(
+    monkeypatch,
+) -> None:
+    from apps.backend.schemas.evaluation import EvaluationControlReadinessComponent
+    from apps.backend.services.evaluation_control import readiness
+
+    async def ready_database_and_schema():
+        component = EvaluationControlReadinessComponent(
+            required=True,
+            ready=True,
+            state="ready",
+            error=None,
+        )
+        return component, component
+
+    monkeypatch.setattr(
+        readiness,
+        "_database_and_schema_ready",
+        ready_database_and_schema,
+    )
+    monkeypatch.setattr(
+        readiness,
+        "control_plane_jwt_readiness",
+        lambda: (True, None),
+    )
+    monkeypatch.setattr(readiness.settings, "EVALUATION_READ_SCOPE", "read")
+    monkeypatch.setattr(readiness.settings, "EVALUATION_WRITE_SCOPE", "write")
+
+    result = await readiness.build_evaluation_control_readiness()
+
+    assert result.ready is True
+    assert result.readiness_scope == "evaluation_control"
+    assert result.components.evaluation_database.ready is True
+    assert result.components.schema_revision.ready is True
+    assert result.components.control_plane_jwt.ready is True
+
+
+@pytest.mark.anyio
+async def test_evaluation_control_readiness_fails_closed_for_schema_drift(
+    monkeypatch,
+) -> None:
+    from apps.backend.schemas.evaluation import EvaluationControlReadinessComponent
+    from apps.backend.services.evaluation_control import readiness
+
+    async def schema_mismatch():
+        return (
+            EvaluationControlReadinessComponent(
+                required=True,
+                ready=True,
+                state="ready",
+                error=None,
+            ),
+            EvaluationControlReadinessComponent(
+                required=True,
+                ready=False,
+                state="mismatch",
+                error="evaluation_schema_revision_mismatch",
+            ),
+        )
+
+    monkeypatch.setattr(readiness, "_database_and_schema_ready", schema_mismatch)
+    monkeypatch.setattr(
+        readiness,
+        "control_plane_jwt_readiness",
+        lambda: (True, None),
+    )
+    monkeypatch.setattr(readiness.settings, "EVALUATION_READ_SCOPE", "read")
+    monkeypatch.setattr(readiness.settings, "EVALUATION_WRITE_SCOPE", "write")
+
+    result = await readiness.build_evaluation_control_readiness()
+
+    assert result.ready is False
+    assert result.components.schema_revision.error == (
+        "evaluation_schema_revision_mismatch"
+    )
+
+
+@pytest.mark.anyio
+async def test_evaluation_control_readiness_endpoint_returns_503(monkeypatch) -> None:
+    from apps.backend.schemas.evaluation import (
+        EvaluationControlReadinessComponent,
+        EvaluationControlReadinessComponents,
+        EvaluationControlReadinessResponse,
+    )
+    from apps.backend.services.evaluation_control.api.api_v1.endpoints import health
+
+    async def unavailable():
+        failed = EvaluationControlReadinessComponent(
+            required=True,
+            ready=False,
+            state="unavailable",
+            error="evaluation_database_unavailable",
+        )
+        return EvaluationControlReadinessResponse(
+            ready=False,
+            readiness_scope="evaluation_control",
+            components=EvaluationControlReadinessComponents(
+                evaluation_database=failed,
+                schema_revision=failed,
+                control_plane_jwt=failed,
+            ),
+        )
+
+    monkeypatch.setattr(health, "build_evaluation_control_readiness", unavailable)
+    response = await health.readiness_check()
+
+    assert response.status_code == 503
+    assert b'"readiness_scope":"evaluation_control"' in response.body
+
+
 def test_connection_url_is_canonical_and_metadata_hash_is_stable() -> None:
     assert (
         canonicalize_connection_base_url("https://Provider.Example:443/v1/")

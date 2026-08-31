@@ -18,10 +18,10 @@
 
 | 维度 | 最终口径 | 当前状态 |
 |---|---|---|
-| 项目 HTTP 路由 | `79 = 75` 个版本化接口 `+ 4` 个根探针 | `STATIC_CONTRACT_QUALIFIED` |
+| 项目 HTTP 路由 | `81 = 77` 个版本化接口 `+ 4` 个根探针 | `STATIC_CONTRACT_QUALIFIED` |
 | Runtime 主链直接支撑子集 | Runtime 29 + Runtime Admin 6 + AI Control 31 = 66 | 静态清单完整 |
-| Evaluation Control | 9 个版本化接口 + 1 个根探针 | 接口存在；当前 Fake scorer 为 0 Prompt/0 Provider |
-| Postman | 96 个 Request = 79 个项目路由 + 5 个 OSS PUT + 12 个多图槽重复请求 | JSON/OpenAPI 静态通过，未运行真实 Runner |
+| Evaluation Control | 11 个版本化接口 + 1 个根探针 | 含 health/readiness；当前 Fake scorer 为 0 Prompt/0 Provider |
+| Postman | 98 个 Request = 81 个项目路由 + 5 个 OSS PUT + 12 个多图槽重复请求 | JSON/OpenAPI 静态通过，未运行真实 Runner |
 | 历史 Runtime 证据 | 曾跑通过单图、真实多视图、Primary/Targeted 个别病例 | 不能替代 2/3/4/5 图完整矩阵 |
 | 当前 2–5 图 Runtime | 服务端上限、Harness 和真实矩阵尚未闭合 | `RUNTIME_2_TO_5_IMAGE_E2E_NOT_RUN` |
 | 医学准确率 | 没有可信 Gold、医学 Scorer、M1 和 Holdout | `MEDICAL_ACCURACY_UNKNOWN` |
@@ -1121,9 +1121,9 @@ AI Control 与 Runtime 是不同进程时，虽然前缀相同，base URL 不同
 分割模型参数或 Postman 脚本叫作 Prompt。“同步”指 HTTP handler 返回前；“异步”指该
 接口成功后由 Outbox/Relay/Worker 继续触发的诊断链。
 
-本项目当前共有 **79 个已实现项目 HTTP 路由**：75 个版本化 `/api/v1` 接口和 4 个非版本化
+本项目当前共有 **81 个已实现项目 HTTP 路由**：77 个版本化 `/api/v1` 接口和 4 个非版本化
 `GET /` 根探针。其中 Runtime 29、Runtime Admin 6、AI Control 31，共 66 个版本化接口直接
-支撑病例工程链；Evaluation Control 另有 9 个版本化接口，属于离线评测治理边界，不是病例
+支撑病例工程链；Evaluation Control 另有 11 个版本化接口，属于离线评测治理边界，不是病例
 Runtime E2E 必经链。为满足“项目所有接口有一个统一总账”的要求，本节与同一 Postman
 Collection 都纳入 Evaluation Control，但必须放在独立 Folder、默认跳过，并明确当前
 Evaluation Worker 使用 Fake scorer，不是 Runtime 等价的 Prompt/Gateway/Provider Runner。
@@ -1218,10 +1218,12 @@ Provider 图像资格验证辅助函数，但当前 31 个 AI Control HTTP 接�
 因此不能把 `/ai-connections/validate` 写成“真实 Provider 可用性测试”，也不能在接口调用
 矩阵中虚构 1 次 Provider Call。
 
-#### 6.5.4 Evaluation Control：9 个已实现接口
+#### 6.5.4 Evaluation Control：11 个已实现接口
 
 | 接口 | 用途 | 同步医学 Prompt | 后续异步医学 Prompt | LLM Provider Logical Call |
 |---|---|---:|---:|---:|
+| `GET /api/v1/health` | 检查 Evaluation Control 进程健康 | 0 | 0 | 0 |
+| `GET /api/v1/readiness` | 检查独立 Evaluation DB、schema revision 与控制面 JWT | 0 | 0 | 0 |
 | `POST /api/v1/evaluation/jobs` | 使用已存在的输入/净化 Artifact 引用创建 Evaluation Job | 0 | 0 | 0 |
 | `POST /api/v1/evaluation/jobs/export` | 从 Runtime 冻结 Task/Report 事实，导出 Artifact 并创建 Job | 0 | 0 | 0 |
 | `GET /api/v1/evaluation/jobs?id=` | 查询 Evaluation Job 状态、版本和指纹 | 0 | 0 | 0 |
@@ -1234,7 +1236,7 @@ Provider 图像资格验证辅助函数，但当前 31 个 AI Control HTTP 接�
 
 这些接口会创建、查询或取消 Evaluation Job/Run/Artifact，但当前执行实现调用
 `FakeEvaluationScorer` 对冻结事实做确定性聚合，不加载候选 Prompt，不经过 Runtime
-`AIRequestService`、Gateway 或 LLM Provider。因此 9 个接口以及它们触发的当前 Worker 路径均为
+`AIRequestService`、Gateway 或 LLM Provider。因此 11 个接口以及它们触发的当前 Worker 路径均为
 `0 医学 Prompt / 0 LLM Provider Logical Call`。这只证明评测状态机与 Artifact 流程存在，不能
 用于宣称 M1、Prompt A/B、Provider A/B 或医学准确率已经可用。
 
@@ -1307,8 +1309,8 @@ ai_control_origin             = http://127.0.0.1:8002
 evaluation_control_origin     = http://127.0.0.1:8003
 ```
 
-它必须覆盖 79 个已实现项目路由：4 个根探针、Runtime 29、Runtime Admin 6、AI Control 31、
-Evaluation Control 9；另把 5 个 `PROPOSED_NOT_IMPLEMENTED` 分割接口明确列为说明，不创建可发送
+它必须覆盖 81 个已实现项目路由：4 个根探针、Runtime 29、Runtime Admin 6、AI Control 31、
+Evaluation Control 11；另把 5 个 `PROPOSED_NOT_IMPLEMENTED` 分割接口明确列为说明，不创建可发送
 的虚构请求。AI Control 写接口默认通过 `enable_control_mutations=false` 跳过；Runtime Admin
 写接口默认通过 `enable_admin_mutations=false` 跳过；Report publish/void 还必须受
 `enable_broken_report_mutations=false` 二次门禁保护；Evaluation 全组默认通过
@@ -1322,29 +1324,29 @@ Postman Collection Runner/Newman 中生效，手工 Send 时需自行重复查�
 Collection 条目计数必须按下列公式解释：
 
 ```text
-96 个 Request
-= 79 个唯一项目 HTTP 路由
+98 个 Request
+= 81 个唯一项目 HTTP 路由
 + 5 个 OSS signed URL PUT
 + 12 个为了 1–5 图槽位重复出现的项目 Request
 
-91 个项目 Request 条目
-= 96 个全部 Request - 5 个 OSS PUT
+93 个项目 Request 条目
+= 98 个全部 Request - 5 个 OSS PUT
 ```
 
-`91` 不是 91 个 Bearer Request。当前静态鉴权分布包含 Bearer 和按 OpenAPI 合同公开的 `noauth`
-项目请求；“91/91 鉴权通过”只表示 91 个项目 Request 的鉴权配置与对应接口合同一致。
+`93` 不是 93 个 Bearer Request。当前静态鉴权分布包含 Bearer 和按 OpenAPI 合同公开的 `noauth`
+项目请求；“93/93 鉴权通过”只表示 93 个项目 Request 的鉴权配置与对应接口合同一致。
 
 ### 6.8 本轮源码复核发现并修正的问题
 
 1. Runtime Admin 原路径误写为 `/admin/...`，已改为独立 `8001` base URL 下的 `/api/v1/...`；
 2. `/ai-connections/validate` 误写成真实资格验证，已按源码改为 endpoint/SHA 合同校验；
-3. 原文没有逐接口明确 Prompt/Provider 次数，已补全 79 个实现路由与 5 个目标接口矩阵；
+3. 原文没有逐接口明确 Prompt/Provider 次数，已补全 81 个实现路由与 5 个目标接口矩阵；
 4. 原文容易让人把 20 个 Prompt Catalog 资产理解为单病例 20 次调用，已明确实际为 1 或 2 次；
 5. 原文未固定 Postman 绝对路径、四套服务 base/origin、默认跳过策略和 OSS `noauth`，现已冻结；
 6. 原文的 Postman 路径、Runtime 端口、base URL 是否包含 `/api/v1` 以及写操作门禁变量名与实际 Collection 不一致，现已按当前项目和 Collection 修正；
 7. `/images/page` 原 Collection 使用不存在的 `study_id` query，已按 `ImagePageQuery.series_id` 改为按 Series 分页；
 8. Task 轮询原先直接覆盖 `report_id`，导致没有真实比较 `Task.current_report_id`、current Report 与 history 最新 Report，现已拆分变量并增加三方一致性断言；
-9. 原文漏掉 Evaluation Control 9 个版本化接口和四个服务根探针，现已纳入 79 路由总账，同时明确 Fake scorer 不执行 Prompt/Provider；
+9. 原文漏掉 Evaluation Control 接口和四个服务根探针，现已纳入 81 路由总账，同时明确 Fake scorer 不执行 Prompt/Provider；
 10. Collection 预留 1–5 个上传槽，但当前服务端尚未完成“2–5 图最大数量硬门禁”，Python E2E Harness 也仍只资格化单图；2/3/4/5 只是目标验收矩阵；
 11. 真实 Runtime/OSS/RabbitMQ/Worker/Provider 尚未在本次文档修订中执行，不能把静态合同校验写成 E2E PASS。
 12. 原文把 Catalog 20 个模块写成当前 v2 Runtime 的权威渲染来源，现已按源码纠正：v2 Worker 直接渲染 immutable AI Config 中冻结的一份完整正文；Catalog 仅为本地模块库存和 v1 provider-disabled 兼容路径资产；
