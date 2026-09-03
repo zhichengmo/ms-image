@@ -41,8 +41,8 @@
 - 最后更新：2026-09-03
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
 - 当前开发合同：`docs/ms-image-current-development-contract.md`（项目级执行规则；每次任务开始前核对完成度总账，并声明单一目标、write set、外部权限和停止条件）
-- 当前状态：`.agent-handoff/snapshot.md`（TargetedReview、ReportGeneration AI 和同一 diagnose Task 八阶段主链均已有真实 Runtime/Provider 工程 PASS；医学准确率仍 UNKNOWN）
-- 下一动作：`.agent-handoff/backlog.md`（后续全链回归使用固定数据根并要求调用方提供真实 projection；不得重复创建公共接口或放宽 lineage）
+- 当前状态：`.agent-handoff/snapshot.md`（XRay AI/Prompt 已改为 Stage 代码路由并完成 Git/Mock 全链/381 tests；真实新路由 Provider E2E 因环境缺失阻断）
+- 下一动作：`.agent-handoff/backlog.md`（环境具备后补真实 Prompt Runtime→Platform→Provider E2E；`xhigh` 继续延期）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
 - 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）

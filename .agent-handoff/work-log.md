@@ -1,15 +1,5 @@
 # 当前工作日志
 
-## 2026-08-31 — Anatomy Localization v1 本地收口与静态资格门
-
-- 在 `codex/xray-anatomy-localization-v1`、HEAD `ef15dea` 的既有脏工作区上完成本地实现收口；保留 `.agent-handoff/archive*`、tracked archive index 和根目录 `postman/`，未恢复、删除、暂存或提交。
-- 实现严格限定为猫狗 2–5 图 Anatomy Localization：1 Task、2 Stage、1 AI Stage、1 Logical Call、单 primary lane、1 Attempt、一次批量 Provider 请求意图、normalized bbox、Task completed、no Report。
-- 新 Stage handler 只生成 `StageExecutionPlan` 并消费 accepted AICall；既有 `AIRequestService` 继续拥有网络、Call/Attempt、图片、receipt、Schema/技术校验和持久化。Gateway、race/Lane/Winner/Attempt/reconcile 实现未改。
-- Prompt Source 接通猫狗 exact Nacos Data ID/variant；Config compile/frozen verify 增加 Localization Profile/Prompt/Schema/预算精确合同；查询由现有 `TaskService` 复用现有 DAL 完成完整 fail-closed 血缘校验。
-- 扩展现有 `run_e2e_local.py`，未新建 Harness。完成 70 focused、311 full tests、Ruff、compileall、Prompt/Schema/label、Config preview/verify、CLI、Alembic 只读和 diff check。
-- 只读回查两个 Nacos exact `1.0.0` Data ID、两个 Prompt identity 和两个 Config identity 均 absent；回读实时 ModelPool/Connection/Platform 非敏感身份与 SHA。未发布 Prompt、未 import/validate、未创建/激活 Config、未调用 Provider。
-- 当前允许记录 `ANATOMY_LOCALIZATION_V1_CODE_IMPLEMENTED` 与 `ANATOMY_LOCALIZATION_STATIC_VALIDATION_PASSED`；真实八格和单 Logical Call Runtime 资格仍未授权、未执行。
-
 ## 2026-08-31 — Anatomy Localization v1 控制面完成与 Runtime 前置阻断
 
 - 在用户明确授权后完成猫狗 exact Nacos `1.0.0` Prompt 发布/回读、Prompt import/validate、两个不可变 Localization Config compile/create/validate/activate；Prompt/Schema/Label/ModelPool/Connection SHA 对账通过，diagnose active Config 集合未改变。
@@ -308,3 +298,10 @@
 - 修复 TargetedReview/Prompt command 对 code-owned Task 的专用 Prompt 判断，保持 Quality、Screening、System 上下文严格消费。
 - 更新现有合同测试，证明新 Task 创建与 code-owned lineage 均不访问 Config DAL；未新增迁移或独立测试脚本。
 - 完成 299 个定向合同测试、6 个 Mock Prompt→Gateway 全链测试和 381 个全量测试；真实外部 E2E 因环境变量、数据库、Broker 和 Docker 缺失而阻断，未伪报 Provider PASS。
+
+
+## 2026-09-03 — code-owned AI 路由 Git 交付
+
+- 创建业务提交 `13f674c refactor: use code-owned AI prompt and model routes`，27 files，1529 insertions，695 deletions。
+- 普通推送到 `origin/codex/per-flow-model-routing` 成功；本地 HEAD 与 upstream 均为 `13f674cf82b0dd2fe58b2b7ebe8e959ca73b4ef9`，未使用 force push。
+- 推送后工作树干净；真实外部 Prompt Runtime/ms-ai-platform/Provider E2E 仍因环境缺失保持 `ENVIRONMENT_BLOCKED`。

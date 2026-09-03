@@ -576,3 +576,12 @@ MEDICAL_RELEASE_NO_GO
 | Ruff changed files | PASS | NUL-safe 文件列表复核通过；首次 zsh scalar 调用仅因换行列表未拆分产生 `E902 File name too long` 工具调用错误，不是源码诊断。 |
 | Patch whitespace | PASS | `git diff --check`。 |
 | 真实 Prompt Runtime / ms-ai-platform / Provider E2E | ENVIRONMENT_BLOCKED | Prompt/Platform/DB/RabbitMQ 环境变量未配置且 Docker 不可用；本轮没有发起真实外部调用。 |
+
+
+## 2026-09-03 — code-owned AI 路由 Git 交付验证
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| Commit | PASS | `13f674c refactor: use code-owned AI prompt and model routes`；提交前 cached diff/secret marker 检查通过。 |
+| Push | PASS | `origin/codex/per-flow-model-routing` 从 `8b5fd76` 前进到 `13f674c`；普通 push，无 force。 |
+| HEAD/upstream | PASS | 均为 `13f674cf82b0dd2fe58b2b7ebe8e959ca73b4ef9`。 |

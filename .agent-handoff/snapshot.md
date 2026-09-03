@@ -5,10 +5,10 @@
 - Last updated: 2026-09-03
 - Active branch: `codex/per-flow-model-routing`
 - Active objective: 完成 `ms-image` AI/Prompt 调用去数据库配置化：按 Stage 在代码中直接声明 `MODEL_ROUTE` 与 `PROMPT_KEYS`，复用现有 Worker、`AIRequestService`、Gateway 和运行审计链。
-- Evidence level: `CODE_IMPLEMENTED / MOCK_FULL_CHAIN_PASS / FULL_TESTS_PASS / EXTERNAL_E2E_ENVIRONMENT_BLOCKED`。
+- Evidence level: `GIT_DELIVERED / CODE_IMPLEMENTED / MOCK_FULL_CHAIN_PASS / FULL_TESTS_PASS / EXTERNAL_E2E_ENVIRONMENT_BLOCKED`。
 - Write set: 当前 AI 路由、Prompt Runtime、Task/Worker/Gateway/Stage 改造文件、现有合同测试文件和必要 handoff；不修改 `ms-ai-fast`、`ms-ai-platform`，不新增 migration 或独立测试脚本。
-- External permissions: 仅 Git commit/push 已获授权；未执行数据库、Nacos、Provider、OSS、Broker 等外部写入。
-- Completion gate: 静态检查通过，现有测试全量 `381 passed`，Mock Prompt→Gateway 全链通过，handoff 完成，普通 commit/push 成功。
+- External permissions: Git commit/push 已完成；未执行数据库、Nacos、Provider、OSS、Broker 等外部写入。
+- Completion gate: 已完成；静态检查通过，现有测试全量 `381 passed`，Mock Prompt→Gateway 全链通过，业务提交 `13f674c` 已普通推送。
 - Stop gate: 真实 Prompt Runtime、Platform 或 Provider 环境缺失时只报告 `ENVIRONMENT_BLOCKED`；不得伪报真实外部 E2E，也不得跨仓库绕过 Platform。
 
 ## Implemented Runtime Contract
@@ -32,6 +32,5 @@
 
 ## Next Actions
 
-1. 提交并普通推送当前改造到 `origin/codex/per-flow-model-routing`。
-2. 若后续提供真实 Runtime 环境，再运行一次 Prompt Runtime → ms-ai-platform → Provider 外部 E2E；不得把 Mock PASS 误写为真实 Provider PASS。
-3. 如用户恢复推理强度需求，再单独设计并验证 `reasoning_effort` 透传；模型名继续保持 `gpt-5.6-sol`，不拼接 `-xhigh`。
+1. 若后续提供真实 Runtime 环境，再运行一次 Prompt Runtime → ms-ai-platform → Provider 外部 E2E；不得把 Mock PASS 误写为真实 Provider PASS。
+2. 如用户恢复推理强度需求，再单独设计并验证 `reasoning_effort` 透传；模型名继续保持 `gpt-5.6-sol`，不拼接 `-xhigh`。
