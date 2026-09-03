@@ -40,16 +40,21 @@ FULL_CHAIN_HARNESS_TASK_TYPE = "diagnose_full_chain"
 FULL_CHAIN_RUNTIME_TASK_TYPE = "diagnose"
 FULL_CHAIN_PROFILE = "xray_diagnose_full_chain_v1"
 FULL_CHAIN_EXPERIMENT_SCOPE = "full-chain-local-v1"
-FULL_CHAIN_ROOT_CONFIG_ID = "95914f0e47a0483692ce21377e30dba7"
-FULL_CHAIN_ROOT_CONFIG_VERSION = "6.0.0"
-FULL_CHAIN_MODEL_POOL_ID = "a8a4b761670745ca98e59d31073a9628"
-FULL_CHAIN_REQUESTED_MODEL = "gemini-3.5-flash"
-FULL_CHAIN_STAGE_CONFIG_IDS = {
-    "study_screening": "0712f1535ad1436c8aca9ac5cfb460bd",
-    "system_analysis": "7985cea39b0f4a959b8a4497d2f0f013",
-    "joint_primary_reader": FULL_CHAIN_ROOT_CONFIG_ID,
-    "targeted_review": "56e2e22c527645fba38a3a86d7d2ff7e",
-    "report_generation": "f0674d515fa447579875a00e07792651",
+FULL_CHAIN_CONFIGS = {
+    "cat": {
+        "quality_config_id": "7a754e24d4c1453483136d788ce86cae",
+        "root_config_id": "e6b1701cdccf42aaa8213a5de3efd401",
+        "root_config_version": "8.0.0-gemini-3.5-flash",
+        "model_pool_id": "a8a4b761670745ca98e59d31073a9628",
+        "requested_model": "gemini-3.5-flash",
+        "stage_config_ids": {
+            "study_screening": "0d6e99af090543249feb2c4563f43361",
+            "system_analysis": "208b22791c844aed84e3e68682438053",
+            "joint_primary_reader": "e6b1701cdccf42aaa8213a5de3efd401",
+            "targeted_review": "e8bb325014dd4291aa39b23a6154ac8b",
+            "report_generation": "bfa22f1383b847fc9b594e2f5896d2b4",
+        },
+    },
 }
 FULL_CHAIN_STAGE_TOPOLOGY = (
     ("study_preparation", "study_preparation", "v1"),
@@ -1471,6 +1476,7 @@ async def _read_full_chain_runtime_receipt(
     *,
     quality_task_id: str,
     diagnose_task_id: str,
+    species: str,
     image_count: int,
     quality_snapshot: dict[str, Any],
     diagnose_snapshot: dict[str, Any],
@@ -1490,6 +1496,15 @@ async def _read_full_chain_runtime_receipt(
     from apps.backend.crud.report import ReportDal
     from apps.backend.crud.stage_checkpoint import StageCheckpointDal
     from apps.backend.crud.task import TaskDal
+
+    identity = FULL_CHAIN_CONFIGS.get(species)
+    require(identity is not None, f"{species} full-chain Config identity is missing")
+    quality_config_id = identity["quality_config_id"]
+    root_config_id = identity["root_config_id"]
+    root_config_version = identity["root_config_version"]
+    model_pool_id = identity["model_pool_id"]
+    requested_model = identity["requested_model"]
+    stage_config_ids = identity["stage_config_ids"]
 
     async with session_factory() as session:
         task_dal = TaskDal(session)
@@ -1534,9 +1549,16 @@ async def _read_full_chain_runtime_receipt(
             label="Quality Review",
         )
         require(
-            quality_config.task_type == "xray_quality_control"
+            quality_config is not None
+            and quality_config.id == quality_config_id
+            and quality_config.task_type == "xray_quality_control"
             and quality_config.profile_key == "xray_image_quality_v1",
             "Quality Review Config task/profile drifted",
+        )
+        require(
+            quality_config.model_pool_id == model_pool_id
+            and quality_call.requested_model == requested_model,
+            "Quality Review model contract drifted",
         )
         quality_output = quality_stage.output_json
         require(
@@ -1562,7 +1584,7 @@ async def _read_full_chain_runtime_receipt(
         )
         require(
             diagnose_snapshot.get("profile_key") == FULL_CHAIN_PROFILE
-            and diagnose_snapshot.get("ai_config_id") == FULL_CHAIN_ROOT_CONFIG_ID,
+            and diagnose_snapshot.get("ai_config_id") == root_config_id,
             "Diagnose full-chain Root Config drifted",
         )
         _require_stage_topology(
@@ -1590,15 +1612,15 @@ async def _read_full_chain_runtime_receipt(
             "Diagnose full-chain Stage Config bindings drifted",
         )
 
-        root_config = await config_dal.get_by_id(FULL_CHAIN_ROOT_CONFIG_ID)
+        root_config = await config_dal.get_by_id(root_config_id)
         require(root_config is not None, "Diagnose Root Config is missing")
         root_budget = root_config.budget_policy_json
         require(
-            root_config.config_key == "xray_diagnose_cat"
-            and root_config.version == FULL_CHAIN_ROOT_CONFIG_VERSION
+            root_config.config_key == f"xray_diagnose_{species}"
+            and root_config.version == root_config_version
             and root_config.profile_key == FULL_CHAIN_PROFILE
             and root_config.task_type == FULL_CHAIN_RUNTIME_TASK_TYPE
-            and root_config.model_pool_id == FULL_CHAIN_MODEL_POOL_ID
+            and root_config.model_pool_id == model_pool_id
             and isinstance(root_budget, dict)
             and root_budget.get("max_total_calls") == 5
             and root_budget.get("max_total_attempts") == 5,
@@ -1607,7 +1629,7 @@ async def _read_full_chain_runtime_receipt(
 
         stage_call_evidence: list[dict[str, Any]] = []
         audited_calls: dict[str, Any] = {}
-        for stage_key, expected_config_id in FULL_CHAIN_STAGE_CONFIG_IDS.items():
+        for stage_key, expected_config_id in stage_config_ids.items():
             stage = stages_by_key[stage_key]
             call = calls_by_stage_id.get(stage.id)
             require(call is not None, f"{stage_key} did not create exactly one Call")
@@ -1619,7 +1641,7 @@ async def _read_full_chain_runtime_receipt(
             require(config is not None, f"{stage_key} Config is missing")
             require(
                 config.task_type == FULL_CHAIN_RUNTIME_TASK_TYPE
-                and config.model_pool_id == FULL_CHAIN_MODEL_POOL_ID,
+                and config.model_pool_id == model_pool_id,
                 f"{stage_key} Config task/model pool drifted",
             )
             model_snapshot = config.model_snapshot_json
@@ -1630,9 +1652,9 @@ async def _read_full_chain_runtime_receipt(
                 and isinstance(lanes[0], dict)
                 and lanes[0].get("lane_key") == "primary"
                 and lanes[0].get("max_attempts") == 1
-                and lanes[0].get("requested_model") == FULL_CHAIN_REQUESTED_MODEL
+                and lanes[0].get("requested_model") == requested_model
                 and call.execution_mode == "single"
-                and call.requested_model == FULL_CHAIN_REQUESTED_MODEL,
+                and call.requested_model == requested_model,
                 f"{stage_key} single-lane model contract drifted",
             )
             if stage_key != "joint_primary_reader":
@@ -2066,6 +2088,7 @@ def run_once(
                 _read_full_chain_runtime_receipt(
                     quality_task_id=quality_task["id"],
                     diagnose_task_id=task["id"],
+                    species=case["species"],
                     image_count=case["image_count"],
                     quality_snapshot=quality_snapshot,
                     diagnose_snapshot=snapshot,
