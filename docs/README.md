@@ -4,10 +4,13 @@
 
 本目录按“当前权威、实施导航、工程证据、历史资料”分类。文档数量不是问题，关键是每类资料只有一种用途，读者能快速判断它是否仍可指导开发。
 
+> 本项目新会话的当前执行合同是[MS-Image 当前开发合同与会话执行规范](ms-image-current-development-contract.md)。项目级 `AGENTS.md` 会要求每次任务先核对其中的已完成能力总账；具体 active objective 仍以用户授权和 `.agent-handoff/snapshot.md` 为准。
+
 ## 先看哪里
 
 | 目的 | 入口 | 权威性 |
 |---|---|---|
+| 开启当前项目开发、新会话或核对已完成功能 | [MS-Image 当前开发合同与会话执行规范](ms-image-current-development-contract.md) | 当前项目执行合同；必须结合 snapshot 和源码复核 |
 | 用一份文档完整理解 XRay 总体架构、数据库、模块、链路、逐层责任和专项设计 | [XRay 完整核心架构与专项设计](refactor/14-xray-specialty-design.md) | 当前自包含交付入口；新开发优先阅读 |
 | 开启新重构会话、实施开发或向团队介绍项目 | [MS-Image 重构文档包](refactor/README.md) | 当前实施与讲解导航；不复制字段权威 |
 | 设计 QJ 接入、公共/专项模块收敛、入口/Worker/数据库连接调整 | [QJ 借鉴与模块收敛调整方案](refactor/16-qj-reference-and-modular-convergence-plan.md) | 当前架构调整建议；不授权迁移或真实环境操作 |

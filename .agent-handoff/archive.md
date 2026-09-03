@@ -2,7 +2,7 @@
 
 本文件保存压缩后的旧交接历史，不属于新会话正常读取范围。
 
-当前没有归档记录。
+历史归档记录见下方索引。
 
 ## Rotated Records
 - [work-log-20260820T035515322329Z.md](archive/work-log-20260820T035515322329Z.md): work log exceeded 64 KiB or 30 dated sections
@@ -114,3 +114,111 @@
 - [work-log-20260826T124846824597Z.md](archive/work-log-20260826T124846824597Z.md): work log exceeded 64 KiB or 30 dated sections
 - [work-log-20260826T135230792351Z.md](archive/work-log-20260826T135230792351Z.md): work log exceeded 64 KiB or 30 dated sections
 - [work-log-20260826T140147961081Z.md](archive/work-log-20260826T140147961081Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T013921586841Z.md](archive/work-log-20260827T013921586841Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T014705804131Z.md](archive/work-log-20260827T014705804131Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T022001909426Z.md](archive/work-log-20260827T022001909426Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T025345376375Z.md](archive/work-log-20260827T025345376375Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T032022431721Z.md](archive/work-log-20260827T032022431721Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T033801365830Z.md](archive/work-log-20260827T033801365830Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T041618232733Z.md](archive/work-log-20260827T041618232733Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T054310108318Z.md](archive/work-log-20260827T054310108318Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T055421387470Z.md](archive/work-log-20260827T055421387470Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T061854959678Z.md](archive/work-log-20260827T061854959678Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T065608670570Z.md](archive/work-log-20260827T065608670570Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T095325780769Z.md](archive/work-log-20260827T095325780769Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T113337395399Z.md](archive/work-log-20260827T113337395399Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T123319730127Z.md](archive/work-log-20260827T123319730127Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T134811425886Z.md](archive/work-log-20260827T134811425886Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T141531875177Z.md](archive/work-log-20260827T141531875177Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T142911836745Z.md](archive/work-log-20260827T142911836745Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260827T150057407770Z.md](archive/work-log-20260827T150057407770Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T014958050599Z.md](archive/work-log-20260828T014958050599Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T020903966651Z.md](archive/work-log-20260828T020903966651Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T021805461492Z.md](archive/work-log-20260828T021805461492Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T031058621399Z.md](archive/work-log-20260828T031058621399Z.md): work log exceeded 64 KiB or 30 dated sections
+- [snapshot-20260828T031155234829Z.md](archive/snapshot-20260828T031155234829Z.md): snapshot exceeded the soft limit (19978 bytes, 166 lines)
+- [work-log-20260828T034834686996Z.md](archive/work-log-20260828T034834686996Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T052334825610Z.md](archive/work-log-20260828T052334825610Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T052520608482Z.md](archive/work-log-20260828T052520608482Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T062723225677Z.md](archive/work-log-20260828T062723225677Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T064642466028Z.md](archive/work-log-20260828T064642466028Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T065813489772Z.md](archive/work-log-20260828T065813489772Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T071339765944Z.md](archive/work-log-20260828T071339765944Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T072046174281Z.md](archive/work-log-20260828T072046174281Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T072827508694Z.md](archive/work-log-20260828T072827508694Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T075059275737Z.md](archive/work-log-20260828T075059275737Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T083940360713Z.md](archive/work-log-20260828T083940360713Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260828T083940362455Z.md](archive/validation-20260828T083940362455Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260828T085915475005Z.md](archive/work-log-20260828T085915475005Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260828T090031359094Z.md](archive/validation-20260828T090031359094Z.md): manual complete-section rotation after multi-table validation exceeded 64 KiB
+- [work-log-20260828T091412440911Z.md](archive/work-log-20260828T091412440911Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T091547458383Z.md](archive/work-log-20260828T091547458383Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T092044509955Z.md](archive/work-log-20260828T092044509955Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T095121981489Z.md](archive/work-log-20260828T095121981489Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T100236362054Z.md](archive/work-log-20260828T100236362054Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T103333939803Z.md](archive/work-log-20260828T103333939803Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260828T113738301233Z.md](archive/work-log-20260828T113738301233Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260828T113738304487Z.md](archive/validation-20260828T113738304487Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260828T145449163529Z.md](archive/work-log-20260828T145449163529Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260828T145449166756Z.md](archive/backlog-completed-20260828T145449166756Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [validation-pre-d2-closeout-20260828.md](archive/validation-pre-d2-closeout-20260828.md): exact pre-compaction validation history archived before the D2 closeout current-state summary
+- [work-log-20260828T162226132239Z.md](archive/work-log-20260828T162226132239Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260828T162226135309Z.md](archive/backlog-completed-20260828T162226135309Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [backlog-completed-20260828T162931966968Z.md](archive/backlog-completed-20260828T162931966968Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260828T172652026564Z.md](archive/work-log-20260828T172652026564Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260828T172652029467Z.md](archive/backlog-completed-20260828T172652029467Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260829T002144860131Z.md](archive/work-log-20260829T002144860131Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260829T002144862848Z.md](archive/backlog-completed-20260829T002144862848Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260829T035211252700Z.md](archive/work-log-20260829T035211252700Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260829T061539194727Z.md](archive/work-log-20260829T061539194727Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260829T061539197930Z.md](archive/backlog-completed-20260829T061539197930Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T033633840095Z.md](archive/work-log-20260830T033633840095Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T033633841598Z.md](archive/backlog-completed-20260830T033633841598Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T041257154600Z.md](archive/work-log-20260830T041257154600Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T041257156325Z.md](archive/backlog-completed-20260830T041257156325Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T061048899972Z.md](archive/work-log-20260830T061048899972Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T061048901535Z.md](archive/backlog-completed-20260830T061048901535Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T064245067948Z.md](archive/work-log-20260830T064245067948Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T064245069596Z.md](archive/backlog-completed-20260830T064245069596Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T071320390632Z.md](archive/work-log-20260830T071320390632Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T071320391940Z.md](archive/backlog-completed-20260830T071320391940Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T073515977761Z.md](archive/work-log-20260830T073515977761Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T073515979366Z.md](archive/backlog-completed-20260830T073515979366Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T074702643916Z.md](archive/work-log-20260830T074702643916Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260830T084823938338Z.md](archive/work-log-20260830T084823938338Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260830T084823939783Z.md](archive/backlog-completed-20260830T084823939783Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260830T132122005774Z.md](archive/work-log-20260830T132122005774Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260830T132237461973Z.md](archive/work-log-20260830T132237461973Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260831T024139050989Z.md](archive/work-log-20260831T024139050989Z.md): work log exceeded 64 KiB or 30 dated sections
+- [backlog-completed-20260831T024139052981Z.md](archive/backlog-completed-20260831T024139052981Z.md): backlog exceeded 32 KiB; archived completed checklist items
+- [work-log-20260831T024352056125Z.md](archive/work-log-20260831T024352056125Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T075251436623Z.md](archive/work-log-20260901T075251436623Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T092237100503Z.md](archive/work-log-20260901T092237100503Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T101449792032Z.md](archive/work-log-20260901T101449792032Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T102304074732Z.md](archive/work-log-20260901T102304074732Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T112945454647Z.md](archive/work-log-20260901T112945454647Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T120701169625Z.md](archive/work-log-20260901T120701169625Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260901T124222957737Z.md](archive/work-log-20260901T124222957737Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260901T124222959445Z.md](archive/validation-20260901T124222959445Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260901T140210355394Z.md](archive/work-log-20260901T140210355394Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260901T140210357100Z.md](archive/validation-20260901T140210357100Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260901T141029827080Z.md](archive/work-log-20260901T141029827080Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260901T141029828933Z.md](archive/validation-20260901T141029828933Z.md): validation history exceeded 64 KiB or 200 rows
+- [validation-20260901T141153584950Z.md](archive/validation-20260901T141153584950Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260902T015129066568Z.md](archive/work-log-20260902T015129066568Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260902T015415Z.md](archive/validation-20260902T015415Z.md): validation history exceeded 64 KiB; archived earliest complete sections
+- [work-log-20260902T022721620354Z.md](archive/work-log-20260902T022721620354Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260902T041734883914Z.md](archive/work-log-20260902T041734883914Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260902T042926493542Z.md](archive/work-log-20260902T042926493542Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260902T043031Z.md](archive/validation-20260902T043031Z.md): validation history exceeded 64 KiB; archived earliest complete 2026-08-28 sections
+- [work-log-20260902T054730441265Z.md](archive/work-log-20260902T054730441265Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260902T070448534037Z.md](archive/work-log-20260902T070448534037Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260902T070448535549Z.md](archive/validation-20260902T070448535549Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260902T082925707491Z.md](archive/work-log-20260902T082925707491Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260902T-targeted-closeout.md](archive/validation-20260902T-targeted-closeout.md): oldest complete Primary validation sections archived during TargetedReview closeout
+- [work-log-20260902T092255328056Z.md](archive/work-log-20260902T092255328056Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260902T100732456052Z.md](archive/work-log-20260902T100732456052Z.md): work log exceeded 64 KiB or 30 dated sections
+- [work-log-20260903T014734060741Z.md](archive/work-log-20260903T014734060741Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260903T-full-chain-closeout.md](archive/validation-20260903T-full-chain-closeout.md): archived completed 2026-08-29 Prompt/Nacos validation during same-Task full-chain closeout
+- [work-log-20260903T040155028438Z.md](archive/work-log-20260903T040155028438Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260903T040155030254Z.md](archive/validation-20260903T040155030254Z.md): validation history exceeded 64 KiB or 200 rows

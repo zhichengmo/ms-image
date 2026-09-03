@@ -303,10 +303,13 @@ Before making a plan or editing files, read:
 2. `.agent-handoff/snapshot.md`
 3. `.agent-handoff/risks.md`
 4. `.agent-handoff/backlog.md`
-5. Additional `.agent-handoff/` files only when needed by the current task, following the Recovery Reading Order in `AGENT_HANDOFF.md`
-6. The source files directly relevant to the user's current request
+5. `docs/ms-image-current-development-contract.md`
+6. Additional `.agent-handoff/` files only when needed by the current task, following the Recovery Reading Order in `AGENT_HANDOFF.md`
+7. The source files directly relevant to the user's current request
 
 Use the handoff files as continuity memory, but verify implementation details from source files before changing behavior.
+
+Before every plan, code change, configuration change, migration, external write, or real Runtime run in this repository, review section 3 of `docs/ms-image-current-development-contract.md` and report the completed-capability ledger check. State one active objective, the evidence level, capabilities that will not be reimplemented, the exact write set, external permissions, completion gate, and stop gate. If the ledger, snapshot, source, contract, or user authorization disagree, stop and report the conflict instead of choosing another backlog item. Historical route maps and old session prompts are background only and cannot become automatic instructions.
 
 ## Default Implementation Standard
 

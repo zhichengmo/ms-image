@@ -905,3 +905,262 @@
 | Fake scorer 烟测只证明基础设施，不读取医学指标 | 当前 scorer 只聚合冻结字段，没有可信 Gold、医学 ontology 或 Runtime 等价候选执行 | Job/Run/Artifact evidence；`MEDICAL_ACCURACY_UNKNOWN` |
 | 在线主库既存注释漂移不混入 R4A migration | 每个切片必须直接服务当前目标；顺手改非 Evaluation 历史列会扩大 migration write set 并降低可审阅性 | 主库 `alembic check` 唯一失败项 |
 | 最终 qualification 必须等待全套验证无阻断 | 代码/烟测 PASS 与完整发布门禁不同；主库 check 和容器 build 未通过时不能虚报全部资格化 | `docs/evidence/evaluation-r4a/20260831T023611Z/validation.json` |
+
+## 2026-08-31 — Anatomy Localization v1 架构与授权边界决策
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 产品语义固定为逐图 normalized bbox 定位，不是像素级分割或诊断 | 当前合同只有 6/38 label 与 bbox，没有 mask、crop、overlay、Gold 或医学 Scorer | `anatomy_localization_contract.py`；Prompt/Schema/label 资产 |
+| Localization 复用现有 Task/Stage/AICall/Attempt/Worker/Gateway 链 | 既有链已经拥有冻结配置、审计、图片 receipt、网络边界和结果持久化；复制服务会产生第二 owner | Stage handler、`AIRequestService`、Pipeline/registry diff |
+| 单 Call/单 Attempt 由 Pipeline、Config 和 Runtime 三层共同门禁 | 只检查 Config 字段不足以证明执行编排；必须同时限制一个 provider Stage、一个 lane、总 Call/Attempt 和 runtime reservation | Config Compiler、`AIRequestService`、focused tests |
+| validator 只按冻结 Schema contract version 分发 | Provider 自报字段、Nacos latest 或本地 Prompt 都是可变或不可信状态，不能决定安全校验路径 | `execute_gateway_attempt_network()` contract-version dispatch |
+| 查询必须验证完整 Task→Stage→Call→Attempt→Config/Snapshot→receipt/result 血缘 | Stage JSON 单独可被损坏或错连；任何不一致都应 409，而不是返回伪空或跨 Task 结果 | `TaskService.get_anatomy_localization()` 与查询 tests |
+| Nacos exact version 是发布事实源，不是 Worker 运行时依赖 | Worker 必须使用 exact import 后冻结的不可变 Config，避免 latest 漂移和历史 Task 重解释 | Prompt Source/Import exact identity tests；Config Snapshot SHA |
+| 静态代码完成后停在用户授权门 | 外部发布、Control Plane 写入、真实 Provider、八格与 Git 提交都会改变外部或持久状态，不能由代码授权自动扩展 | 用户 2026-08-31 实施计划；当前 NOT RUN 记录 |
+| `secret_ref`、Docker、aiomysql warning 和 R4A–M1 均独立 deferred | 这些事项不直接服务 2–5 图单 Call bbox no-Report 目标，混入会扩大 write set 并降低结论可归因性 | 当前 diff scope、Alembic readback、backlog/risks |
+
+## 2026-08-31 — Anatomy Localization v1 Runtime 首次尝试停止裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 缺少 `MS_IMAGE_XRAY_DATA_ROOT` 的 `cat-02` 命令按本轮失败处理并停止矩阵 | 用户固定任一 manifest 失败即停且禁止重复；即使失败早于 Task 创建，也不能静默补环境后重跑同一 manifest | Harness stderr；`load_case_manifest()` 位于 token/client/run_once 之前；空 evidence 目录 |
+| 不把该失败解释为 Provider、模型或 Localization 合同失败 | 没有签发 token、创建 Runtime client、Task、Call、Attempt 或网络请求，因而没有 Provider 层事实 | `run_e2e_local.py` main 调用顺序；launcher 日志与空 evidence |
+| 新的八格尝试需要已确认数据根目录和用户再次明确允许 | 当前路径不在 shell/仓库/常用 `.env`，猜测路径会破坏冻结 manifest 与审计；原规则又禁止自主重复失败 manifest | 环境/仓库只读搜索；backlog 环境阻断 |
+| 控制面已发布资产保持不变，不因 Harness 环境阻断回滚或升版 | Prompt/Config 生命周期已成功且失败与其内容无关；覆盖、退版或自动 `1.0.1` 都无意义并破坏不可变审计 | exact Prompt/Config readback 与 SHA；失败发生在本地 manifest load |
+
+## 2026-08-31 — Anatomy Localization v1 数据根目录裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 使用 `/Users/mozhicheng/workspace/documents/X光_没问题_全量过滤` 作为下一次八格的 `MS_IMAGE_XRAY_DATA_ROOT` | 现有 Harness 无需路径重写即可解析八份冻结 manifest；28/28 张目标图的路径、SHA、size、JPEG 合同、sequence 与解码均通过，目标文件无 symlink 或内容重复 | `load_case_manifest()` 逐 manifest PASS；Pillow `verify/load` 28/28；本地 stat/symlink 检查 |
+| 数据检查结论只限定为工程 Runtime 输入可用 | manifest 明示 `engineering_candidate` 且 projection 为 `UNKNOWN`；当前无 Dataset 治理、Gold、Scorer 或医学复核 | 八份 `scripts/dev/manifests/xray-2to5/*.json`；R4B/R4C 尚未实施 |
+| 只读数据核验不自动恢复已停止的八格尝试 | 用户本轮要求先检查目录是否可行；此前失败后的重复运行仍需明确授权，避免把目录确认扩张为 Provider 调用许可 | 当前用户请求；首次尝试停止裁决 |
+
+## 2026-08-31 — Anatomy Localization v1 首格真实合同失败裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| `cat-02` 的 `anatomy_localization_image_lineage_mismatch` 作为本轮矩阵失败并立即停止 | 请求已真实到达 Provider、HTTP 200 且通用 JSON Schema 通过，失败属于 Localization 技术合同而非 Harness 启动问题；用户门禁要求任一格失败即停 | Task `c9f0ddb948444be1aa3f28aee0d29e89`；Call `4836bebc9a3f42f49587220308c59f4c`；Attempt `7a3053aedc484bc191cb3106703dbc09`；脱敏 failure evidence |
+| 不重跑 `cat-02`，不继续其余七格 | 重发会产生新的模型输出，不能解释本次被拒绝响应；继续矩阵会违反 stop gate 并弱化失败归因 | Harness 终态；其余病例均记录 `not_run_stop_gate` |
+| 不猜测具体 lineage 字段，也不放宽或修正 validator | 当前持久事实只保留稳定聚合错误码，没有保存 rejected parsed payload、Provider request ID 或 response SHA；无法区分 image/series/sequence/projection/manifest 中哪项漂移 | AICall/Attempt failed 状态与失败 evidence `provider_boundary` |
+| 根因审核优先使用下游既有只读审计；若不可用，再单独评审最小失败可观测性 | 只读日志可能保留本轮原始事实且无需重发；可观测性改动必须保持 failed 结果不可被当作 accepted，并避免保存敏感 Provider 原文 | 当前数据库审计缺口；既有 fail-closed 合同 |
+| Prompt/Schema/Config `1.0.0` 保持不可变 | 本轮失败尚未定位，原地覆盖会破坏 Task Snapshot 和审计；自动升版也会绕过用户审核 | exact Nacos/Prompt/Config identity 与本轮 Task Snapshot SHA |
+
+## 2026-08-31 — `cat-02` lineage 失败只读审计穷尽裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将具体漂移图片和字段保持为 `UNKNOWN` | 现有持久事实只有聚合错误码与 expected receipt；Provider HTTP 200 body、rejected parsed result、provider request ID 和 response SHA 均未留存，无法区分五个 lineage 字段 | Attempt/AICall 只读回读；`anatomy_localization_contract.py` 的联合错误分支；definite failure 落库路径 |
+| 不再把“查询现有公开审计”作为可执行下一步 | 已按 Task/Call/Attempt、request/trace/idempotency key、错误码和时间窗检查本机与 `ms-ai-fast` 日志；AI Platform 公开 OpenAPI 没有 audit/trace/log 查询接口 | 本机只读日志搜索；AI Platform `/openapi.json` 路径清单；未调用 completion |
+| 下一步只能先审核最小失败可观测性改动 | 新的 Provider 请求不能恢复旧响应；字段级 hash diff 可以定位合同漂移而不保存 Provider 正文或放宽校验，但仍属于业务代码行为变化，需要用户明确审阅 | 当前审计缺口；单 Attempt/不可重试/不可覆盖 `1.0.0` 门禁 |
+| 若安全证据无法复用现有字段承载，则停止而不是新增 migration | Localization 当前明确禁止表、字段和 migration；可观测性需求不能暗中扩大持久化合同 | 用户实施边界；当前 Exact Write Set 和 Stop Conditions |
+
+## 2026-08-31 — 最小失败可观测性无 migration 设计裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Provider 响应摘要复用现有 Attempt/AICall 字段 | 两个模型已有 `provider_request_id`、`response_sha256`、`actual_model`，Attempt 另有 `usage_json`；当前缺口只是 definite rejection exception、Worker 与 finalizer 没有传递这些已解析事实 | `models/ai_call_attempt.py`；`models/ai_call.py`；`ai_request_service.py:1348-1430,1537-1635`；`stage_execution.py:115-127` |
+| lineage 漂移使用图片 ordinal + 字段的有限稳定错误码 | 2–5 图和 5 个固定字段形成有限集合；最长候选 `anatomy_localization_image_5_series_manifest_sha256_mismatch` 为 60 字符，适配现有 `error_code VARCHAR(80)`，可以定位未来失败而不保存原值 | `anatomy_localization_contract.py:190-211`；模型 `error_code` 字段 |
+| 不把 rejection evidence 塞入 `parsed_result_json`、`usage_json` 或 object-ref | 这些字段分别代表 Schema 结果、Provider usage 和加密对象引用；挪用会污染数据语义，违背“改动必须有意义”的收口要求 | ORM 字段注释与 accepted/failure 持久化合同 |
+| 该改动只提升失败可观测性，不修复或重新解释旧 `cat-02` | 旧响应已经丢失，新的错误码只对后续新请求生效；不得把将来复现结果冒充旧响应证据 | 当前审计穷尽结论；单 Attempt/不可重试门禁 |
+
+## 2026-08-31 — 最小失败可观测性实施裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 仅在 Provider 核心摘要完整时把 definite-response facts 附加到失败异常 | request ID、actual model 和 response SHA 缺一时无法形成可信关联；半套事实比空值更容易误导审计 | `AIRequestService.execute_gateway_attempt_network()`；半套摘要负例测试 |
+| Attempt 保存 request ID/model/usage/response SHA，无 winner 的 AICall 只投影 request ID/model/response SHA | 复用既有字段语义；usage 原本只属于物理 Attempt，AICall 没有 usage 字段；winner 不能被失败 Attempt 覆盖 | `models/ai_call_attempt.py`、`models/ai_call.py`；finalizer 持久化测试 |
+| HTTP rejection、Gateway-level parse failure 和 unknown delivery 不生成 Provider 摘要 | 这些路径没有取得完整且经过边界校验的 Provider JSON 事实；不得根据请求或 fallback 值伪造响应审计 | error classification tests；`GatewayDefiniteResponseError` optional summary contract |
+| rejected parsed result 继续不落库 | 目标是定位 lineage 字段并关联下游响应，而不是把合同拒绝结果升级为可消费业务结果；保存正文还会扩大敏感和语义风险 | failed Attempt/AICall tests；`parsed_result_json` 保持空 |
+| 静态验证完成后暂停，不自动重跑 `cat-02` | 用户授权只覆盖无 migration 代码实施和静态验证；新 Provider 请求是新的资格化事实，不能恢复旧响应 | 用户授权边界；328 full tests、Ruff、compileall、diff check |
+
+## 2026-08-31 — 新 `cat-02` 精确 projection 失败裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将新运行记录为独立资格化事实，不用于重写旧 `cat-02` 历史 | 新请求有新的 Task/Call/Attempt、Provider request ID 和 response SHA；它能验证新可观测性，但不能恢复旧响应 | Task `917f9c5498bc4fdea26bb6f2993875f`；Call `69233e53112c4c4da69319d0d7365aab`；Attempt `06f242e1d3a4417a97b28a08d9a67db3` |
+| `anatomy_localization_image_1_projection_mismatch` 必须继续 fail-closed | projection 是冻结逐图 lineage 的一部分；自动改写、忽略或猜测会破坏 exact coverage 与审计合同 | Provider HTTP 200 后的冻结 Localization validator 结果；accepted parsed result 和 winner 均为空 |
+| 首格失败后停止剩余七格，不通过继续运行收集样本来绕过门禁 | 资格化合同明确任一格失败立即停止；继续运行会把已知合同失败混入成功矩阵 | `cat-03/04/05`、`dog-02/03/04/05` 均未运行；Attempt count=1 |
+| 下一步先审核 Prompt/Schema/safe-context 与 Provider 回显行为，再决定新的不可变版本 | 当前只能确定字段和图片序号，不能从 response SHA 推导 Provider 具体值；直接放宽 validator 或覆盖 `1.0.0` 都会损坏冻结合同 | 字段级错误码；Provider body/rejected parsed result 未保存；Prompt/Config SHA 无漂移 |
+| 单个失败病例不升级为全矩阵 single-call 资格 | 该病例证明本次编排只有一个 Logical Call 和一个 Attempt，但未完成猫狗 2–5 图成功矩阵 | 新 `cat-02` 运行记录；其余七格 NOT RUN |
+## 2026-09-01 — 项目级防偏移规则启用
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将当前开发合同的“每轮完成度核对与单一目标闸门”写入本项目 `AGENTS.md` | 用户确认该规则可以对 `ms-image` 项目生效；项目级配置能约束后续该仓库会话，同时不影响其他仓库 | 用户本轮确认；`AGENTS.md` Required Startup Routine |
+| 不把具体 active objective 固定写入 `AGENTS.md` | 当前任务会随阶段变化，动态目标应继续由 `.agent-handoff/snapshot.md` 和用户本轮授权决定，避免永久配置过期 | 当前 snapshot/backlog 的动态状态职责 |
+
+## 2026-09-01 — 非分割 X-Ray 阶段级 Prompt 架构审计
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Primary 与 Targeted 不再作为目标架构的双模式共享 Prompt | 用户明确要求每个实际 AI 阶段拥有专门 Prompt；当前同物种 v4 通过 `PRIMARY_RESULT_JSON` 分支合并两种角色，只是历史运行事实，不再是目标设计 | 用户本轮要求；cat/dog v4；`prompt_commands.py` |
+| 首版目标为 Cat/Dog 各 6 个 Prompt，共 12 个 identity | 非分割目标链有 ImageQuality、StudyScreening、SystemAnalysis、Primary/CaseAdjudication、TargetedReview、ReportGeneration 六类独立 AI 职责；猫犬旧 Prompt 存在实质医学规则差异 | `docs/refactor/31-xray-non-segmentation-ai-stage-prompt-and-interface-audit.md`；`vet-platform@6d1dd28` Prompt 审计 |
+| 借鉴旧链逐图 Quality fan-out 和 A/B 并发，但不复制 A/B/C 同批并发 | 逐图和互不依赖的 A/B 可以并行；旧 C 自称 Phase 3 却未消费 A/B 输出，目标 ReportGeneration 必须等待唯一 final result | `vet-platform x_ray_service.py:804-1027,4007-4148`；31 号文档目标 DAG |
+| 不迁移 17×2 crop Prompt、6×2 system crop Prompt 或分割硬依赖 | 这些调用依赖 segmentation bbox、crop、PiP/标注图，与用户排除的红框链相冲突；首版 SystemAnalysis 可直接对全部冻结原图做 Study 级系统化分析 | `x_ray_constants.py:335-543`；`_analyze_all_images_with_organ_seg()`；用户范围 |
+| Stage 拆分优先使用现有 Config/Task/Stage/AICall 表和 Service，无迁移设计 | 现有 `AIConfigRecord` 与 `AICall.ai_config_id` 能保存独立 Config；Task Snapshot 可冻结 stage bindings，但当前单 Config 校验和图片全量加载需局部扩展 | `models/ai_config_record.py`；`stages/contracts.py`；`ai_request_service.py:1832-1881` |
+| 本轮只形成设计文档，不创建 Prompt/Schema、不发布 Nacos、不实施代码 | 用户要求先分析并整理详细文档；三个产品选择仍会改变实现，且拆分后的 6–10 Call 成本需要显式接受 | 用户本轮授权；31 号文档第 17 章 |
+
+## 2026-09-01 — 宠物档案迁移边界与数据合同
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将用户本轮迁移要求视为对旧“宠物主表不进入 ms-image”边界的明确调整授权 | 当前开发合同规定用户本轮明确授权优先；用户明确要求迁移宠物档案流程、`pet-info` 和数据库表代码 | 用户本轮指令；`docs/ms-image-current-development-contract.md` 权威顺序 |
+| 只迁宠物档案与品种资料目录，不迁完整病历/体征时间线 | 用户关注档案和 `pet-info`；源项目医疗时间线会显著扩大领域、表和接口范围，且不是档案成立的必要条件 | 源仓库只读审计；目标新增 write set |
+| 所有业务数据库访问遵循 API -> Service -> CRUD -> Model，并复用 `DalBase` | 目标仓库禁止 endpoint/Service 直接 SQL，也禁止第二套 Repository/CRUDBase | `AGENTS.md`；新增 `PetProfileDal`、`PetProfileHistoryDal`、`PetInfoDal` |
+| 档案 owner 使用可信 JWT `subject`，不使用或保存手机号作为归属键 | owner 必须来自认证上下文，避免不可信请求字段和个人信息耦合 | `get_current_user` / 新 Service 调用链 |
+| 头像只持久化 OSS object key，不保存签名 URL | 签名 URL 短期有效且包含 query；持久化会产生泄露和失效风险 | `PetProfile` Schema 校验与字段合同 |
+| 创建采用全局唯一 `request_id` 幂等，更新/归档/恢复采用 `state_version` CAS | 防止重复创建和并发覆盖；与目标项目状态版本风格一致 | `PetProfile` 模型、DAL、Service |
+| 删除语义收敛为 archive/restore，并记录逐字段历史 | 宠物档案属于长期业务记录，物理删除不利于审计；历史与主更新共享同一 Session/事务 | `PetProfileHistory`、archive/restore Service |
+| 新表使用 opaque `VARCHAR(64)` 单列主键、无 FK/enum/tenant；状态类型用 string，字段 comment 写候选类型和中文含义 | 满足 `ms-image` 的 MySQL 模型硬规则并避免把源库旧整数/租户模型原样复制 | 3 个新增 ORM 模型合同 smoke |
+| 用户后续明确授权后，三张表按 `ms-image` 合同重新建模并创建独立 revision `20260901_01`，不复制旧 DDL | 源库整数主键、旧命名和历史约束不满足目标 opaque ID、无 FK/enum/tenant 规则；独立 revision 可避免夹带无关漂移 | 用户后续指令；migration；实库 metadata 核对 |
+| legacy ID 使用确定性 UUID5 hex，旧 ID 仅保留为 `source_system/source_pet_id`，档案另设稳定 `request_id` | 保持目标资源 ID 全局 opaque，同时让导入可审计、可重跑且不重复 | 导入结果；唯一约束；第二次执行新增 0 |
+| `user_uuid` 直接映射为 `owner_id` | 旧 JWT identity/sub 即用户 id，旧创建链写入 `user_uuid`；目标认证上下文使用同语义的 `subject` | 旧认证/档案创建链；目标依赖与 Service |
+| 只转换可严格证明的数据：`数字kg` 体重和已验证旧 OSS host 头像 path；第三方品种图与区间体重留空 | 防止把外部 URL 冒充 OSS key，或将区间文本推断成不存在的单值事实 | 源数据分布；跨库核对；导入规则 |
+| 源 `pet_profile_history` 为 0 时目标历史保持 0 | 迁移只保存真实存在的历史，不根据当前档案反向伪造事件 | 源/目标 count 核对 |
+
+## 2026-09-01 — Quality Prompt 不可变发布与 Dog 重试边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Cat/Dog Quality Prompt 视为已发布，不再重复写同一 `1.0.0` | Nacos exact 回读存在且规范化正文 SHA 与本地冻结文件完全一致；重复发布会违反不可变版本合同 | Nacos readback SHA；`prompts/xray/nacos/image-quality/` |
+| DB Prompt `1.0.1` 与 Nacos source `1.0.0` 是合法的两个版本域 | DB Prompt 版本标识本地不可变记录，source receipt 冻结外部 Nacos release；active Config 精确绑定 DB Prompt 与 source content SHA | AI Config/Prompt readback |
+| Cat 只能升级为工程 Runtime PASS，不能升级为医学准确率 PASS | Task/Stage/Call/Attempt/GET/无 Report 均通过，但没有 Gold、医学 Scorer 或人工复核 | Cat Task `c1cea8...` |
+| Dog HTTP 409 不是 Provider 失败 | 冲突发生在 Task 创建前；数据库没有 Dog Task、AICall 或 Attempt | Dog Study `89573c...` task count 0 |
+| Dog 若继续，只允许对现有 committed-ready Study 单次重试 Task 创建 | 避免重新上传和重复病例；首次冲突的具体内部错误码仍 UNKNOWN，第二次失败必须停 | Study `89573c...` 当前 ready/revision 已只读确认 |
+
+## 2026-09-01 — 目标诊断链 Prompt Nacos 发布合同
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Nacos Prompt 写操作使用 `/v3/admin/ai/prompt` 生命周期，不使用 `/v3/console/ai/prompt` | 当前部署 Admin draft/submit/publish capability 为 200，Console draft 为 404；Prompt Client 路由只用于读取 | Admin OPTIONS；Nacos `PromptAdminController`；真实发布记录 |
+| 新 Prompt 必须先 exact/admin 双重预检，再 `draft → submit`，禁止 force publish | Client exact GET 只能看到可读版本，Admin governance 可同时发现 editing/reviewing metadata；双门禁避免覆盖同版本或遗留草稿 | 10 个发布前 preflight；不可变版本合同 |
+| 10 个 `1.0.0` online 只代表外部 Prompt 资产完成，不代表目标 Stage 全链实现 | 当前尚无对应 Prompt Source mapping、Schema/validator、stage-specific Config binding 和 Runtime DAG | 当前源码；本轮未改业务代码/数据库/Runtime |
+
+
+## 2026-09-01 — Quality 写接口 commit-before-response 事务边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Runtime 写接口由 endpoint 使用显式 `db.begin()` 拥有事务，并在退出事务块完成 commit 后再构造成功响应 | 避免 yield dependency 在响应发送后才 commit，消除 `HTTP 201` 已返回但紧接 GET 尚不可见的竞态；Service 仍拥有业务逻辑，endpoint 只拥有事务边界 | `sessions.py`、`studies.py`、`tasks.py`、`xray_quality.py`；真实 `POST 201 → immediate GET 200` 回归 |
+| Quality 接口不是一次性接口；幂等边界是 `requester_id + request_id + task_type` | 同 request_id/同冻结输入返回原 Task；新 request_id 可对同一 ready Study/Revision 创建新 Task；模型只有 `business_key` 唯一约束 | `task_service.py:189-196`；`models/task.py:12-16`；真实幂等重放返回同一 Task |
+| 历史首次 409 只确认归属 Runtime，不确认精确冲突子类型 | 当时没有 Task/Call/Attempt/Provider request；但公共响应未保留内部稳定错误码，不能从事后状态反推唯一分支 | 历史数据库边界；当前回归 Task `8c854...` |
+
+
+## 2026-09-01 — StudyScreening message contract 阻断处理
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Cat Prompt Import 422 视为控制面代码合同缺口，不视为 Nacos、Prompt正文、变量或 Provider 故障 | exact fetch/version/SHA 与变量解析全部通过，唯一失败为 `prompt_message_contract_invalid` | `message_contract.py:32-36`；无持久化分步诊断 |
+| 不通过删除 message contract、伪装 `PRIMARY_RESULT_JSON`、直接写库或放宽 Schema/validator 绕过 | 这些做法会破坏冻结 context 语义和 fail-closed 边界，且无法证明 Runtime 使用真实 Quality 结果 | StudyScreening Prompt variables 与 Runtime command 合同 |
+| 在用户确认修复前停止控制面与 Runtime；Dog import、Config、Provider 和 SystemAnalysis 全部不执行 | 当前开发合同要求发现需改代码时先停止报告，首次链路阻断不得静默修复后继续外部运行 | 本轮完成门/停止门；DB Audit/Prompt absent |
+
+
+## 2026-09-01 — StudyScreening 首次 Runtime projection mismatch 停止裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将 Cat 首次 Runtime 归类为 Provider HTTP 200 后的技术 lineage fail-closed，而不是网络、Prompt 缭失或 Config 漂移 | Root/Stage Config 冻结身份一致，2/2/2 图片与 manifest 一致；唯一稳定错误为 projection mismatch | Task `e004c...`、Call `e3e388...`、Attempt `7ec8...` |
+| 不重试、不修改现有 `1.0.0` Prompt/Schema/validator、不进入 SystemAnalysis | 当前合同规定首次真实失败立即停止；重试或放宽会污染单次资格化证据 | Runtime stop gate；Report 0；Attempt count 1 |
+| 将“Provider 可能把 UNKNOWN 推断改写为具体 projection”保留为最可能解释，不升级为已确认返回值 | 两份冻结输入均明确为 UNKNOWN，但拒绝路径没有保存被拒绝 source_refs | Safe/Quality readback；Attempt parsed_result_json null |
+| 若继续，优先设计新的不可变 Prompt/Config 版本，明确 lineage 字段逐字复制；不放宽 validator | projection 是冻结来源事实，模型不应静默重写；严格 validator 是正确的 fail-closed 边界 | `study_screening_contract.py`；Prompt `1.0.0` 当前措辞 |
+| 任何新 Runtime 需要用户再次明确授权并重新建立单次门禁 | 当前第一次已消费且失败；自动重跑违反授权和证据隔离 | 用户逐个跑通顺序；当前停止门 |
+
+## 2026-09-02 — StudyScreening lineage authority 与 canonicalization 裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 选择 existing-entry internal modular refactor，不采用仅改 Prompt，也不全链重写 | v1 的失败由 Prompt/Schema/validator 对同一动态 lineage 的不同合同造成；现有 Task/Stage/AICall/Gateway/receipt 主体边界有效，可版本化修复 | Cat Runtime `study_screening_source_projection_mismatch`；`study_screening.v1.schema.json`；`study_screening_contract.py` |
+| v2 Provider 只输出医学内容与最小 `source_ref_id + image_id` anchor；确定性 lineage 由 receipt 构造 | projection/manifest/series/order 是系统冻结事实，不应由模型成为第二 authority；动态值无法由静态 JSON Schema 表达逐值相等 | `AI_IMAGE_RECEIPT_V2`；Quality query 的 server-side lineage enrich；Snapshot receipt reconstruction |
+| AICall 保留 Provider schema-valid 结果，Stage output 保存 canonical result | AICall 是 Provider 证据边界，Stage 是业务结果边界；在 AIRequest validator 内直接覆写会丢失模型实际结构，query-time enrich 又会造成下游与查询分叉 | `ai_call.py` 字段语义；`AIRequestService._structured_call_response()`；`StudyScreeningStageHandler.consume_ai_call()` |
+| v1 Prompt/Schema/validator/Task replay 全部保留；v2 使用新 Prompt/Schema/handler/profile/Config identity | 冻结任务必须可重放，Prompt 同 key/version 不可覆盖；新行为不能改变历史 Config 含义 | Prompt import immutability；Config frozen verify；pipeline/registry version dispatch |
+| Screening 单阶段修复与完整诊断链汇合分开验收 | 当前 root profile 虽顺序执行 screening→primary，但 primary command 不读取 screening previous output；不能把顺序接入误报为证据消费 | `pipeline.py`；`imaging_execution_service.py`；`prompt_commands.py:build_primary_ai_request_command` |
+
+
+## 2026-09-02 — StudyScreening v2 实施与验收边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Provider anchor 合同与 Stage canonical 结果必须作为两个明确边界，不得让同一 contract version 同时表示“最小 anchor 形状”和“完整 lineage 形状” | 否则会重新制造 Schema、持久化语义和下游解释漂移；AICall 保存 Provider 证据，Stage output 保存业务 canonical 结果 | `ai_call.parsed_result_json` 字段语义；Stage output 持久化边界 |
+| 当前正式修复不采用 Prompt-only 补丁；Prompt 只能辅助模型稳定输出 anchor，不能成为动态 lineage authority | 静态 Schema/自然语言无法证明字段等于本次 receipt；projection 和 coverage 会继续受模型行为影响 | v1 projection mismatch；coverage 潜在第二阻断 |
+| 先验收独立 `xray_study_screening_v2`，再接 diagnose Root Profile 和 Primary 消费 | 单 Stage canonicalization 与下游证据汇合是两个故障域；合并验收会让失败无法归因 | 当前 Primary command 未读取 `study_screening_result` |
+| 如需进一步加固，可后续把 `source_ref_id` 由系统按冻结顺序预分配；当前 v2 最小实施仍以唯一、已发送、全覆盖的 `source_ref_id + image_id` anchor 为准 | 系统预分配能继续减少模型 identity 权限，但不是修复 projection 冲突的必要条件，不在当前最小授权范围内扩大设计 | `ordered_image_refs` 已有稳定 sequence/image identity；v2 推荐边界 |
+
+## 2026-09-02 — StudyScreening v2 Cat 工程资格结论与 SHA 语义
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将 StudyScreening v2 Cat 标记为工程 `RUNTIME_QUALIFIED`，不再重跑 | 唯一真实 Task completed，1 Call/1 Attempt、Provider 200、accepted、2/2/2、Report 0，双边界审计通过 | Task `2c48ad...`、Call `2a2e7a...`、Attempt `fab095...` |
+| 原始 Schema 文件 SHA 与 frozen canonical JSON SHA 分别记录 | `b197...` 对原始字节计算，`f2d0...` 对同一 JSON 的 canonical serialization 计算；对象不同，不是漂移 | Config frozen verify PASS |
+| 下一候选为 SystemAnalysis，但不自动开始 | 本次授权和证据仅覆盖独立 StudyScreening；下游必须建立自己的控制面与 Runtime 完成门 | 用户要求逐阶段解决；当前 Report 0 |
+| 医学状态保持 UNKNOWN/NO-GO | 工程可运行不证明医学准确性或发布收益 | 无 Gold/Scorer/Holdout 医学验证 |
+
+## 2026-09-02 — 跳过 Screening 的下游验证证据边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 本轮 StudyScreening 只记为 `ASSUMED_PASS` | 用户要求继续而不等待；本次 Task 实际没有 screening checkpoint，不能把假设提升为 Runtime 事实 | 用户本轮授权；Task `5c6c...` Stage topology |
+| 使用既有 experiment Config，不创建或切换控制面版本 | `xray_targeted_review_v2` 可从 StudyPreparation 直接进入 Primary，满足跳过 Screening 且避免修改 Nacos/Config | Config `a290e1...` / `full-chain-local-v1` |
+| 一次 Cat E2E 是本轮唯一真实调用门 | 防止失败后重试污染证据；用户目标是继续验证而非现场优化 Prompt/validator | 1 Task / 1 Call / 1 Attempt |
+| Primary lineage 仍按动态 Receipt 严格校验 | 跳过 Screening 不意味着放宽后置来源合同；本次 Provider 输出全部匹配后才 accepted | AICall `e4862f...`；source_refs=2 |
+| Stage availability 与持久医学状态保持分层 | `produced` 表示结果存在，`normal` 是模型医学结论；ReportService 前的投影是既有合同，不应视为漂移 | `imaging_execution_service.py`；focused tests 2 passed |
+| 未触发的 TargetedReview、未包含的 SystemAnalysis/ReportGeneration 不计为通过 | Task completed 只证明实际拓扑，不证明未执行能力 | Stage list、Call count=1 |
+
+## 2026-09-02 — SystemAnalysis 独立资格与完成门边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 将 Cat `xray_system_analysis` 标记为独立工程 `RUNTIME_QUALIFIED`，不重跑 | 唯一 Task completed；1 Call/1 Attempt；Provider 200；accepted；2/2/2；Schema/合同/Stage 持久化门 PASS；Report 0 | Task `4e116598...`；完成门 JSON |
+| SystemAnalysis Stage 的当前权威持久化 lineage 是 `output_json.source_call_id + system_analysis_result + output_sha256` | Handler 明确只写这三个可验证事实；`accepted_call_id` 模型字段可空且当前路径没有写入 | `system_analysis.py:55-58`；`stage_checkpoint.py:38` |
+| 不把可空 `accepted_call_id` 或 `response_object_ref_json` 强加为本轮完成门 | 临时审计脚本的额外假设会把成功业务执行误报为失败；删除审计假设不等于放宽业务 validator | 两次临时审计失败与最终 PASS |
+| 不把独立 StudyScreening/SystemAnalysis/Primary PASS 拼成同 Task 全链 PASS | 三次资格使用不同 Task/Profile；先前 Primary 用例跳过 Screening 且不包含 SystemAnalysis | 当前与上一轮 Stage topology |
+| 下一未资格 AI Stage 默认为条件性 TargetedReview，但不自动开始 | Primary 已有独立工程 PASS；TargetedReview 在正常病例未触发，必须另备 targeted candidate 和单次授权 | Task `5c6c...` route=`primary_final` |
+| 医学状态保持 UNKNOWN/NO-GO | 单病例工程合同通过不证明系统分析内容正确或临床收益 | 无 Gold/Scorer/Holdout |
+
+## 2026-09-02 — TargetedReview 本地合同收口
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| TargetedReview 使用独立 Cat/Dog Prompt identity 与 stage config binding | Targeted 需要明确消费 Route、Quality、StudyScreening、SystemAnalysis 结果，不能继续依赖单份模糊双模式上下文 | `config_compiler.py`、`task_service.py`、`prompt_commands.py` |
+| Route/上游结果由冻结 Snapshot/Stage input 注入，Provider 只消费，不成为 lineage authority | 保持现有 prompt-first、truth-preserving 边界，避免 Python 改写医学结论 | `XRayPromptCommand`、`AIRequestService._v2_safe_variables` |
+| 独立 Targeted 输出禁止再次产生 `targeted_candidate`，采用 fail-closed | Targeted 最多一次；递归候选会造成无限/重复路由和错误预算消耗 | `targeted_review.py`、递归候选合同测试 |
+| 本轮只认本地合同完成，不升级 Runtime PASS | 未执行真实 Provider，且尚无合法 candidate 的单次资格化证据 | 两份合同测试 `356 passed`、Backend 全量 `365 passed`；无 Runtime evidence |
+# Durable Decisions
+
+## 2026-09-02 — Pet profile is an optional frozen Task context
+
+- Reuse the existing `PetProfile` capability; do not create another table, migration, repository, service, or endpoint.
+- `diagnose` Task may accept `pet_profile_id`; creation validates caller ownership, `active` status, and cat/dog species equality.
+- Freeze `profile_id`, `state_version`, and limited identity/demographic fields into `request_snapshot_json` so later profile edits cannot change an in-flight or replayed Task.
+- Do not automatically inject disease, allergy, family, or medical history into X-Ray prompts. Those fields are clinical claims and require a separately reviewed prompt contract.
+
+## 2026-09-02 — Anatomy Localization 必须与 diagnose 主链显式关联
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Localization 不能仅以 `requester_id + study_id + study_revision_id` 推断属于某条诊断主链 | 同一冻结 Study Revision 可存在多个 diagnose/localization Task、重跑和不同 request/config；该组合只能得到候选集合，不能证明直接血缘 | `models/task.py`、`TaskDal.page_for_owner()`、`TaskService.create_task()` |
+| 推荐在 Localization Task 上持久化 `source_task_id`，语义固定为其关联的 `diagnose` 主链 Task | 显式 Task-to-Task ID 才能从主链稳定反查并避免 trace/request/study 误关联；复用现有 Task 实体即可 | 当前 Task 模型/Schema 无 parent/source/related task 字段；用户明确要求主链可查询 |
+| `quality_review_task_id` 不得承担此关联语义 | 它只表示质量审核上游并冻结进请求 Snapshot，不能改义为 diagnosis-to-localization | `TaskCreate.quality_review_task_id`；`TaskService._load_verified_xray_quality_review()` |
+| 创建继续使用 `POST /tasks`，Localization 请求增加 `source_task_id`，不新增专用 create/status/cancel API | Task 已拥有幂等、CAS、状态、取消和错误事实；新增重复接口会形成第二生命周期 owner | 现有 `/tasks` endpoints 与 Localization v1 架构决策 |
+| 主链查询必须暴露 Localization 关联摘要，完整结果仍由专用结果合同返回 | 主链可发现 sidecar task/status，同时避免把 bbox 结果复制进通用 Task 或诊断 Report | `GET /tasks?id=`、`GET /anatomy-localizations?task_id=` 当前边界 |
+| 严格实现需为 `task_record.source_task_id` 增加普通索引和 Alembic migration，但不新增表或 foreign key | 反向查询需要明确、可索引的持久列；JSON Snapshot 查询或 Study 推断都不满足稳定血缘 | 项目数据库约束；当前 task_record 无该字段 |
+
+## 2026-09-03 — TargetedReview、ReportGeneration 与同 Task 主链资格裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| “单接口跑通”按主链内部单 Stage 完成门验收，不新增 Targeted/ReportGeneration 公共 Task API | 两者是 diagnose Profile 内部 Stage；另造公共接口会复制生命周期、绕过冻结 Snapshot/lineage 并形成伪主链 | `targeted_review.py`、`report_generation.py`、`imaging_execution_service.py` |
+| TargetedReview 标记为工程 `RUNTIME_QUALIFIED` | 合法 `thoracic/lung_pattern` candidate 真实触发；Stage completed，Call succeeded/accepted，winner Attempt succeeded，3/3/3 receipt 与上下游 lineage 通过 | Task `ae3c77...`；Stage `866f01...`；Call `b3706e...`；Attempt `b67d89...` |
+| ReportGeneration AI 标记为工程 `RUNTIME_QUALIFIED` | 独立零图 Stage 真实调用 Provider；Call/Attempt accepted，0/0/0 图片合同正确，冻结医学结果未被重写，final Report 血缘完整 | Stage `3f8c18...`；Call `c63f93...`；Attempt `6cb133...`；Report `a65a33...` |
+| 同一 diagnose Task 八阶段主链标记为工程 `RUNTIME_QUALIFIED` | 8 Stage completed、5 AI Call、5 Attempt、唯一 final Report；不是把不同历史 Task 的 PASS 拼接 | Evidence `/tmp/ms-image-xray-full-chain-evidence-20260903-targeted-r3/engineering-candidate-cat-03-20260902T160745Z-34de55df.json` |
+| 不重复发起 Provider 调用来证明已持久化的同一事实 | 当前 evidence/DB 已满足完成门；重复调用只会产生新的 Task/Attempt 和成本，不能增强原 Task 的真实性 | 2026-09-03 主线程与独立只读审计一致 |
+| 医学状态继续 UNKNOWN/NO-GO | 工程执行、receipt 和 lineage 不证明诊断内容正确 | 无可信 Gold/Scorer/Failure Bank/Holdout |
+
+## 2026-09-03 — Git 收口与模型路由分支边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 功能代码、full-chain harness、文档/handoff 分提交保存，不压成一个不可审计提交 | 当前工作区包含业务实现、运行辅助与大量耐久历史；拆分后可独立审阅且不重写既有提交 | `ee2fa3a`、`2b7d66b`；逐路径暂存结果 |
+| `.agent-handoff/archive/**` 与 `.agent-handoff/archive.md` 一并纳入 Git | 索引引用 216 个 archive path，108 个本次新增文件全部存在；只提交索引会造成恢复历史断链 | archive reference check：216 refs / 0 missing |
+| 当前分支只做现状收口，新建 `codex/per-flow-model-routing` 再处理模型切换 | 避免将已资格化 X-Ray/宠物档案交付与新的跨仓库模型路由设计混合 | 用户要求“提交推送后重新创建一个分支”；当前分支提交边界 |
+| 推理强度与模型名分开表达 | `gpt-5.6-sol` 是模型标识，`xhigh` 应是独立 `reasoning_effort` 参数；把两者拼成模型名会破坏路由和平台匹配 | 已定位的 `AiModelRoute`/Runtime payload 与平台 Schema/Endpoint 覆盖行为 |

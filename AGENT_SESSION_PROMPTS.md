@@ -1,10 +1,35 @@
 # MS-Image 新会话提示词
 
-> **当前有效恢复入口**：始终先按 `AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md` 和用户本轮授权恢复。XRay（X 光）后续开发使用本文“开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）”以及 `docs/refactor/24-current-runtime-audit-and-next-development-guide.md`。
+> **当前有效恢复入口**：始终先按 `AGENT_HANDOFF.md`、`.agent-handoff/snapshot.md` 和用户本轮授权恢复。项目级当前开发合同为 `docs/ms-image-current-development-contract.md`；每次任务必须先核对其中第 3 章的完成度总账，并声明单一目标、write set、外部权限、完成条件和停止条件。旧完整路线图和下方历史 Prompt 只能解释由来，不能覆盖当前源码、snapshot 或用户授权。
 >
 > 下方“历史 P1/P2 提示”仅保留用于解释旧会话条件，**禁止**作为当前启动入口；其中的旧 SHA、已实现范围和兼容处理不得覆盖当前 worktree/handoff 事实。
 
-## 开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）
+## 开启当前项目开发会话（当前入口）
+
+```text
+请在当前工作区继续工作，并严格遵循：
+docs/ms-image-current-development-contract.md
+
+开始前必须读取：
+1. AGENTS.md
+2. AGENT_HANDOFF.md
+3. .agent-handoff/snapshot.md
+4. .agent-handoff/risks.md
+5. .agent-handoff/backlog.md
+6. docs/ms-image-current-development-contract.md
+7. 当前任务直接相关源码和既有测试
+
+必须先按开发合同第 3 章逐项核对已完成能力，明确本轮不会重复开发哪些能力。
+然后读取 snapshot 中明确的 `Active development objective`，并与用户本轮授权核对；如果 snapshot 没有明确 active objective，立即停止并报告，不要自行猜测或选择 backlog 中的其他任务。
+
+第一条回复必须输出：当前唯一目标、阶段、已完成能力核对、代码事实和 file:line、
+精确 write set、外部调用权限、完成条件、停止条件。
+
+如果发现目标已完成、文档与源码冲突、需要新增职责或需要超出授权的外部操作，
+立即停止并报告，不要自动选择 backlog 中的另一个任务。
+```
+
+## 开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（历史入口，禁止作为当前入口）
 
 > 当前代码、配置、数据库和真实 AI 网络链的审计结论以 `docs/refactor/24-current-runtime-audit-and-next-development-guide.md（当前运行时审计、完整 XRay 开发路径与新会话交接）` 为准。`21（完整能力合同）`、`22（逐层架构参考）`、`23（旧实施指南）` 仅分别保留目标范围、架构说明和历史阶段目标，不能覆盖 24 号文档中的当前运行事实。
 

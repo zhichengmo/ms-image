@@ -3,10 +3,13 @@
 状态：`CURRENT_REFACTOR_GUIDE`（当前重构导航）
 更新日期：2026-08-27
 适用范围：后续重构会话、架构评审、开发拆分和团队沟通。
+当前项目执行合同：[MS-Image 当前开发合同与会话执行规范](../ms-image-current-development-contract.md)
 设计母文：[MS-Image 最终架构、数据库与完整链路设计](../ms-image-final-architecture-and-database-design.md)
 术语表：[MS-Image 英文术语中英对照](../术语中英对照.md)
 
 本目录是“怎么理解和实施当前设计”的工作包，不是第二份字段权威。精确字段、索引、状态候选值和核心不变量以设计母文为准；本目录负责把母文拆成项目介绍、架构、数据库导航、服务合同、开发规范、迁移验证和交接材料。
+
+> 新会话的执行闸门以当前项目合同、`AGENTS.md` 和 `.agent-handoff/snapshot.md` 为准。本目录中的旧阶段路线只能作为背景，不能自动选择下一项工作。
 
 ## 1. 文档地图
 

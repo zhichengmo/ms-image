@@ -38,10 +38,11 @@
 
 ## 当前指针
 
-- 最后更新：2026-08-31
+- 最后更新：2026-09-03
 - 工作区：`/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- 当前状态：`.agent-handoff/snapshot.md`（R4A Evaluation 独立数据库、metadata/Alembic、readiness 与 Fake scorer 技术烟测已完成；后端 240 tests 通过；最终资格标记被主库既存非 Evaluation 列注释漂移暂缓）
-- 下一动作：`.agent-handoff/backlog.md`（先单独处理或明确豁免在线 `alembic check` 的 `ai_api_connection.secret_ref` 注释漂移并补容器构建验证；R4A 关闭后才进入 R4B Dataset 治理）
+- 当前开发合同：`docs/ms-image-current-development-contract.md`（项目级执行规则；每次任务开始前核对完成度总账，并声明单一目标、write set、外部权限和停止条件）
+- 当前状态：`.agent-handoff/snapshot.md`（TargetedReview、ReportGeneration AI 和同一 diagnose Task 八阶段主链均已有真实 Runtime/Provider 工程 PASS；医学准确率仍 UNKNOWN）
+- 下一动作：`.agent-handoff/backlog.md`（后续全链回归使用固定数据根并要求调用方提供真实 projection；不得重复创建公共接口或放宽 lineage）
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
 - 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）
@@ -50,8 +51,9 @@
 - Primary 主链缺口清单：`docs/refactor/26-ms-image-primary-chain-incomplete-capability-checklist.md`
 - 完整 XRay 架构参考：`docs/refactor/22-xray-full-ai-prompt-chain-development-guide.md`
 - 完整 XRay 能力合同：`docs/refactor/21-xray-complete-capability-chain-and-session-prompt.md`
+- 非分割全接口与独立 Prompt 审计：`docs/refactor/31-xray-non-segmentation-ai-stage-prompt-and-interface-audit.md`
 - 新会话说明：`docs/refactor/08-new-session-handoff.md`
-- 可复制启动提示：`AGENT_SESSION_PROMPTS.md` 的“开启当前 XRay Runtime、Nacos Prompt 与完整能力开发会话（当前入口）”章节
+- 可复制启动提示：`AGENT_SESSION_PROMPTS.md` 的“开启当前项目开发会话（当前入口）”章节
 
 ## 容量与关闭规则
 

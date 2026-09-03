@@ -1,61 +1,45 @@
 # Handoff Snapshot
 
-## Current State
+## Current Objective
 
-- Last updated: 2026-08-31（R4A Evaluation 独立库、readiness 与 Fake scorer 技术烟测完成；最终资格标记被主库既存 Alembic 注释漂移暂缓）
-- Workspace root: `/Users/mozhicheng/workspace/code/cy-code/ms-image`
-- Branch: `codex/xray-evaluation-r4a`
-- Base: `e452b34`
-- Objective: 将 Evaluation 从在线 metadata/Alembic 中隔离为独立 `ms_image_eval`，并资格化空库重建、既有同构表接管、独立 readiness、Compose 迁移顺序和 Fake scorer 基础设施链；不进入 Dataset、Gold、Runtime 等价 Runner、M1 或 Prompt。
-- Current process state: Evaluation Control、Relay、Worker 已停止；8003 无监听。本轮临时 Secret/Token 只存在于已结束进程内，未写文件或输出。
+- Last updated: 2026-09-03
+- Active objective: 将当前已验证的 X-Ray Runtime、宠物档案和配套资产按边界提交并推送到 `codex/xray-anatomy-localization-v1`，随后创建 `codex/per-flow-model-routing` 处理按接口/流程节点选择模型及推理强度。
+- Evidence level: `LOCAL_VALIDATED / GIT_DELIVERY_IN_PROGRESS`; 不代表医学准确率或生产发布资格。
+- Write set: 现有功能代码已形成两个提交；当前仅整理既有 `AGENTS.md`、`AGENT_HANDOFF.md`、`AGENT_SESSION_PROMPTS.md`、`docs/` 与 `.agent-handoff/` 历史文件，不新增业务实现。
+- External permissions: 用户已明确授权 Git commit/push；未调用 Provider，未写 Nacos、数据库、OSS 或 Broker。
+- Completion gate: 当前分支所有有用内容逐路径提交并成功推送；新分支创建、设置 upstream；最终工作树干净。
+- Stop gate: 凭据泄露、合并冲突、非快进、认证失败、未知重叠改动或意外文件进入暂存区时立即停止；禁止 force push、reset、clean、restore 与 `git add -A`。
 
-## Completed In This Slice
+## Git Delivery Status
 
-- 四个 Evaluation ORM 已改用独立 `EvaluationBaseModel.metadata`；在线 `BaseModel.metadata` 不再包含 `evaluation_*`。
-- 新增独立 `alembic_evaluation.ini`、`alembic_evaluation_migrations/` 和初始 revision `20260831_eval_01`。
-- 独立 migration 已验证空库重建、同构 adoption、部分 schema 拒绝、额外 constraint 拒绝和有数据 downgrade 拒绝。
-- 主库 cleanup revision `20260831_01` 已验证非空 fail-closed、空表删除和空结构 downgrade；正式 `ms_image` 已升级到该 revision，四张历史 Evaluation 空表已删除。
-- 正式 `ms_image_eval` 已创建并迁移到 `20260831_eval_01`；当前保留 1 个技术烟测 Job、1 个 Outbox、1 个 Run、5 个 Artifact 作为审计记录。
-- Evaluation Control 新增公开 `/api/v1/health` 与 `/api/v1/readiness`；真实运行时 database/schema/JWT 三项均 ready、HTTP 200。
-- Compose 新增 `evaluation-migrate`；Control/Relay/Worker 等待 migration 成功。Backend 镜像补入独立 Alembic 资产，Evaluation runtime URL 使用 `URL.create()` 安全编码凭据。
-- 真实链已完成：Runtime completed Task/Report export → Evaluation Job → Outbox → Relay → RabbitMQ → 单 Worker → Fake scorer → Run/5 Artifacts；Job completed、Run succeeded，5 个 OSS ObjectRef 均通过 HEAD。
-- 后端全量测试为 `240 passed, 41 warnings`；Ruff、compileall、Evaluation Alembic current/check、Compose 四种配置、81 路由/98 Postman 对账、JSON 与 diff check 通过。
+- Source branch: `codex/xray-anatomy-localization-v1`
+- Functional commit: `ee2fa3a feat: complete xray runtime and pet profile workflows`
+- Full-chain harness follow-up: `2b7d66b fix(dev): validate species-specific full-chain configs`
+- Documentation/handoff commit: pending
+- Source branch push: pending
+- Target branch: `codex/per-flow-model-routing` (pending creation)
 
-## Current Qualification Boundary
+## Validation Baseline
+
+- `PYTHONPATH=. /opt/homebrew/anaconda3/bin/pytest apps/backend/tests -q` → `379 passed, 48 warnings`。
+- Python compile/changed-file `py_compile`、Prompt JSON、Postman JSON、migration AST/结构、模块导入、secret scan、handoff archive references 与 `git diff --check` 均通过。
+- 两次环境型 pytest 失败已定位：Homebrew Python 3.13 未安装 pytest；Anaconda pytest 首次缺少 `PYTHONPATH=.` 导致 `ModuleNotFoundError: apps`。设置 `PYTHONPATH=.` 后全量通过。
+
+## Preserved Qualification
 
 ```text
-R4A_IMPLEMENTATION_COMPLETE
-EVALUATION_CONTROL_READINESS_RUNTIME_SMOKE_PASSED
-EVALUATION_FAKE_SCORER_INFRASTRUCTURE_SMOKE_PASSED
-EVALUATION_R4A_FINAL_QUALIFICATION_BLOCKED
+TARGETED_REVIEW_RUNTIME_PASS
+REPORT_GENERATION_AI_RUNTIME_PASS
+SAME_TASK_FULL_CHAIN_RUNTIME_PASS
 MEDICAL_ACCURACY_UNKNOWN
 MEDICAL_RELEASE_NO_GO
 ```
 
-尚未记录计划中的最终 `EVALUATION_R4A_DATABASE_ISOLATION_QUALIFIED` / `EVALUATION_CONTROL_READINESS_QUALIFIED`，原因是在线主库 `alembic check` 暴露既存、非 Evaluation 的 `ai_api_connection.secret_ref` 列注释漂移。R4A 不顺带修改该历史列。
+- 已完成能力不会因 Git 收口而重新运行：X-Ray 八阶段主链、TargetedReview、ReportGeneration、宠物档案 Model/Schema/DAL/Service/API 与既有 Prompt/Config 资产均按现状保存。
+- `.agent-handoff/archive.md` 当前引用的 216 个 archive path 均存在；对应 108 个本次新增 archive 文件必须与索引一起提交，避免历史断链。
 
-## Blockers and Next Actions
+## Next Branch Objective
 
-1. 单独审阅主库 `ai_api_connection.secret_ref` 物理注释与 ORM 注释的差异；若用户授权，使用独立最小 migration 修复，再重跑主库 `alembic check`。
-2. Docker daemon 当前未运行，`docker build` 无法执行；Compose 静态解析已通过。若需要容器级资格化，启动现有 Docker 环境后只验证镜像构建与 `evaluation-migrate` 启动，不扩展业务范围。
-3. 两项关闭后复核脱敏 evidence，记录最终 R4A qualification，分组提交并推送当前分支。
-4. R4A 最终关闭后下一独立阶段才是 R4B Dataset 治理；不得跳到 Gold/Scorer、Runner、M1 或 Prompt 优化。
-
-## Evidence
-
-- `docs/evidence/evaluation-r4a/20260831T023611Z/database-isolation.json`
-- `docs/evidence/evaluation-r4a/20260831T023611Z/fake-scorer-smoke.json`
-- `docs/evidence/evaluation-r4a/20260831T023611Z/validation.json`
-
-## Active Files
-
-- `apps/backend/core/async_db.py`
-- `apps/backend/models/evaluation_base.py`
-- `apps/backend/models/evaluation.py`
-- `alembic_evaluation.ini`
-- `alembic_evaluation_migrations/`
-- `alembic_migrations/versions/20260831_01_remove_evaluation_tables_from_online.py`
-- `apps/backend/services/evaluation_control/`
-- `docker-compose.yml`
-- `apps/backend/Dockerfile`
-- `docs/evidence/evaluation-r4a/20260831T023611Z/`
+- 在 `codex/per-flow-model-routing` 上先审计并设计 `ms-image` 的“业务接口/Stage → AiModelRoute”入口，复用现有 AI Control、冻结 Config、`AIRequestService` 与 Gateway，不创建第二套 Provider owner。
+- 目标模型应表达为 `model="gpt-5.6-sol"` 与独立的 `reasoning_effort="xhigh"`，不能把 `gpt-5.6-sol-xhigh` 当模型名。
+- 需同时核对 `/Users/mozhicheng/workspace/code/cy-code/ms-ai-fast` 的代码级路由实现，以及 `/Users/mozhicheng/workspace/code/python_project/ms-ai-platform` 对请求模型、`reasoning_effort` 和 Endpoint 选择的透传/覆盖行为；在用户进一步授权前不修改其他仓库。
