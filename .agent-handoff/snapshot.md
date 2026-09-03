@@ -3,27 +3,29 @@
 ## Current Objective
 
 - Last updated: 2026-09-03
-- Active objective: 将当前已验证的 X-Ray Runtime、宠物档案和配套资产按边界提交并推送到 `codex/xray-anatomy-localization-v1`，随后创建 `codex/per-flow-model-routing` 处理按接口/流程节点选择模型及推理强度。
-- Evidence level: `LOCAL_VALIDATED / GIT_DELIVERY_IN_PROGRESS`; 不代表医学准确率或生产发布资格。
-- Write set: 现有功能代码已形成两个提交；当前仅整理既有 `AGENTS.md`、`AGENT_HANDOFF.md`、`AGENT_SESSION_PROMPTS.md`、`docs/` 与 `.agent-handoff/` 历史文件，不新增业务实现。
-- External permissions: 用户已明确授权 Git commit/push；未调用 Provider，未写 Nacos、数据库、OSS 或 Broker。
-- Completion gate: 当前分支所有有用内容逐路径提交并成功推送；新分支创建、设置 upstream；最终工作树干净。
-- Stop gate: 凭据泄露、合并冲突、非快进、认证失败、未知重叠改动或意外文件进入暂存区时立即停止；禁止 force push、reset、clean、restore 与 `git add -A`。
+- Active branch: `codex/per-flow-model-routing`
+- Active objective: 为 `ms-image` 建立按业务接口/流程 Stage 配置模型与推理强度的清晰入口；先完成调用链、冻结 Config 与跨仓库透传边界审计，再决定最小实施写集。
+- Evidence level: `GIT_DELIVERED / ROUTING_AUDIT_READY`; 尚未实施或 Runtime 验证新的模型路由。
+- Write set: 当前 Git 收口已完成；下一轮在读清目标源码前不预设业务写集，也不修改 `ms-ai-fast` 或 `ms-ai-platform`。
+- External permissions: 当前仅 Git commit/push 已获授权并完成；未获 Provider、Nacos、数据库、OSS、Broker 或其他仓库写权限。
+- Completion gate for next objective: 明确每个接口/Stage 的 route owner、`model`/`reasoning_effort` 冻结与传递位置、Platform Endpoint 选择语义、兼容策略和精确文件写集；用户确认范围后再实施。
+- Stop gate: 发现调用方模型被 Platform 无条件覆盖、Schema 丢弃 `reasoning_effort`、SDK 不支持 `xhigh`、需要跨仓库写入或会产生第二套 Gateway/Provider owner 时，先报告冲突，不直接绕过。
 
 ## Git Delivery Status
 
-- Source branch: `codex/xray-anatomy-localization-v1`
+- Source branch: `codex/xray-anatomy-localization-v1` → `origin/codex/xray-anatomy-localization-v1`
+- Target branch: `codex/per-flow-model-routing` → `origin/codex/per-flow-model-routing`；基线为 `adbd2b1`，仅增加本次分支交接状态
 - Functional commit: `ee2fa3a feat: complete xray runtime and pet profile workflows`
-- Full-chain harness follow-up: `2b7d66b fix(dev): validate species-specific full-chain configs`
-- Documentation/handoff commit: pending
-- Source branch push: pending
-- Target branch: `codex/per-flow-model-routing` (pending creation)
+- Full-chain harness commit: `2b7d66b fix(dev): validate species-specific full-chain configs`
+- Documentation/handoff commit: `adbd2b1 docs(handoff): preserve xray qualification history`
+- 模型路由业务实现尚未开始；新分支只比源分支增加本次交接状态。
 
 ## Validation Baseline
 
 - `PYTHONPATH=. /opt/homebrew/anaconda3/bin/pytest apps/backend/tests -q` → `379 passed, 48 warnings`。
-- Python compile/changed-file `py_compile`、Prompt JSON、Postman JSON、migration AST/结构、模块导入、secret scan、handoff archive references 与 `git diff --check` 均通过。
-- 两次环境型 pytest 失败已定位：Homebrew Python 3.13 未安装 pytest；Anaconda pytest 首次缺少 `PYTHONPATH=.` 导致 `ModuleNotFoundError: apps`。设置 `PYTHONPATH=.` 后全量通过。
+- Python compile/changed-file `py_compile`、Prompt JSON、Postman JSON、migration AST/结构、模块导入、secret scan、handoff archive references 与 patch checks 均通过。
+- 218 个 handoff archive 引用、218 个文件、0 missing；最终 maintenance 无 unresolved，轮转文件已纳入交接提交。
+- 两个分支均成功执行普通 `git push -u`，未使用 force push；新分支工作树在交接更新前为干净状态。
 
 ## Preserved Qualification
 
@@ -35,11 +37,12 @@ MEDICAL_ACCURACY_UNKNOWN
 MEDICAL_RELEASE_NO_GO
 ```
 
-- 已完成能力不会因 Git 收口而重新运行：X-Ray 八阶段主链、TargetedReview、ReportGeneration、宠物档案 Model/Schema/DAL/Service/API 与既有 Prompt/Config 资产均按现状保存。
-- `.agent-handoff/archive.md` 当前引用的 216 个 archive path 均存在；对应 108 个本次新增 archive 文件必须与索引一起提交，避免历史断链。
+- 不因模型路由任务重跑或重写已完成能力：X-Ray 八阶段主链、TargetedReview、ReportGeneration、宠物档案链路、Prompt/Schema/Config 资产继续按冻结事实处理。
+- 新实现必须复用现有 AI Control、冻结 Config、`AIRequestService`、Gateway/Worker；API/Stage 不得直接调用 Provider。
 
-## Next Branch Objective
+## Next Actions
 
-- 在 `codex/per-flow-model-routing` 上先审计并设计 `ms-image` 的“业务接口/Stage → AiModelRoute”入口，复用现有 AI Control、冻结 Config、`AIRequestService` 与 Gateway，不创建第二套 Provider owner。
-- 目标模型应表达为 `model="gpt-5.6-sol"` 与独立的 `reasoning_effort="xhigh"`，不能把 `gpt-5.6-sol-xhigh` 当模型名。
-- 需同时核对 `/Users/mozhicheng/workspace/code/cy-code/ms-ai-fast` 的代码级路由实现，以及 `/Users/mozhicheng/workspace/code/python_project/ms-ai-platform` 对请求模型、`reasoning_effort` 和 Endpoint 选择的透传/覆盖行为；在用户进一步授权前不修改其他仓库。
+1. 从 `ms-image` endpoint/Stage 开始追踪到 `AIRequestService`、冻结 Config、Gateway request 的完整参数链，定位最合适的 `AiModelRoute` 等价入口。
+2. 对照 `/Users/mozhicheng/workspace/code/cy-code/ms-ai-fast` 中 `ai_model_route.py`、各 Flow Service 与 `ai_runtime_service.py` 的代码级映射模式，只借鉴语义，不复制第二套服务。
+3. 只读核对 `/Users/mozhicheng/workspace/code/python_project/ms-ai-platform` 的入口 Schema、`ai_proxy_service.py`、Endpoint Config 与 OpenAI SDK 版本，确认 `reasoning_effort="xhigh"` 是否会被丢弃或拒绝。
+4. 目标参数保持分离：`model="gpt-5.6-sol"`，`reasoning_effort="xhigh"`；禁止使用伪模型名 `gpt-5.6-sol-xhigh`。

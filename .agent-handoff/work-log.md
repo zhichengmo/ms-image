@@ -1,16 +1,5 @@
 # 当前工作日志
 
-## 2026-08-30 — 猫狗 2–5 图 Runtime 真实矩阵资格化
-
-- 从已推送基线 `d4a216a` 创建 `codex/xray-2to5-runtime-qualification`，先按 E0 manifest → E1 数量门禁 → E3 Harness → E2 唯一 owner 顺序完成只读计划核验；未引入新接口、表、迁移或医学规则。
-- AI Control health/readiness 全绿；临时 HS256 Admin Secret/Token 只存在于本轮进程内，未写盘或打印。
-- 猫狗 global Primary `3.0.1` 完成 compile-preview、create、validate、CAS activate；仅将 budget 从 20 收紧为 5，旧 3.0.0 retired 且未覆盖。
-- 唯一拓扑为 API=1、Relay=1、Worker parent/child=1、Beat=0、consumer=1；串行 cat/dog × 2/3/4/5 共 8 格全部 Task completed、Report final、C2 v2、receipt v2，image count=N。
-- 8 份脱敏 evidence 写入 `docs/evidence/xray-2to5-runtime/20260830T130608Z/`；Config/Prompt SHA 前后无漂移，敏感 key/value 扫描通过。
-- 回归通过：`234 passed, 41 warnings`，Ruff、compileall、E2E help/非法参数、launcher shell、四种 Compose 配置与 JSON/diff 检查均 PASS。
-- Harness 结束存在非阻塞 aiomysql event-loop 析构告警；本切片只记录风险。最终已停止本轮 launcher/AI Control，8002/8010、ms-image 进程、lock 和 imaging queue consumer/messages 均清理。
-- 显式暂存 8 份 evidence 与当前 handoff 文件，未使用 `git add -A`；提交 `bc4fb47` 已推送当前分支，archive 与旧根目录 Postman 保持未提交。
-
 ## 2026-08-31 — R4A Evaluation 独立数据库与基础设施烟测
 
 - 从 `e452b34` 建立 `codex/xray-evaluation-r4a`，严格限制在 Evaluation metadata/DB/Alembic/readiness/Compose/Fake scorer 基础设施；未进入 Dataset、Gold、真实 Runner、M1、Prompt 或医学规则。
@@ -314,3 +303,10 @@
 - 创建提交 `ee2fa3a feat: complete xray runtime and pet profile workflows`：86 files，19729 insertions，291 deletions。
 - 发现 full-chain harness 仍有一组未进入首个暂存快照的按物种 Config 校验改动；复核后作为有用代码单独提交为 `2b7d66b fix(dev): validate species-specific full-chain configs`。
 - 当前正在整理已有文档和 `.agent-handoff/` 历史；下一步运行 handoff maintenance、创建文档提交、推送当前分支，再创建 `codex/per-flow-model-routing`。
+
+## 2026-09-03 — 模型路由分支交接完成
+
+- 创建文档/handoff 提交 `adbd2b1 docs(handoff): preserve xray qualification history`，共 122 files；包含 108 个本次新增 archive 文件与两份架构文档。
+- 普通推送并设置 `codex/xray-anatomy-localization-v1` upstream，远端新分支创建成功；未使用 force push。
+- 从 `adbd2b1` 创建 `codex/per-flow-model-routing`，普通推送并设置 upstream；两个分支在业务实现开始前共享同一基线。
+- 当前分支已切换到 `codex/per-flow-model-routing`；下一轮只读审计模型路由和推理参数传递边界，不自动修改其他仓库。

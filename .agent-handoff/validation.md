@@ -32,9 +32,6 @@ MEDICAL_RELEASE_NO_GO
 
 | 检查 | 结果 | 说明 |
 |---|---|---|
-| 猫完整 Targeted 分支 | PASS | Task `7569c45063dc43aba1a337d132c07db7` / Report `e245b39b697445c09e68c94bce2686d7`；5 Stage、2 AI Call 均 succeeded/accepted、两份 `ai-image-receipt.v2`、final C2 v2 Report。 |
-| 狗完整 Targeted 分支 | PASS | Task `77a0e506c69045049e020b801f1c9033` / Report `1e28fb896091474db946180e169595df`；5 Stage、2 AI Call 均 succeeded/accepted、两份 `ai-image-receipt.v2`、final C2 v2 Report。 |
-| Targeted 技术引用失败 | EXPECTED FAIL-CLOSED / OPEN STABILITY RISK | 狗 Task `398e76a28af24072a1d66f7c28189ed6` 已成功完成 Primary/FamilyRouting 并真实发送 Targeted；Provider 复制错 `manifest_sha256` 后以 `provider_result_source_manifest_sha256_mismatch` 失败，无 Report，Attempt/Call 仍保存脱敏 receipt v2；未静默重试、回退或由 Python 修正。 |
 | 当前小样本 | PASS WITH RISK | 5 个新 Task 中 4 个 completed/final、1 个 fail-closed；3 个进入 Targeted 的 Task 中 2 个成功、1 个 manifest 失败。样本过小，不能当正式失败率。 |
 | Prompt/Gateway 定向合同 | PASS | `PYTHONPATH=. python3.12 -m pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py apps/backend/tests/test_ai_prompt_control_plane_contracts.py`：`186 passed, 38 warnings`。 |
 | Backend 全量 | PASS | `192 passed, 38 warnings`。 |
@@ -644,3 +641,14 @@ MEDICAL_RELEASE_NO_GO
 | 功能提交 | PASS | `ee2fa3a`，86 files / 19729 insertions / 291 deletions |
 | Harness 补充提交 | PASS | `2b7d66b`，1 file / 43 insertions / 20 deletions |
 | Runtime/Provider/Nacos/DB/OSS/Broker | NOT RUN | 本轮仅 Git 收口；未产生业务外部调用或写入 |
+
+## 2026-09-03 — Git 推送与新分支验证
+
+| 检查 | 结果 | 说明 |
+|---|---|---|
+| Source branch push | PASS | `git push -u origin codex/xray-anatomy-localization-v1` 创建远端分支并设置 upstream |
+| Target branch collision precheck | PASS | 本地无同名分支；`git ls-remote --heads` 确认远端无 `codex/per-flow-model-routing` |
+| Target branch create/push | PASS | 从 `adbd2b1` 创建并 `git push -u origin codex/per-flow-model-routing` 成功 |
+| Branch tracking | PASS | 两个本地分支分别跟踪对应 `origin/*`，均指向 `adbd2b1` |
+| Force/history rewrite | NOT USED | 未执行 force push、reset、clean、restore、rebase 或 amend |
+| Runtime/Provider/Nacos/DB/OSS/Broker | NOT RUN | Git 交付与分支创建不触发业务外部系统 |
