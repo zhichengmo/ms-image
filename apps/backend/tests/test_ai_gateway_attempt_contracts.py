@@ -211,6 +211,78 @@ def _network_plan(**overrides: Any) -> dict[str, Any]:
     return plan
 
 
+@pytest.mark.anyio
+async def test_prompt_runtime_client_uses_ms_ai_fast_http_render_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.backend.core.ai.prompt_runtime_client import PromptRuntimeClient
+
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "data": {
+                    "messages": [{"role": "user", "content": "rendered"}],
+                    "temperature": 0.15,
+                    "output_schema": SCHEMA,
+                },
+            },
+        )
+
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(
+            transport=httpx.MockTransport(handler),
+            **kwargs,
+        ),
+    )
+    rendered = await PromptRuntimeClient(
+        base_url="http://prompt.example/",
+        api_key="prompt-secret",
+        env="prod",
+        caller_service="ms-image",
+        timeout=3,
+    ).render(
+        service_code="ms-image",
+        module_code="xray",
+        prompt_key="xray_cat_study_screening",
+        variables={"species": "cat"},
+        locale="zh-CN",
+        variant="default",
+        trace_id="trace_1",
+        request_id="event_1",
+    )
+
+    assert captured["url"] == "http://prompt.example/api/v1/prompts/render"
+    assert captured["headers"]["x-ms-api-key"] == "prompt-secret"
+    assert captured["body"] == {
+        "service_code": "ms-image",
+        "module_code": "xray",
+        "prompt_key": "xray_cat_study_screening",
+        "env": "prod",
+        "locale": "zh-CN",
+        "variant": "default",
+        "variables": {"species": "cat"},
+        "caller": {
+            "service": "ms-image",
+            "request_id": "event_1",
+            "trace_id": "trace_1",
+            "user_id": None,
+        },
+    }
+    assert rendered["messages"] == [{"role": "user", "content": "rendered"}]
+    assert rendered["temperature"] == 0.15
+    assert rendered["output_schema"] == SCHEMA
+
+
 def test_gateway_client_preserves_ms_ai_fast_platform_base_url() -> None:
     client = GatewayClient(
         base_url="http://Platform.Example:80/api/v1/",
@@ -978,72 +1050,163 @@ def test_task_create_requires_and_normalizes_species_for_diagnose() -> None:
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("species", "expected_config_key"),
-    (
-        ("cat", "xray_diagnose_cat"),
-        ("dog", "xray_diagnose_dog"),
-    ),
-)
-async def test_task_create_selects_species_specific_active_config(
+@pytest.mark.parametrize("species", ("cat", "dog"))
+async def test_xray_task_create_uses_code_owned_runtime_without_config_db(
     species: str,
-    expected_config_key: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
 
+    from apps.backend.core.imaging.manifest import build_study_manifest
+    from apps.backend.core.pipeline import build_default_registry
     from apps.backend.schemas.task import TaskCreate
-    from apps.backend.services.runtime.service.task_service import (
-        TaskService,
-        TaskStateConflictError,
+    from apps.backend.services.runtime.service import (
+        task_service as task_service_module,
     )
+    from apps.backend.services.runtime.service.task_service import TaskService
 
     service = object.__new__(TaskService)
+    registry = build_default_registry()
+    manifest_sha = build_study_manifest([]).sha256
+    created: dict[str, dict] = {}
 
-    async def get_study(_: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            id="study_1",
-            session_id="session_1",
-            status="ready",
-            revision_id="revision_1",
-            resolved_manifest_sha256="a" * 64,
-            modality_type="xray",
+    async def must_not_read_config(**_: str) -> None:
+        raise AssertionError("AI Config DB must not be read for code-routed XRay tasks")
+
+    async def value(result):
+        return result
+
+    async def create_task(values: dict) -> SimpleNamespace:
+        created["task"] = values
+        return SimpleNamespace(**values)
+
+    async def create_stage(values: dict) -> SimpleNamespace:
+        created["stage"] = values
+        return SimpleNamespace(**values)
+
+    async def create_outbox(values: dict) -> SimpleNamespace:
+        created["outbox"] = values
+        return SimpleNamespace(**values)
+
+    service.registry = registry
+    service.config_compiler = SimpleNamespace()
+    service.study_dal = SimpleNamespace(
+        get_by_id=lambda _: value(
+            SimpleNamespace(
+                id="study_1",
+                session_id="session_1",
+                status="ready",
+                revision_id="revision_1",
+                resolved_manifest_sha256=manifest_sha,
+                modality_type="xray",
+            )
         )
-
-    async def get_session(_: str) -> SimpleNamespace:
-        return SimpleNamespace(requester_id="caller_1", status="open")
-
-    async def get_existing(_: str) -> None:
-        return None
-
-    selected: dict[str, str] = {}
-
-    async def get_active_config(**kwargs: str) -> None:
-        selected.update(kwargs)
-        return None
-
-    service.study_dal = SimpleNamespace(get_by_id=get_study)
-    service.session_dal = SimpleNamespace(get_by_id_for_update=get_session)
-    service.task_dal = SimpleNamespace(get_by_business_key=get_existing)
-    service._get_active_config = get_active_config
-
-    with pytest.raises(TaskStateConflictError, match="task_config_not_active"):
-        await service.create_task(
-            payload=TaskCreate(
-                study_id="study_1",
-                study_revision_id="revision_1",
-                request_id=f"request_{species}",
-                task_type="diagnose",
-                species=species,
-                trace_id=f"trace_{species}",
-            ),
-            caller=SimpleNamespace(subject_id="caller_1"),
+    )
+    service.session_dal = SimpleNamespace(
+        get_by_id_for_update=lambda _: value(
+            SimpleNamespace(requester_id="caller_1", status="open")
         )
+    )
+    service.task_dal = SimpleNamespace(
+        get_by_business_key=lambda _: value(None),
+        create_idempotent=create_task,
+    )
+    service.series_dal = SimpleNamespace(list_for_study=lambda _: value([]))
+    service.image_dal = SimpleNamespace(
+        list_ready_for_series_ids=lambda _: value([]),
+        list_ready_diagnostic_for_series_ids=lambda _: value([]),
+    )
+    service.stage_dal = SimpleNamespace(create_idempotent=create_stage)
+    service.outbox_dal = SimpleNamespace(create_idempotent=create_outbox)
+    service._get_active_config = must_not_read_config
+    service._response = lambda task: task
+    service._require_xray_task_image_count = lambda **_: None
+    monkeypatch.setattr(
+        task_service_module,
+        "requires_xray_runtime_image_contract",
+        lambda **_: False,
+    )
 
-    assert selected == {
-        "config_key": expected_config_key,
-        "modality_type": "xray",
-        "task_type": "diagnose",
+    task = await service.create_task(
+        payload=TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id=f"request_{species}",
+            task_type="anatomy_localization",
+            species=species,
+            trace_id=f"trace_{species}",
+        ),
+        caller=SimpleNamespace(subject_id="caller_1"),
+    )
+
+    snapshot = task.request_snapshot_json
+    assert snapshot["runtime_config_source"] == "code"
+    assert snapshot["profile_key"] == "xray_anatomy_localization_v1"
+    assert task.ai_config_id == "code-route:xray_anatomy_localization_v1"
+    assert task.routing_policy_version == "code-owned-stage-routes.v1"
+    assert task.budget_snapshot_json == TaskService.CODE_ROUTED_BUDGET_POLICY
+    assert created["stage"]["stage_key"] == "study_preparation"
+    assert created["outbox"]["event_type"] == "execute_stage"
+
+
+@pytest.mark.anyio
+async def test_code_routed_lineage_uses_frozen_call_runtime_without_config_db() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    response_schema = {
+        "type": "object",
+        "x-ms-image-contract-version": "xray-image-quality.v1",
     }
+    config_sha256 = "a" * 64
+    snapshot = {
+        "runtime_config_source": "code",
+        "snapshot_contract_version": "task-request-snapshot.v3",
+        "profile_key": "xray_image_quality_v1",
+        "compiled_pipeline_sha256": "b" * 64,
+        "ai_config_id": "code-route:xray_image_quality_v1",
+        "config_sha256": config_sha256,
+    }
+    call = SimpleNamespace(
+        ai_config_id=snapshot["ai_config_id"],
+        config_sha256=config_sha256,
+        schema_sha256=sha256_json(response_schema),
+        requested_model="gpt-5.6-sol",
+        execution_mode="race",
+        budget_reservation_json={
+            "runtime_request": {
+                "prompt": {"prompt_key": "xray_cat_image_quality"},
+                "route": {"models": ["gpt-5.6-sol"], "mode": "race"},
+                "response_schema": response_schema,
+            }
+        },
+    )
+    task = SimpleNamespace(
+        ai_config_id=snapshot["ai_config_id"],
+        compiled_pipeline_sha256=snapshot["compiled_pipeline_sha256"],
+    )
+
+    class MustNotReadConfigDal:
+        async def get_by_id(self, _: str):
+            raise AssertionError("code-routed lineage must not read AI Config DB")
+
+    service = object.__new__(TaskService)
+    service.config_dal = MustNotReadConfigDal()
+    resolved = await service._lineage_response_schema(
+        task=task,
+        call=call,
+        snapshot=snapshot,
+        expected_profile_key="xray_image_quality_v1",
+        expected_task_type="xray_quality_control",
+        expected_prompt_key="xray_cat_image_quality",
+        expected_config_key="xray_image_quality_cat",
+        expected_contract_version="xray-image-quality.v1",
+        error_code="xray_quality_review_lineage_invalid",
+    )
+
+    assert resolved == response_schema
 
 
 @pytest.mark.parametrize(
@@ -1846,19 +2009,46 @@ async def test_oss_attempt_image_signer_revalidates_order_and_hides_url_repr() -
 
 
 @pytest.mark.anyio
-async def test_stage_execution_worker_uses_gateway_client_without_secret_or_response_store(
+async def test_stage_execution_worker_runs_prompt_then_gateway_without_db_config_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
 
+    from apps.backend.core.ai.model_route import AiModelRoute
     from apps.backend.services.runtime.service.imaging_execution_service import (
         ImagingExecutionService,
     )
     from apps.backend.workers.imaging_worker.stage_execution import StageExecutionWorker
 
     calls: list[str] = []
+    captured: dict[str, Any] = {}
     finalized: dict[str, Any] = {}
+    rendered = {
+        "messages": [{"role": "user", "content": "rendered xray prompt"}],
+        "temperature": 0.15,
+        "output_schema": {
+            **SCHEMA,
+            "x-ms-image-contract-version": "complete-medical-result.v1",
+        },
+    }
+    prompt_command = SimpleNamespace(
+        safe_context={"species": "cat", "study_id": "study_1"},
+        primary_complete_result=None,
+        quality_results=None,
+        route_context=None,
+        study_screening_result=None,
+        system_analysis_result=None,
+        final_medical_result=None,
+    )
+    ai_request = SimpleNamespace(
+        prompt_command=prompt_command,
+        prompt_key="xray_cat_study_screening",
+        route=AiModelRoute(models=("gpt-5.6-sol",), mode="race"),
+        module_code="xray",
+        locale="zh-CN",
+        variant="default",
+    )
 
     class FakeSession:
         async def __aenter__(self):
@@ -1874,6 +2064,12 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
     def session_factory():
         return FakeSession()
 
+    class FakePromptClient:
+        async def render(self, **kwargs):
+            calls.append("prompt")
+            captured["prompt"] = kwargs
+            return rendered
+
     class FakeSigner:
         async def sign(self, **kwargs):
             calls.append("sign")
@@ -1882,12 +2078,13 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
     class FakeGateway:
         async def chat_completions(self, payload, *, idempotency_key):
             calls.append("provider")
+            captured["gateway_payload"] = payload
             assert idempotency_key == "idem-1"
             return {
                 "request_id": "provider-1",
                 "body": {
                     "choices": [{"message": {"content": json.dumps({"result": "ok"})}}],
-                    "model": "provider-model",
+                    "model": "gpt-5.6-sol",
                     "usage": {"total_tokens": 1},
                 },
             }
@@ -1896,10 +2093,28 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
         return SimpleNamespace(id="stage_1")
 
     async def prepare(self, **kwargs):
+        calls.append("prepare")
+        if kwargs.get("rendered_prompt") is None:
+            return {
+                "network_required": False,
+                "prompt_render_required": True,
+                "ai_request": ai_request,
+            }
+        assert kwargs["rendered_prompt"] == rendered
+        captured["prepared_rendered_prompt"] = kwargs["rendered_prompt"]
         return {"network_required": True, "attempt_id": "attempt_1"}
 
     async def load(self, **kwargs):
-        return _network_plan(request_id="event_1")
+        calls.append("load")
+        return _network_plan(
+            request_id="event_1",
+            requested_model="gpt-5.6-sol",
+            allowed_actual_models=("gpt-5.6-sol",),
+            strategy="race",
+            generation_params={"temperature": rendered["temperature"]},
+            response_schema=rendered["output_schema"],
+            messages=tuple(rendered["messages"]),
+        )
 
     async def finalize_attempt(self, **kwargs):
         calls.append("attempt_finalize")
@@ -1910,6 +2125,10 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
         calls.append("stage_finalize")
         return {"status": "completed"}
 
+    monkeypatch.setattr(
+        "apps.backend.services.runtime.service.ai_request_service.validate_xray_result_contract",
+        lambda **kwargs: kwargs["result"],
+    )
     monkeypatch.setattr(ImagingExecutionService, "claim", claim)
     monkeypatch.setattr(ImagingExecutionService, "prepare_stage_execution", prepare)
     monkeypatch.setattr(ImagingExecutionService, "finalize_ai_stage", finalize_stage)
@@ -1918,6 +2137,7 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
 
     result = await StageExecutionWorker(
         session_factory_=session_factory,
+        prompt_client=FakePromptClient(),
         gateway_client=FakeGateway(),
         image_signer=FakeSigner(),
     ).execute(
@@ -1928,8 +2148,44 @@ async def test_stage_execution_worker_uses_gateway_client_without_secret_or_resp
         owner_id="worker_1",
         lease_seconds=120,
     )
+
     assert result["outcome"] == "completed"
-    assert calls == ["sign", "provider", "attempt_finalize", "stage_finalize"]
+    assert calls == [
+        "prepare",
+        "prompt",
+        "prepare",
+        "load",
+        "sign",
+        "provider",
+        "attempt_finalize",
+        "stage_finalize",
+    ]
+    assert captured["prompt"] == {
+        "service_code": "ms-image",
+        "module_code": "xray",
+        "prompt_key": "xray_cat_study_screening",
+        "variables": {
+            "SAFE_STUDY_CONTEXT_JSON": {
+                "species": "cat",
+                "study_id": "study_1",
+            },
+            "base_info": {"species": "cat", "study_id": "study_1"},
+            "study_context": {"species": "cat", "study_id": "study_1"},
+        },
+        "locale": "zh-CN",
+        "variant": "default",
+        "trace_id": "trace_1",
+        "request_id": "event_1",
+    }
+    payload = captured["gateway_payload"]
+    assert payload["model"] == "gpt-5.6-sol"
+    assert payload["strategy"] == "race"
+    assert payload["messages"] == rendered["messages"]
+    assert payload["temperature"] == 0.15
+    assert (
+        payload["response_format"]["json_schema"]["schema"] == rendered["output_schema"]
+    )
+    assert captured["prepared_rendered_prompt"] == rendered
     assert "object_ref" not in finalized
 
 
@@ -6461,30 +6717,37 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
     async def get_stage(stage_id: str):
         return stage if stage_id == stage.id else None
 
-    async def get_config(config_id: str):
-        return config if config_id == config.id else None
+    class ConfigDalMustNotBeRead:
+        async def get_by_id(self, _config_id: str):
+            raise AssertionError("code-routed AI calls must not read AIConfigRecord")
 
     service.stage_dal = SimpleNamespace(get_by_id=get_stage)
-    service.config_dal = SimpleNamespace(get_by_id=get_config)
-    service.config_compiler = SimpleNamespace(
-        verify_frozen_integrity=lambda _config: None
-    )
+    service.config_dal = ConfigDalMustNotBeRead()
     service._runtime_gate_allows = lambda: True
-    service._render_v2_messages = lambda **_kwargs: (
-        SimpleNamespace(
-            rendered_text="localization prompt",
-            rendered_prompt_sha256="a" * 64,
-            context_sha256="b" * 64,
-        ),
-        SimpleNamespace(messages_json=[], messages_sha256="c" * 64),
-        {},
+    from apps.backend.core.ai.model_route import AiModelRoute
+
+    prompt_command = SimpleNamespace(
+        prompt_kind="anatomy_localization",
+        safe_context={"species": "cat"},
+        primary_complete_result=None,
+        quality_results=None,
+        route_context=None,
+        study_screening_result=None,
+        system_analysis_result=None,
+        final_medical_result=None,
     )
-    service._build_v2_request_facts = lambda **_kwargs: (
-        {},
-        "d" * 64,
-        "logical-localization-1",
-    )
-    prompt_command = SimpleNamespace(prompt_kind="anatomy_localization")
+    runtime_kwargs = {
+        "route": AiModelRoute(models=("gpt-5.6-sol",), mode="race"),
+        "prompt_key": "xray_cat_anatomy_localization",
+        "module_code": "xray",
+        "locale": "zh-CN",
+        "variant": "default",
+        "rendered_prompt": {
+            "messages": [{"role": "user", "content": "localization prompt"}],
+            "temperature": 0.1,
+            "output_schema": {"type": "object", "properties": {}},
+        },
+    }
 
     first = await service.prepare_structured_call(
         task_id=task.id,
@@ -6492,6 +6755,7 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
         prompt_command=prompt_command,
         trace_id="trace_1",
         request_id="request_1",
+        **runtime_kwargs,
     )
     second = await service.prepare_structured_call(
         task_id=task.id,
@@ -6499,6 +6763,7 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
         prompt_command=prompt_command,
         trace_id="trace_1",
         request_id="request_1",
+        **runtime_kwargs,
     )
 
     assert first["call_id"] == second["call_id"]
@@ -6508,12 +6773,15 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
     assert len(attempt_dal.created) == 1
     call = call_dal.created[0]
     attempt = attempt_dal.created[0]
-    assert call.execution_mode == "single"
+    assert call.execution_mode == "race"
+    assert call.requested_model == "gpt-5.6-sol"
+    assert call.budget_reservation_json["runtime_request"]["route"] == {
+        "models": ["gpt-5.6-sol"],
+        "mode": "race",
+    }
     assert call.attempt_count == 1
     assert call.budget_reservation_json["reserved_call_units"] == 1
     assert call.budget_reservation_json["reserved_attempts"] == 1
-    assert lane["lane_key"] == "primary"
-    assert lane["max_attempts"] == 1
     assert attempt.ai_call_id == call.id
     assert attempt.attempt_no == 1
 
@@ -7968,7 +8236,9 @@ async def test_network_dispatches_system_analysis_by_frozen_schema_contract() ->
     assert response["image_receipt"] == receipt
 
 
-def test_full_chain_primary_consumes_frozen_quality_screening_and_system_lineage() -> None:
+def test_full_chain_primary_consumes_frozen_quality_screening_and_system_lineage() -> (
+    None
+):
     from types import SimpleNamespace
 
     from apps.backend.core.ai.prompting import PromptContractError
@@ -8068,12 +8338,8 @@ def test_full_chain_primary_consumes_frozen_quality_screening_and_system_lineage
         "lung_pattern",
         "cardiovascular_contour",
     ]
-    assert command.study_screening_result == screening_output[
-        "study_screening_result"
-    ]
-    assert command.system_analysis_result == system_output[
-        "system_analysis_result"
-    ]
+    assert command.study_screening_result == screening_output["study_screening_result"]
+    assert command.system_analysis_result == system_output["system_analysis_result"]
 
     tampered = deepcopy(upstream_results)
     tampered["system_analysis"]["result"]["system_analysis_result"] = {
@@ -8290,7 +8556,10 @@ async def test_report_generation_acceptance_persists_one_report_and_failure_pers
 ) -> None:
     from types import SimpleNamespace
 
-    from apps.backend.core.pipeline import StageResult, XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+    from apps.backend.core.pipeline import (
+        StageResult,
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    )
     from apps.backend.services.runtime.service import imaging_execution_service
     from apps.backend.services.runtime.service.imaging_execution_service import (
         ImagingExecutionService,
@@ -8367,8 +8636,7 @@ async def test_report_generation_acceptance_persists_one_report_and_failure_pers
     assert captured["reports"][0]["finalization_stage_id"] == stage.id
     assert captured["reports"][0]["source_call_id"] == "report_call_1"
     assert (
-        captured["reports"][0]["content"]["complete_medical_result"]
-        == complete_result
+        captured["reports"][0]["content"]["complete_medical_result"] == complete_result
     )
 
     captured["reports"].clear()

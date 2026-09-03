@@ -1,18 +1,5 @@
 # 当前工作日志
 
-## 2026-08-31 — R4A Evaluation 独立数据库与基础设施烟测
-
-- 从 `e452b34` 建立 `codex/xray-evaluation-r4a`，严格限制在 Evaluation metadata/DB/Alembic/readiness/Compose/Fake scorer 基础设施；未进入 Dataset、Gold、真实 Runner、M1、Prompt 或医学规则。
-- 新增 `EvaluationBaseModel`/`EvaluationRecordBase`，四个 Evaluation ORM 已从在线 `BaseModel.metadata` 完全移出；独立 metadata 精确为四表且保持 opaque `VARCHAR(64)` 单列主键、无 FK/enum/tenant。
-- 新增 `alembic_evaluation.ini`、独立 migration env 与 `20260831_eval_01`；空库、完整 adoption、部分 schema、额外 constraint、空/非空 downgrade 门禁均已真实验证。
-- 新增在线 cleanup revision `20260831_01`；临时库证明非空 fail-closed、空表删除和 downgrade 空结构恢复。正式主库四张历史空表在 0 行复核后删除，主库 revision 现为 `20260831_01`。
-- 正式创建 `ms_image_eval` 并迁移到 `20260831_eval_01`。Evaluation Control `/health`、`/readiness` 真实 200，database/schema/JWT 三项均 ready。
-- 真实启动单 Relay、单 Worker；确认同 broker 的其他 `scheduled` 节点不消费 `evaluation.job.execute`。使用既有 completed Task/Report 导出非医学 smoke Job，Job completed、Run succeeded、5 个 Artifact ready 且 OSS HEAD 均存在。
-- Fake scorer 的 `expected_status` 明确标为 schema sentinel，不读取 Artifact 正文或医学指标；保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
-- 修复两个真实资格化缺陷：Backend 镜像补入 Evaluation Alembic 资产；Evaluation async URL 使用 `URL.create()`，特殊字符密码 round-trip 通过。
-- 停止 Evaluation Control/Relay/Worker，清理临时数据库，运行目录移入系统废纸篓；正式评测库和烟测审计记录保留。
-- 验证：backend `240 passed, 41 warnings`；Ruff、compileall、Evaluation Alembic current/check、Compose 四 profile、81 route/98 Postman、JSON、diff check 通过。Docker daemon 未运行，镜像 build 阻断；在线主库 `alembic check` 仅被既存 `secret_ref` 注释漂移阻断，因此未记录最终 R4A qualification。
-
 ## 2026-08-31 — Anatomy Localization v1 本地收口与静态资格门
 
 - 在 `codex/xray-anatomy-localization-v1`、HEAD `ef15dea` 的既有脏工作区上完成本地实现收口；保留 `.agent-handoff/archive*`、tracked archive index 和根目录 `postman/`，未恢复、删除、暂存或提交。
@@ -310,3 +297,14 @@
 - 普通推送并设置 `codex/xray-anatomy-localization-v1` upstream，远端新分支创建成功；未使用 force push。
 - 从 `adbd2b1` 创建 `codex/per-flow-model-routing`，普通推送并设置 upstream；两个分支在业务实现开始前共享同一基线。
 - 当前分支已切换到 `codex/per-flow-model-routing`；下一轮只读审计模型路由和推理参数传递边界，不自动修改其他仓库。
+
+
+## 2026-09-03 — AI/Prompt code-owned 路由改造收口
+
+- 按用户要求将新 XRay AI 调用改为 `ms-ai-fast` 风格：各 Stage 直接声明 `MODEL_ROUTE` 与 `PROMPT_KEYS`，本轮统一使用 `gpt-5.6-sol`、`race`，暂不处理 `xhigh`。
+- 新增 `AiModelRoute` 和 `PromptRuntimeClient`；Worker 在数据库事务外调用 Prompt HTTP Render API，再进入现有 `AIRequestService` 创建 Call/Attempt 并由 Gateway 请求 ms-ai-platform。
+- 新 XRay Task 由代码 profile 编译 runtime identity，不读取 active AI Config DB，不生成 Stage Config bindings；数据库继续保存 Task/Stage/Call/Attempt 和冻结审计事实。
+- 保留历史 Config Task/replay 兼容；Anatomy Localization、Image Quality 的 code-owned lineage 从 Call 冻结 runtime snapshot 校验，不读取 Config DAL。
+- 修复 TargetedReview/Prompt command 对 code-owned Task 的专用 Prompt 判断，保持 Quality、Screening、System 上下文严格消费。
+- 更新现有合同测试，证明新 Task 创建与 code-owned lineage 均不访问 Config DAL；未新增迁移或独立测试脚本。
+- 完成 299 个定向合同测试、6 个 Mock Prompt→Gateway 全链测试和 381 个全量测试；真实外部 E2E 因环境变量、数据库、Broker 和 Docker 缺失而阻断，未伪报 Provider PASS。

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
@@ -21,6 +22,8 @@ class AnatomyLocalizationStageHandler:
 
     handler_key = "anatomy_localization"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_anatomy_localization", "dog": "xray_dog_anatomy_localization"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         stage = context.stage
@@ -28,12 +31,14 @@ class AnatomyLocalizationStageHandler:
             raise StageHandlerContractError(
                 "anatomy_localization_stage_invalid"
             )
+        prompt_command = build_anatomy_localization_ai_request_command(
+            task=context.task, stage=stage
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_anatomy_localization_ai_request_command(
-                    task=context.task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

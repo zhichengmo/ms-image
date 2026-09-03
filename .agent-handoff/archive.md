@@ -224,3 +224,5 @@
 - [validation-20260903T040155030254Z.md](archive/validation-20260903T040155030254Z.md): validation history exceeded 64 KiB or 200 rows
 - [work-log-20260903T040506242642Z.md](archive/work-log-20260903T040506242642Z.md): work log exceeded 64 KiB or 30 dated sections
 - [validation-20260903T040506244201Z.md](archive/validation-20260903T040506244201Z.md): validation history exceeded 64 KiB or 200 rows
+- [work-log-20260903T065649908366Z.md](archive/work-log-20260903T065649908366Z.md): work log exceeded 64 KiB or 30 dated sections
+- [validation-20260903T-code-route-closeout.md](archive/validation-20260903T-code-route-closeout.md): archived earliest complete validation sections during code-owned AI route closeout

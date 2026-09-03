@@ -1164,3 +1164,15 @@
 | `.agent-handoff/archive/**` 与 `.agent-handoff/archive.md` 一并纳入 Git | 索引引用 216 个 archive path，108 个本次新增文件全部存在；只提交索引会造成恢复历史断链 | archive reference check：216 refs / 0 missing |
 | 当前分支只做现状收口，新建 `codex/per-flow-model-routing` 再处理模型切换 | 避免将已资格化 X-Ray/宠物档案交付与新的跨仓库模型路由设计混合 | 用户要求“提交推送后重新创建一个分支”；当前分支提交边界 |
 | 推理强度与模型名分开表达 | `gpt-5.6-sol` 是模型标识，`xhigh` 应是独立 `reasoning_effort` 参数；把两者拼成模型名会破坏路由和平台匹配 | 已定位的 `AiModelRoute`/Runtime payload 与平台 Schema/Endpoint 覆盖行为 |
+
+
+## 2026-09-03 — XRay AI/Prompt 路由改为代码拥有
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 新 XRay Stage 直接声明 `MODEL_ROUTE` 和 `PROMPT_KEYS`，不从 AI Config DB 解析模型或 Prompt key | 与用户指定的 `ms-ai-fast` 使用方式一致，接口/Stage 切换模型只需修改局部代码声明，避免控制面配置链过度复杂 | XRay Stage handlers；`core/ai/model_route.py` |
+| Prompt 通过独立 HTTP Render API 获取，且外部 I/O 位于数据库事务之外 | 复用 ms-ai-fast 的 Prompt Runtime 合同，同时保持现有事务/Outbox 可靠性边界 | `prompt_runtime_client.py`；`workers/imaging_worker/stage_execution.py` |
+| 不创建第二套 AI Gateway 或 Worker；模型请求继续复用 `AIRequestService`、Call/Attempt 和 `GatewayClient` | 保留已有可靠执行、幂等、失败审计和 Provider 边界，避免为“去数据库配置”重写整条运行链 | `ai_request_service.py`；Gateway contracts |
+| 数据库继续保存运行与审计事实，但不作为新 XRay route/prompt 配置源 | 用户要求“不用数据库”针对 AI/Prompt 配置读取；Task/Stage/Call/Attempt 是可靠执行和审计所需事实，不应删除 | Task runtime snapshot；Call/Attempt persistence |
+| 历史 Config Task/replay 继续使用 frozen Config 兼容分支 | 去配置化不应破坏已经冻结的历史任务、结果查询和 replay 语义 | `TaskService._lineage_response_schema()` legacy branch |
+| 本轮不加入 `reasoning_effort` / `xhigh` | 用户明确要求“先不管 xhigh”；模型保持独立标识 `gpt-5.6-sol` | 当前用户范围；Stage `MODEL_ROUTE` |

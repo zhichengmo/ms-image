@@ -182,6 +182,24 @@ class TaskService:
     TASK_CONFIG_KEYS = {
         "replay": ZERO_MODEL_CONFIG_KEY,
     }
+    CODE_RUNTIME_CONTRACT_VERSION = "code-owned-task-runtime.v1"
+    CODE_ROUTED_TASK_PROFILES = {
+        "diagnose": XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        XRAY_ANATOMY_LOCALIZATION_TASK_TYPE: XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+        XRAY_IMAGE_QUALITY_TASK_TYPE: XRAY_IMAGE_QUALITY_PROFILE_V1,
+        XRAY_STUDY_SCREENING_TASK_TYPE: XRAY_STUDY_SCREENING_PROFILE_V2,
+        XRAY_SYSTEM_ANALYSIS_TASK_TYPE: XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+    }
+    CODE_ROUTED_BUDGET_POLICY = {
+        "contract_version": "ai-budget-policy.v1",
+        "max_prompt_chars": 120_000,
+        "max_input_images": 5,
+        "max_total_calls": 8,
+        "max_total_attempts": 8,
+        "task_deadline_ms": 1_800_000,
+        "reserve_before_send": True,
+    }
+
     TASK_PROFILES = {
         "replay": frozenset({ZERO_MODEL_PROFILE}),
         "diagnose": frozenset(
@@ -195,16 +213,135 @@ class TaskService:
         XRAY_ANATOMY_LOCALIZATION_TASK_TYPE: frozenset(
             {XRAY_ANATOMY_LOCALIZATION_PROFILE_V1}
         ),
-        XRAY_IMAGE_QUALITY_TASK_TYPE: frozenset(
-            {XRAY_IMAGE_QUALITY_PROFILE_V1}
-        ),
-        XRAY_STUDY_SCREENING_TASK_TYPE: frozenset(
-            {XRAY_STUDY_SCREENING_PROFILE_V2}
-        ),
-        XRAY_SYSTEM_ANALYSIS_TASK_TYPE: frozenset(
-            {XRAY_SYSTEM_ANALYSIS_PROFILE_V1}
-        ),
+        XRAY_IMAGE_QUALITY_TASK_TYPE: frozenset({XRAY_IMAGE_QUALITY_PROFILE_V1}),
+        XRAY_STUDY_SCREENING_TASK_TYPE: frozenset({XRAY_STUDY_SCREENING_PROFILE_V2}),
+        XRAY_SYSTEM_ANALYSIS_TASK_TYPE: frozenset({XRAY_SYSTEM_ANALYSIS_PROFILE_V1}),
     }
+
+    @classmethod
+    def _build_code_runtime_identity(
+        cls,
+        *,
+        task_type: str,
+        profile_key: str,
+        compiled_pipeline_sha256: str,
+        stage_registry_contract_version: str,
+    ) -> dict[str, Any]:
+        facts = {
+            "contract_version": cls.CODE_RUNTIME_CONTRACT_VERSION,
+            "task_type": task_type,
+            "profile_key": profile_key,
+            "compiled_pipeline_sha256": compiled_pipeline_sha256,
+            "stage_registry_contract_version": stage_registry_contract_version,
+        }
+        config_sha256 = sha256_json(facts)
+        return {
+            "runtime_config_source": "code",
+            "ai_config_id": f"code-route:{profile_key}",
+            "config_key": f"code-route:{task_type}",
+            "config_version": "v1",
+            "config_contract_version": cls.CODE_RUNTIME_CONTRACT_VERSION,
+            "config_sha256": config_sha256,
+            "release_fingerprint": sha256_json(
+                {"runtime": facts, "budget_policy": cls.CODE_ROUTED_BUDGET_POLICY}
+            ),
+            "compiled_pipeline_sha256": compiled_pipeline_sha256,
+            "stage_registry_contract_version": stage_registry_contract_version,
+            "budget_policy": json.loads(json.dumps(cls.CODE_ROUTED_BUDGET_POLICY)),
+            "routing_policy_version": "code-owned-stage-routes.v1",
+        }
+
+    @staticmethod
+    def _is_code_routed_snapshot(snapshot: Any) -> bool:
+        return (
+            isinstance(snapshot, dict)
+            and snapshot.get("runtime_config_source") == "code"
+        )
+
+    @staticmethod
+    def _call_runtime_request(call: Any) -> dict[str, Any] | None:
+        reservation = getattr(call, "budget_reservation_json", None)
+        runtime = (
+            reservation.get("runtime_request")
+            if isinstance(reservation, dict)
+            else None
+        )
+        return runtime if isinstance(runtime, dict) else None
+
+    async def _lineage_response_schema(
+        self,
+        *,
+        task: Any,
+        call: Any,
+        snapshot: dict[str, Any],
+        expected_profile_key: str,
+        expected_task_type: str,
+        expected_prompt_key: str,
+        expected_config_key: str,
+        expected_contract_version: str,
+        error_code: str,
+        enforce_legacy_prompt_identity: bool = True,
+    ) -> dict[str, Any]:
+        if self._is_code_routed_snapshot(snapshot):
+            runtime = self._call_runtime_request(call)
+            prompt = runtime.get("prompt") if isinstance(runtime, dict) else None
+            route = runtime.get("route") if isinstance(runtime, dict) else None
+            response_schema = (
+                runtime.get("response_schema") if isinstance(runtime, dict) else None
+            )
+            route_models = route.get("models") if isinstance(route, dict) else None
+            if (
+                not isinstance(prompt, dict)
+                or not isinstance(route, dict)
+                or not isinstance(response_schema, dict)
+                or not isinstance(route_models, list)
+                or snapshot.get("snapshot_contract_version") != TASK_REQUEST_SNAPSHOT_V3
+                or snapshot.get("profile_key") != expected_profile_key
+                or snapshot.get("compiled_pipeline_sha256")
+                != task.compiled_pipeline_sha256
+                or snapshot.get("ai_config_id") != task.ai_config_id
+                or snapshot.get("config_sha256") != call.config_sha256
+                or call.ai_config_id != task.ai_config_id
+                or call.schema_sha256 != sha256_json(response_schema)
+                or prompt.get("prompt_key") != expected_prompt_key
+                or call.requested_model not in route_models
+                or route.get("mode") != call.execution_mode
+                or response_schema.get("x-ms-image-contract-version")
+                != expected_contract_version
+            ):
+                raise TaskStateConflictError(error_code)
+            return response_schema
+
+        config = await self.config_dal.get_by_id(task.ai_config_id)
+        if config is None:
+            raise TaskStateConflictError(error_code)
+        try:
+            self.config_compiler.verify_frozen_integrity(config)
+        except AIControlValidationError as exc:
+            raise TaskStateConflictError(error_code) from exc
+        if (
+            call.ai_config_id != task.ai_config_id
+            or call.config_sha256 != config.config_sha256
+            or call.schema_sha256 != config.output_schema_sha256
+            or (
+                enforce_legacy_prompt_identity
+                and (
+                    config.config_key != expected_config_key
+                    or config.prompt_key != expected_prompt_key
+                )
+            )
+            or config.profile_key != expected_profile_key
+            or config.task_type != expected_task_type
+            or config.output_schema_json.get("x-ms-image-contract-version")
+            != expected_contract_version
+            or snapshot.get("ai_config_id") != config.id
+            or snapshot.get("config_sha256") != config.config_sha256
+            or snapshot.get("output_schema_sha256") != config.output_schema_sha256
+            or snapshot.get("compiled_pipeline_sha256")
+            != config.compiled_pipeline_sha256
+        ):
+            raise TaskStateConflictError(error_code)
+        return config.output_schema_json
 
     def __init__(self, db: AsyncSession):
         self.session_dal = SessionDal(db)
@@ -228,12 +365,15 @@ class TaskService:
     async def create_task(
         self, *, payload: TaskCreate, caller: CallerContext
     ) -> TaskResponse:
+        allowed_profiles = self.TASK_PROFILES.get(payload.task_type)
+        code_profile_key = self.CODE_ROUTED_TASK_PROFILES.get(payload.task_type)
         config_key = self._config_key_for_task(
             task_type=payload.task_type,
             species=payload.species,
         )
-        allowed_profiles = self.TASK_PROFILES.get(payload.task_type)
-        if config_key is None or allowed_profiles is None:
+        if allowed_profiles is None or (
+            code_profile_key is None and config_key is None
+        ):
             raise TaskStateConflictError("task_type_not_supported")
         study = await self.study_dal.get_by_id(payload.study_id)
         if study is None:
@@ -259,24 +399,42 @@ class TaskService:
             or not study.resolved_manifest_sha256
         ):
             raise TaskStateConflictError("study_revision_not_ready")
-        config = await self._get_active_config(
-            config_key=config_key,
-            modality_type=study.modality_type,
-            task_type=payload.task_type,
-        )
-        if config is None:
-            raise TaskStateConflictError("task_config_not_active")
-        self._validate_species_config_binding(
-            config=config,
-            task_type=payload.task_type,
-            species=payload.species,
-        )
-        profile_key, contract, profile_sha = self._validate_assignable_config(
-            config=config,
-            allowed_profiles=allowed_profiles,
-        )
+
+        config = None
+        runtime_identity: dict[str, Any] | None = None
+        if code_profile_key is not None:
+            if code_profile_key not in allowed_profiles:
+                raise TaskStateConflictError("task_profile_not_allowed")
+            profile_key = code_profile_key
+            contract, profile_sha = compile_profile_contract(profile_key, self.registry)
+            runtime_identity = self._build_code_runtime_identity(
+                task_type=payload.task_type,
+                profile_key=profile_key,
+                compiled_pipeline_sha256=profile_sha,
+                stage_registry_contract_version=self.registry.CONTRACT_VERSION,
+            )
+        else:
+            config = await self._get_active_config(
+                config_key=config_key,
+                modality_type=study.modality_type,
+                task_type=payload.task_type,
+            )
+            if config is None:
+                raise TaskStateConflictError("task_config_not_active")
+            self._validate_species_config_binding(
+                config=config,
+                task_type=payload.task_type,
+                species=payload.species,
+            )
+            profile_key, contract, profile_sha = self._validate_assignable_config(
+                config=config,
+                allowed_profiles=allowed_profiles,
+            )
+
         pet_profile_snapshot: dict[str, Any] | None = None
-        existing_snapshot = existing.request_snapshot_json if existing is not None else None
+        existing_snapshot = (
+            existing.request_snapshot_json if existing is not None else None
+        )
         existing_pet_profile = (
             existing_snapshot.get("pet_profile")
             if isinstance(existing_snapshot, dict)
@@ -286,8 +444,7 @@ class TaskService:
             if payload.pet_profile_id is not None:
                 if (
                     not isinstance(existing_pet_profile, dict)
-                    or existing_pet_profile.get("profile_id")
-                    != payload.pet_profile_id
+                    or existing_pet_profile.get("profile_id") != payload.pet_profile_id
                 ):
                     raise TaskIdempotencyConflictError("task_idempotency_conflict")
                 pet_profile_snapshot = json.loads(json.dumps(existing_pet_profile))
@@ -299,6 +456,7 @@ class TaskService:
                 owner_id=caller.subject_id,
                 species=payload.species,
             )
+
         quality_review_snapshot: dict[str, Any] | None = None
         stage_ai_config_bindings: dict[str, dict[str, Any]] | None = None
         if profile_key in {
@@ -309,116 +467,116 @@ class TaskService:
             XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
         }:
             if payload.quality_review_task_id is None:
-                raise TaskStateConflictError(
-                    "task_quality_review_reference_required"
-                )
-            try:
-                self.config_compiler.verify_frozen_integrity(config)
-            except AIControlValidationError as exc:
-                raise TaskStateConflictError("task_config_invalid") from exc
+                raise TaskStateConflictError("task_quality_review_reference_required")
+            if config is not None:
+                try:
+                    self.config_compiler.verify_frozen_integrity(config)
+                except AIControlValidationError as exc:
+                    raise TaskStateConflictError("task_config_invalid") from exc
             quality_review_snapshot = await self._load_verified_xray_quality_review(
                 task_id=payload.quality_review_task_id,
                 caller=caller,
             )
             if (
                 quality_review_snapshot["study_id"] != study.id
-                or quality_review_snapshot["study_revision_id"]
-                != study.revision_id
+                or quality_review_snapshot["study_revision_id"] != study.revision_id
                 or quality_review_snapshot["resolved_manifest_sha256"]
                 != study.resolved_manifest_sha256
                 or quality_review_snapshot["species"] != payload.species
             ):
-                raise TaskStateConflictError(
-                    "task_quality_review_reference_mismatch"
-                )
-            if profile_key == XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1:
-                stage_config = await self._get_active_study_screening_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                )
-                stage_ai_config_bindings = {
-                    "study_screening": self._freeze_stage_ai_config_binding(
-                        config=stage_config
+                raise TaskStateConflictError("task_quality_review_reference_mismatch")
+            # Historical Config-owned tasks retain their frozen per-stage bindings.
+            if config is not None:
+                if profile_key == XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1:
+                    stage_config = await self._get_active_study_screening_config(
+                        root_config=config,
+                        modality_type=study.modality_type,
+                        species=payload.species,
                     )
-                }
-            elif profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1:
-                screening_config = await self._get_active_diagnose_stage_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                    config_keys=self.STUDY_SCREENING_CONFIG_KEYS,
-                    prompt_keys=self.STUDY_SCREENING_PROMPT_KEYS,
-                    profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
-                    binding_error="task_study_screening_config_binding_invalid",
-                    not_active_error="task_study_screening_config_not_active",
-                )
-                system_config = await self._get_active_diagnose_stage_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                    config_keys=self.SYSTEM_ANALYSIS_CONFIG_KEYS,
-                    prompt_keys=self.SYSTEM_ANALYSIS_PROMPT_KEYS,
-                    profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
-                    binding_error="task_system_analysis_config_binding_invalid",
-                    not_active_error="task_system_analysis_config_not_active",
-                )
-                targeted_config = await self._get_active_diagnose_stage_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                    config_keys=self.TARGETED_REVIEW_CONFIG_KEYS,
-                    prompt_keys=self.TARGETED_REVIEW_PROMPT_KEYS,
-                    profile_key=XRAY_TARGETED_REVIEW_PROFILE_V2,
-                    binding_error="task_targeted_review_config_binding_invalid",
-                    not_active_error="task_targeted_review_config_not_active",
-                )
-                report_config = await self._get_active_diagnose_stage_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                    config_keys=self.REPORT_GENERATION_CONFIG_KEYS,
-                    prompt_keys=self.REPORT_GENERATION_PROMPT_KEYS,
-                    profile_key=XRAY_REPORT_GENERATION_PROFILE_V1,
-                    binding_error="task_report_generation_config_binding_invalid",
-                    not_active_error="task_report_generation_config_not_active",
-                )
-                stage_ai_config_bindings = {
-                    "study_screening": self._freeze_stage_ai_config_binding(
-                        config=screening_config
-                    ),
-                    "system_analysis": self._freeze_stage_ai_config_binding(
-                        config=system_config
-                    ),
-                    "targeted_review": self._freeze_stage_ai_config_binding(
-                        config=targeted_config
-                    ),
-                    "report_generation": self._freeze_stage_ai_config_binding(
-                        config=report_config
-                    ),
-                }
-            elif profile_key == XRAY_TARGETED_REVIEW_PROFILE_V2:
-                stage_config = await self._get_active_diagnose_stage_config(
-                    root_config=config,
-                    modality_type=study.modality_type,
-                    species=payload.species,
-                    config_keys=self.TARGETED_REVIEW_CONFIG_KEYS,
-                    prompt_keys=self.TARGETED_REVIEW_PROMPT_KEYS,
-                    profile_key=XRAY_TARGETED_REVIEW_PROFILE_V2,
-                    binding_error="task_targeted_review_config_binding_invalid",
-                    not_active_error="task_targeted_review_config_not_active",
-                )
-                stage_ai_config_bindings = {
-                    "targeted_review": self._freeze_stage_ai_config_binding(
-                        config=stage_config
+                    stage_ai_config_bindings = {
+                        "study_screening": self._freeze_stage_ai_config_binding(
+                            config=stage_config
+                        )
+                    }
+                elif profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1:
+                    stage_specs = (
+                        (
+                            "study_screening",
+                            self.STUDY_SCREENING_CONFIG_KEYS,
+                            self.STUDY_SCREENING_PROMPT_KEYS,
+                            XRAY_STUDY_SCREENING_PROFILE_V2,
+                            "task_study_screening_config_binding_invalid",
+                            "task_study_screening_config_not_active",
+                        ),
+                        (
+                            "system_analysis",
+                            self.SYSTEM_ANALYSIS_CONFIG_KEYS,
+                            self.SYSTEM_ANALYSIS_PROMPT_KEYS,
+                            XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+                            "task_system_analysis_config_binding_invalid",
+                            "task_system_analysis_config_not_active",
+                        ),
+                        (
+                            "targeted_review",
+                            self.TARGETED_REVIEW_CONFIG_KEYS,
+                            self.TARGETED_REVIEW_PROMPT_KEYS,
+                            XRAY_TARGETED_REVIEW_PROFILE_V2,
+                            "task_targeted_review_config_binding_invalid",
+                            "task_targeted_review_config_not_active",
+                        ),
+                        (
+                            "report_generation",
+                            self.REPORT_GENERATION_CONFIG_KEYS,
+                            self.REPORT_GENERATION_PROMPT_KEYS,
+                            XRAY_REPORT_GENERATION_PROFILE_V1,
+                            "task_report_generation_config_binding_invalid",
+                            "task_report_generation_config_not_active",
+                        ),
                     )
-                }
+                    stage_ai_config_bindings = {}
+                    for (
+                        stage_key,
+                        config_keys,
+                        prompt_keys,
+                        stage_profile,
+                        binding_error,
+                        not_active_error,
+                    ) in stage_specs:
+                        stage_config = await self._get_active_diagnose_stage_config(
+                            root_config=config,
+                            modality_type=study.modality_type,
+                            species=payload.species,
+                            config_keys=config_keys,
+                            prompt_keys=prompt_keys,
+                            profile_key=stage_profile,
+                            binding_error=binding_error,
+                            not_active_error=not_active_error,
+                        )
+                        stage_ai_config_bindings[stage_key] = (
+                            self._freeze_stage_ai_config_binding(config=stage_config)
+                        )
+                elif profile_key == XRAY_TARGETED_REVIEW_PROFILE_V2:
+                    stage_config = await self._get_active_diagnose_stage_config(
+                        root_config=config,
+                        modality_type=study.modality_type,
+                        species=payload.species,
+                        config_keys=self.TARGETED_REVIEW_CONFIG_KEYS,
+                        prompt_keys=self.TARGETED_REVIEW_PROMPT_KEYS,
+                        profile_key=XRAY_TARGETED_REVIEW_PROFILE_V2,
+                        binding_error="task_targeted_review_config_binding_invalid",
+                        not_active_error="task_targeted_review_config_not_active",
+                    )
+                    stage_ai_config_bindings = {
+                        "targeted_review": self._freeze_stage_ai_config_binding(
+                            config=stage_config
+                        )
+                    }
         elif payload.quality_review_task_id is not None:
             raise TaskStateConflictError(
                 "task_quality_review_reference_profile_invalid"
             )
-        first_definition = contract["stages"][0]
 
+        first_definition = contract["stages"][0]
         series = await self.series_dal.list_for_study(study.id)
         xray_image_contract_required = requires_xray_runtime_image_contract(
             modality_type=study.modality_type,
@@ -446,6 +604,7 @@ class TaskService:
             study=study,
             series=series,
             config=config,
+            runtime_identity=runtime_identity,
             profile_key=profile_key,
             compiled_profile=contract,
             task_type=payload.task_type,
@@ -457,12 +616,21 @@ class TaskService:
             pet_profile=pet_profile_snapshot,
         )
         request_sha = self._sha(snapshot)
+        identity = runtime_identity or {
+            "ai_config_id": config.id,
+            "config_sha256": config.config_sha256,
+            "release_fingerprint": config.release_fingerprint,
+            "budget_policy": config.budget_policy_json,
+            "routing_policy_version": "control-plane.v1",
+        }
+        config_id = identity["ai_config_id"]
+        budget_policy = identity["budget_policy"]
         if existing is not None:
             self._ensure_idempotent_task(
                 task=existing,
                 study_id=study.id,
                 study_revision_id=study.revision_id,
-                config_id=config.id,
+                config_id=config_id,
                 request_sha=request_sha,
             )
             return self._response(existing)
@@ -477,9 +645,9 @@ class TaskService:
         stage_input_sha = self._sha(stage_input)
         assignment_sha = self._sha(
             {
-                "config_id": config.id,
-                "config_sha256": config.config_sha256,
-                "release_fingerprint": config.release_fingerprint,
+                "config_id": config_id,
+                "config_sha256": identity["config_sha256"],
+                "release_fingerprint": identity["release_fingerprint"],
                 "profile": profile_sha,
                 "task_type": payload.task_type,
                 "run_mode": run_mode,
@@ -493,10 +661,10 @@ class TaskService:
             "task_type": payload.task_type,
             "business_key": business_key,
             "contract_version": "task.v1",
-            "ai_config_id": config.id,
+            "ai_config_id": config_id,
             "compiled_pipeline_sha256": profile_sha,
             "stage_registry_contract_version": self.registry.CONTRACT_VERSION,
-            "routing_policy_version": "control-plane.v1",
+            "routing_policy_version": identity["routing_policy_version"],
             "assignment_sha256": assignment_sha,
             "study_revision_id": study.revision_id,
             "report_required": report_required,
@@ -507,10 +675,10 @@ class TaskService:
             "state_version": 0,
             "request_snapshot_json": snapshot,
             "request_sha256": request_sha,
-            "budget_snapshot_json": config.budget_policy_json,
+            "budget_snapshot_json": budget_policy,
             "budget_reserved_json": {
                 "contract_version": "task-budget-reservation.v1",
-                "budget_policy_sha256": self._sha(config.budget_policy_json),
+                "budget_policy_sha256": self._sha(budget_policy),
                 "reserved_call_units": 0,
                 "reserved_attempts": 0,
             },
@@ -528,7 +696,7 @@ class TaskService:
                 task=existing,
                 study_id=study.id,
                 study_revision_id=study.revision_id,
-                config_id=config.id,
+                config_id=config_id,
                 request_sha=request_sha,
             )
             return self._response(existing)
@@ -596,9 +764,7 @@ class TaskService:
         try:
             require_xray_study_image_count(image_count)
         except ValueError as exc:
-            raise TaskStateConflictError(
-                "xray_task_image_count_out_of_range"
-            ) from exc
+            raise TaskStateConflictError("xray_task_image_count_out_of_range") from exc
 
     @classmethod
     def _config_key_for_task(
@@ -815,9 +981,7 @@ class TaskService:
             "model_snapshot_sha256": config.model_snapshot_sha256,
             "output_schema_sha256": config.output_schema_sha256,
             "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
-            "stage_registry_contract_version": (
-                config.stage_registry_contract_version
-            ),
+            "stage_registry_contract_version": (config.stage_registry_contract_version),
             "budget_policy_sha256": sha256_json(config.budget_policy_json),
         }
 
@@ -917,7 +1081,9 @@ class TaskService:
             "neuter_status": profile.neuter_status,
             "vaccination_status": profile.vaccination_status,
             "birthday": profile.birthday.isoformat() if profile.birthday else None,
-            "weight_kg": str(profile.weight_kg) if profile.weight_kg is not None else None,
+            "weight_kg": str(profile.weight_kg)
+            if profile.weight_kg is not None
+            else None,
             "weight_measured_at": (
                 profile.weight_measured_at.isoformat()
                 if profile.weight_measured_at
@@ -935,7 +1101,8 @@ class TaskService:
         *,
         study,
         series,
-        config,
+        config=None,
+        runtime_identity: dict[str, Any] | None = None,
         profile_key: str,
         compiled_profile: dict,
         task_type: str,
@@ -946,8 +1113,11 @@ class TaskService:
         stage_ai_config_bindings: dict[str, dict[str, Any]] | None = None,
         pet_profile: dict[str, Any] | None = None,
     ) -> dict:
-        """Freeze the active Config identity once, without dereferencing sources later."""
-        is_config_v2 = is_v2_config(config)
+        """Freeze either a code-owned runtime identity or a legacy DB Config."""
+        if (config is None) == (runtime_identity is None):
+            raise TaskStateConflictError("task_runtime_identity_invalid")
+        code_routed = runtime_identity is not None
+        is_config_v2 = code_routed or is_v2_config(config)
         if task_type in {
             "diagnose",
             XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
@@ -994,11 +1164,25 @@ class TaskService:
                 else species or "unknown"
             ),
             "series": legacy_series_snapshot,
-            "ai_config_id": config.id,
-            "config_key": config.config_key,
-            "config_version": config.version,
-            "config_sha256": config.config_sha256,
-            "release_fingerprint": config.release_fingerprint,
+            "ai_config_id": (
+                runtime_identity["ai_config_id"] if code_routed else config.id
+            ),
+            "config_key": (
+                runtime_identity["config_key"] if code_routed else config.config_key
+            ),
+            "config_version": (
+                runtime_identity["config_version"] if code_routed else config.version
+            ),
+            "config_sha256": (
+                runtime_identity["config_sha256"]
+                if code_routed
+                else config.config_sha256
+            ),
+            "release_fingerprint": (
+                runtime_identity["release_fingerprint"]
+                if code_routed
+                else config.release_fingerprint
+            ),
             "profile_key": profile_key,
             "compiled_profile": compiled_profile,
             **frozen_clinical_context.snapshot_fields(),
@@ -1039,9 +1223,7 @@ class TaskService:
                         image_manifest = (
                             build_xray_diagnostic_series_manifest(ready_images)
                             if requires_xray_runtime_image_contract(
-                                modality_type=getattr(
-                                    study, "modality_type", None
-                                ),
+                                modality_type=getattr(study, "modality_type", None),
                                 task_type=task_type,
                                 profile_key=profile_key,
                             )
@@ -1098,19 +1280,36 @@ class TaskService:
                 raise TaskStateConflictError(
                     "task_result_contract_requires_snapshot_v3"
                 )
-            snapshot.update(
-                {
-                    "snapshot_contract_version": snapshot_contract_version,
-                    "config_contract_version": config.config_contract_version,
-                    "prompt_content_sha256": config.prompt_content_sha256,
-                    "model_snapshot_sha256": config.model_snapshot_sha256,
-                    "output_schema_sha256": config.output_schema_sha256,
-                    "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
-                    "stage_registry_contract_version": (
-                        config.stage_registry_contract_version
-                    ),
-                }
-            )
+            if code_routed:
+                snapshot.update(
+                    {
+                        "runtime_config_source": "code",
+                        "snapshot_contract_version": snapshot_contract_version,
+                        "config_contract_version": runtime_identity[
+                            "config_contract_version"
+                        ],
+                        "compiled_pipeline_sha256": runtime_identity[
+                            "compiled_pipeline_sha256"
+                        ],
+                        "stage_registry_contract_version": runtime_identity[
+                            "stage_registry_contract_version"
+                        ],
+                    }
+                )
+            else:
+                snapshot.update(
+                    {
+                        "snapshot_contract_version": snapshot_contract_version,
+                        "config_contract_version": config.config_contract_version,
+                        "prompt_content_sha256": config.prompt_content_sha256,
+                        "model_snapshot_sha256": config.model_snapshot_sha256,
+                        "output_schema_sha256": config.output_schema_sha256,
+                        "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+                        "stage_registry_contract_version": (
+                            config.stage_registry_contract_version
+                        ),
+                    }
+                )
             return snapshot
 
         prompt_bundle = config.prompt_bundle_json
@@ -1171,9 +1370,7 @@ class TaskService:
 
         stages = await self.stage_dal.list_for_task(task.id)
         localization_stages = [
-            stage
-            for stage in stages
-            if stage.stage_key == "anatomy_localization"
+            stage for stage in stages if stage.stage_key == "anatomy_localization"
         ]
         if (
             len(stages) != 2
@@ -1201,23 +1398,31 @@ class TaskService:
             raise TaskStateConflictError("anatomy_localization_lineage_invalid")
 
         call = await self.call_dal.get_by_id(source_call_id)
-        config = await self.config_dal.get_by_id(task.ai_config_id)
         snapshot = task.request_snapshot_json or {}
-        if call is None or config is None:
+        expected_prompt_key = self.ANATOMY_LOCALIZATION_PROMPT_KEYS.get(
+            snapshot.get("species") or ""
+        )
+        expected_config_key = self.ANATOMY_LOCALIZATION_CONFIG_KEYS.get(
+            snapshot.get("species") or ""
+        )
+        if call is None or expected_prompt_key is None or expected_config_key is None:
             raise TaskStateConflictError("anatomy_localization_lineage_invalid")
-        try:
-            self.config_compiler.verify_frozen_integrity(config)
-        except AIControlValidationError as exc:
-            raise TaskStateConflictError(
-                "anatomy_localization_lineage_invalid"
-            ) from exc
+        response_schema = await self._lineage_response_schema(
+            task=task,
+            call=call,
+            snapshot=snapshot,
+            expected_profile_key=XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+            expected_task_type=XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
+            expected_prompt_key=expected_prompt_key,
+            expected_config_key=expected_config_key,
+            expected_contract_version=ANATOMY_LOCALIZATION_CONTRACT_V1,
+            error_code="anatomy_localization_lineage_invalid",
+            enforce_legacy_prompt_identity=False,
+        )
         if (
             call.id != source_call_id
             or call.task_id != task.id
             or call.stage_checkpoint_id != stage.id
-            or call.ai_config_id != task.ai_config_id
-            or call.config_sha256 != config.config_sha256
-            or call.schema_sha256 != config.output_schema_sha256
             or call.status != "succeeded"
             or call.result_disposition != "accepted"
             or call.attempt_count != 1
@@ -1226,16 +1431,6 @@ class TaskService:
             or not isinstance(call.parsed_result_json, dict)
             or not isinstance(call.image_receipt_json, dict)
             or call.image_count_requested != call.image_count_sent
-            or config.profile_key != XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
-            or config.task_type != XRAY_ANATOMY_LOCALIZATION_TASK_TYPE
-            or config.output_schema_json.get("x-ms-image-contract-version")
-            != ANATOMY_LOCALIZATION_CONTRACT_V1
-            or snapshot.get("ai_config_id") != config.id
-            or snapshot.get("config_sha256") != config.config_sha256
-            or snapshot.get("output_schema_sha256")
-            != config.output_schema_sha256
-            or snapshot.get("compiled_pipeline_sha256")
-            != config.compiled_pipeline_sha256
             or call.requested_image_manifest_sha256
             != snapshot.get("resolved_manifest_sha256")
             or call.sent_image_manifest_sha256
@@ -1264,11 +1459,11 @@ class TaskService:
             )
             parsed = schema_validate_result(
                 value=call.parsed_result_json,
-                schema=config.output_schema_json,
+                schema=response_schema,
             )
             validated = validate_anatomy_localization_result_contract(
                 result=parsed,
-                schema_contract_version=config.output_schema_json.get(
+                schema_contract_version=response_schema.get(
                     "x-ms-image-contract-version"
                 ),
                 image_receipt=call.image_receipt_json,
@@ -1327,9 +1522,7 @@ class TaskService:
 
         stages = await self.stage_dal.list_for_task(task.id)
         quality_stages = [
-            stage
-            for stage in stages
-            if stage.stage_key == "batch_image_quality_review"
+            stage for stage in stages if stage.stage_key == "batch_image_quality_review"
         ]
         if (
             len(stages) != 2
@@ -1357,28 +1550,27 @@ class TaskService:
             raise TaskStateConflictError("xray_quality_review_lineage_invalid")
 
         call = await self.call_dal.get_by_id(source_call_id)
-        config = await self.config_dal.get_by_id(task.ai_config_id)
         snapshot = task.request_snapshot_json or {}
         species = snapshot.get("species")
         expected_config_key = self.IMAGE_QUALITY_CONFIG_KEYS.get(species or "")
         expected_prompt_key = self.IMAGE_QUALITY_PROMPT_KEYS.get(species or "")
-        if call is None or config is None:
+        if call is None or expected_config_key is None or expected_prompt_key is None:
             raise TaskStateConflictError("xray_quality_review_lineage_invalid")
-        try:
-            self.config_compiler.verify_frozen_integrity(config)
-        except AIControlValidationError as exc:
-            raise TaskStateConflictError(
-                "xray_quality_review_lineage_invalid"
-            ) from exc
+        response_schema = await self._lineage_response_schema(
+            task=task,
+            call=call,
+            snapshot=snapshot,
+            expected_profile_key=XRAY_IMAGE_QUALITY_PROFILE_V1,
+            expected_task_type=XRAY_IMAGE_QUALITY_TASK_TYPE,
+            expected_prompt_key=expected_prompt_key,
+            expected_config_key=expected_config_key,
+            expected_contract_version=XRAY_IMAGE_QUALITY_CONTRACT_V1,
+            error_code="xray_quality_review_lineage_invalid",
+        )
         if (
-            expected_config_key is None
-            or expected_prompt_key is None
-            or call.id != source_call_id
+            call.id != source_call_id
             or call.task_id != task.id
             or call.stage_checkpoint_id != stage.id
-            or call.ai_config_id != task.ai_config_id
-            or call.config_sha256 != config.config_sha256
-            or call.schema_sha256 != config.output_schema_sha256
             or call.status != "succeeded"
             or call.result_disposition != "accepted"
             or call.attempt_count != 1
@@ -1387,22 +1579,9 @@ class TaskService:
             or not isinstance(call.parsed_result_json, dict)
             or not isinstance(call.image_receipt_json, dict)
             or call.image_count_requested != call.image_count_sent
-            or config.config_key != expected_config_key
-            or config.prompt_key != expected_prompt_key
-            or config.profile_key != XRAY_IMAGE_QUALITY_PROFILE_V1
-            or config.task_type != XRAY_IMAGE_QUALITY_TASK_TYPE
-            or config.output_schema_json.get("x-ms-image-contract-version")
-            != XRAY_IMAGE_QUALITY_CONTRACT_V1
-            or snapshot.get("snapshot_contract_version")
-            != TASK_REQUEST_SNAPSHOT_V3
+            or snapshot.get("snapshot_contract_version") != TASK_REQUEST_SNAPSHOT_V3
             or snapshot.get("study_id") != task.study_id
             or snapshot.get("study_revision_id") != task.study_revision_id
-            or snapshot.get("ai_config_id") != config.id
-            or snapshot.get("config_sha256") != config.config_sha256
-            or snapshot.get("output_schema_sha256")
-            != config.output_schema_sha256
-            or snapshot.get("compiled_pipeline_sha256")
-            != config.compiled_pipeline_sha256
             or call.requested_image_manifest_sha256
             != snapshot.get("resolved_manifest_sha256")
             or call.sent_image_manifest_sha256
@@ -1431,20 +1610,18 @@ class TaskService:
             )
             parsed = schema_validate_result(
                 value=call.parsed_result_json,
-                schema=config.output_schema_json,
+                schema=response_schema,
             )
             validated = validate_xray_image_quality_result_contract(
                 result=parsed,
-                schema_contract_version=config.output_schema_json.get(
+                schema_contract_version=response_schema.get(
                     "x-ms-image-contract-version"
                 ),
                 image_receipt=call.image_receipt_json,
                 expected_species=species,
             )
         except (GatewayContractError, XRayImageQualityContractError) as exc:
-            raise TaskStateConflictError(
-                "xray_quality_review_lineage_invalid"
-            ) from exc
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid") from exc
         if validated != stage_result:
             raise TaskStateConflictError("xray_quality_review_lineage_invalid")
 

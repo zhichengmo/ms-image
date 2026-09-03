@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
@@ -19,16 +20,20 @@ from apps.backend.services.runtime.stages.xray.prompt_commands import (
 class ReportGenerationStageHandler:
     handler_key = "report_generation"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_report_generation", "dog": "xray_dog_report_generation"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         if context.stage.stage_key != self.handler_key:
             raise StageHandlerContractError("report_generation_stage_invalid")
+        prompt_command = build_report_generation_ai_request_command(
+            task=context.task, stage=context.stage
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_report_generation_ai_request_command(
-                    task=context.task,
-                    stage=context.stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

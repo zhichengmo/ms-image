@@ -198,6 +198,7 @@ class GatewayRequest:
     timeout_ms: int
     provider_idempotency_key: str
     image_manifest_sha256: str | None
+    strategy: str = "race"
 
     def request_sha256(self) -> str:
         """Hash canonical request intent without API Key or short-lived URLs."""
@@ -211,6 +212,7 @@ class GatewayRequest:
                 "provider_type": self.provider_type,
                 "api_format": self.api_format,
                 "requested_model": self.requested_model,
+                "strategy": self.strategy,
                 "allowed_actual_models": list(self.allowed_actual_models),
                 "generation_params": dict(self.generation_params),
                 "response_schema": dict(self.response_schema),

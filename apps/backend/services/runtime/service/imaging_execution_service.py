@@ -202,6 +202,7 @@ class ImagingExecutionService:
         owner_id: str,
         trace_id: str,
         request_id: str,
+        rendered_prompt: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Boundary A: build a Stage plan and durably prepare its Logical Call."""
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
@@ -233,12 +234,24 @@ class ImagingExecutionService:
             return {"network_required": False, "output": output}
         if plan.ai_request is None:
             raise StageExecutionStateConflict("stage_execution_plan_invalid")
+        if rendered_prompt is None:
+            return {
+                "network_required": False,
+                "prompt_render_required": True,
+                "ai_request": plan.ai_request,
+            }
         call_result = await AIRequestService(self.outbox_dal.db).prepare_call(
             task_id=task.id,
             stage_checkpoint_id=stage.id,
             prompt_command=plan.ai_request.prompt_command,
             trace_id=trace_id,
             request_id=request_id,
+            route=plan.ai_request.route,
+            prompt_key=plan.ai_request.prompt_key,
+            module_code=plan.ai_request.module_code,
+            locale=plan.ai_request.locale,
+            variant=plan.ai_request.variant,
+            rendered_prompt=rendered_prompt,
         )
         if call_result.get("network_required"):
             return {

@@ -80,6 +80,8 @@ from apps.backend.core.ai.gateway.image_signer import (
     build_oss_attempt_image_signer,
 )
 from apps.backend.core.ai.gateway_client import GatewayClient, GatewayResponseParseError
+from apps.backend.core.ai.model_route import AiModelRoute
+from apps.backend.core.config import settings
 from apps.backend.core.pipeline import (
     XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
     XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
@@ -166,6 +168,17 @@ class AIRequestService:
         # code-owned Pipeline/Schema contracts.  It never reads mutable sources.
         self.config_compiler = AIConfigCompiler(build_default_registry())
 
+    @classmethod
+    def _legacy_route_for_config(cls, *, config: Any) -> AiModelRoute:
+        """Compatibility only for old provider-disabled Config tasks."""
+        if is_v2_config(config):
+            model = cls._frozen_lane(config=config).get("requested_model")
+        else:
+            model = (config.model_policy_json or {}).get("requested_model")
+        if not isinstance(model, str) or not model.strip():
+            raise AIRequestStateConflict("ai_call_requested_model_invalid")
+        return AiModelRoute(models=(model,), mode="race")
+
     async def prepare_call(
         self,
         *,
@@ -174,19 +187,44 @@ class AIRequestService:
         prompt_command: XRayPromptCommand,
         trace_id: str,
         request_id: str,
+        route: AiModelRoute | None = None,
+        prompt_key: str | None = None,
+        module_code: str = "xray",
+        locale: str = "zh-CN",
+        variant: str = "default",
+        rendered_prompt: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Prepare one durable Logical Call and state whether network I/O is required."""
         task = await self.task_dal.get_by_id(task_id)
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
         if task is None or stage is None or stage.task_id != task.id:
             raise AIRequestStateConflict("ai_call_stage_task_mismatch")
+        if rendered_prompt is not None:
+            if route is None or not prompt_key:
+                raise AIRequestStateConflict("ai_prompt_runtime_request_invalid")
+            return await self.prepare_structured_call(
+                task_id=task_id,
+                stage_checkpoint_id=stage_checkpoint_id,
+                prompt_command=prompt_command,
+                trace_id=trace_id,
+                request_id=request_id,
+                route=route,
+                prompt_key=prompt_key,
+                module_code=module_code,
+                locale=locale,
+                variant=variant,
+                rendered_prompt=rendered_prompt,
+            )
+
         config = await self._resolve_task_stage_config(task=task, stage=stage)
+        effective_route = route or self._legacy_route_for_config(config=config)
         if not is_v2_config(config):
             result = await self._prepare_v1_provider_disabled_call(
                 task=task,
                 stage=stage,
                 config=config,
                 prompt_command=prompt_command,
+                route=effective_route,
             )
             return {
                 **result,
@@ -204,6 +242,7 @@ class AIRequestService:
                 stage=stage,
                 config=config,
                 prompt_command=prompt_command,
+                route=effective_route,
             )
         if not self._runtime_gate_allows():
             return await self._prepare_v2_provider_disabled_call(
@@ -213,14 +252,9 @@ class AIRequestService:
                 prompt_command=prompt_command,
                 terminal_error_code="ai_gateway_runtime_gate_denied",
                 provider_disabled_required=False,
+                route=effective_route,
             )
-        return await self.prepare_structured_call(
-            task_id=task_id,
-            stage_checkpoint_id=stage_checkpoint_id,
-            prompt_command=prompt_command,
-            trace_id=trace_id,
-            request_id=request_id,
-        )
+        raise AIRequestStateConflict("ai_prompt_runtime_render_required")
 
     async def prepare_provider_disabled_call(
         self,
@@ -228,6 +262,7 @@ class AIRequestService:
         task_id: str,
         stage_checkpoint_id: str,
         prompt_command: XRayPromptCommand,
+        route: AiModelRoute | None = None,
     ) -> dict[str, Any]:
         task = await self.task_dal.get_by_id(task_id)
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
@@ -236,18 +271,21 @@ class AIRequestService:
         # Runtime is intentionally bound to the Task's immutable Config reference,
         # never to the currently active Config or mutable Prompt/Pool/Connection rows.
         config = await self._resolve_task_stage_config(task=task, stage=stage)
+        route = route or self._legacy_route_for_config(config=config)
         if is_v2_config(config):
             return await self._prepare_v2_provider_disabled_call(
                 task=task,
                 stage=stage,
                 config=config,
                 prompt_command=prompt_command,
+                route=route,
             )
         return await self._prepare_v1_provider_disabled_call(
             task=task,
             stage=stage,
             config=config,
             prompt_command=prompt_command,
+            route=route,
         )
 
     async def _prepare_v1_provider_disabled_call(
@@ -257,6 +295,7 @@ class AIRequestService:
         stage: Any,
         config: Any,
         prompt_command: XRayPromptCommand,
+        route: AiModelRoute,
     ) -> dict[str, Any]:
         """Preserve the legacy Bundle path for historical v1 Tasks unchanged."""
         if config.status != "active":
@@ -365,6 +404,7 @@ class AIRequestService:
         stage: Any,
         config: Any,
         prompt_command: XRayPromptCommand,
+        route: AiModelRoute,
         terminal_error_code: str = "provider_disabled",
         provider_disabled_required: bool = True,
     ) -> dict[str, Any]:
@@ -401,7 +441,7 @@ class AIRequestService:
         lane = lanes[0]
         if not isinstance(lane, Mapping):
             raise AIRequestStateConflict("ai_call_model_snapshot_invalid")
-        requested_model = lane.get("requested_model")
+        requested_model = route.models[0]
         if not isinstance(requested_model, str) or not requested_model:
             raise AIRequestStateConflict("ai_call_requested_model_invalid")
 
@@ -453,6 +493,7 @@ class AIRequestService:
             manifest_sha=manifest_sha,
             generation_params=generation_params,
             budget_policy=budget_policy,
+            route=route,
         )
         budget_policy_sha256 = sha256_json(task.budget_snapshot_json)
         now = datetime.utcnow()
@@ -667,6 +708,39 @@ class AIRequestService:
         ).hexdigest()
 
     @staticmethod
+    def _runtime_request_snapshot(*, call: Any) -> dict[str, Any]:
+        reservation = call.budget_reservation_json
+        runtime = (
+            reservation.get("runtime_request")
+            if isinstance(reservation, Mapping)
+            else None
+        )
+        if not isinstance(runtime, Mapping):
+            raise AIRequestStateConflict("ai_call_runtime_snapshot_missing")
+        required_strings = (
+            "connection_id",
+            "connection_sha256",
+            "provider_type",
+            "api_format",
+            "streaming_mode",
+        )
+        if any(
+            not isinstance(runtime.get(key), str) or not runtime.get(key)
+            for key in required_strings
+        ):
+            raise AIRequestStateConflict("ai_call_runtime_snapshot_invalid")
+        if (
+            not isinstance(runtime.get("generation_params"), Mapping)
+            or not isinstance(runtime.get("response_schema"), Mapping)
+            or not isinstance(runtime.get("route"), Mapping)
+            or not isinstance(runtime.get("allowed_actual_models"), list)
+            or not isinstance(runtime.get("timeout_ms"), int)
+            or not isinstance(runtime.get("image_url_ttl_seconds"), int)
+        ):
+            raise AIRequestStateConflict("ai_call_runtime_snapshot_invalid")
+        return dict(runtime)
+
+    @staticmethod
     def _frozen_lane(*, config: Any) -> dict[str, Any]:
         model_snapshot = config.model_snapshot_json
         if not isinstance(model_snapshot, Mapping):
@@ -799,7 +873,7 @@ class AIRequestService:
             # Keep ms-image's frozen single-lane execution separate from the
             # ms-ai-platform scheduling contract.  The Platform only accepts
             # ``round_robin`` or ``race``; ms-ai-fast uses ``race`` by default.
-            "strategy": "race",
+            "strategy": request.strategy,
             "messages": cls._messages_with_images(request=request),
             "temperature": temperature,
             "metadata": {
@@ -944,6 +1018,7 @@ class AIRequestService:
         manifest_sha: str,
         generation_params: Mapping[str, Any],
         budget_policy: Mapping[str, Any],
+        route: AiModelRoute,
     ) -> tuple[dict[str, Any], str, str]:
         budget_policy_sha256 = sha256_json(budget_policy)
         request = {
@@ -960,6 +1035,7 @@ class AIRequestService:
             "schema_sha256": config.output_schema_sha256,
             "manifest_sha256": manifest_sha,
             "model_snapshot_sha256": config.model_snapshot_sha256,
+            "code_model_route": {"models": list(route.models), "mode": route.mode},
             "generation_params_sha256": sha256_json(generation_params),
             "budget_policy_sha256": budget_policy_sha256,
         }
@@ -975,11 +1051,95 @@ class AIRequestService:
                 "schema": config.output_schema_sha256,
                 "manifest": manifest_sha,
                 "model": config.model_snapshot_sha256,
+                "code_model_route": {"models": list(route.models), "mode": route.mode},
                 "execution_mode": "single",
                 "prompt_kind": prompt_command.prompt_kind,
             }
         )
         return request, request_sha, logical_key
+
+    @staticmethod
+    def prompt_runtime_variables(
+        *, prompt_command: XRayPromptCommand
+    ) -> dict[str, Any]:
+        """Build the same permissive variables payload style used by ms-ai-fast."""
+        variables: dict[str, Any] = {
+            "SAFE_STUDY_CONTEXT_JSON": prompt_command.safe_context,
+            "base_info": prompt_command.safe_context,
+            "study_context": prompt_command.safe_context,
+        }
+        optional = {
+            "PRIMARY_RESULT_JSON": prompt_command.primary_complete_result,
+            "previous_answer": prompt_command.primary_complete_result,
+            "primary_result": prompt_command.primary_complete_result,
+            "QUALITY_RESULTS_JSON": prompt_command.quality_results,
+            "ROUTE_CONTEXT_JSON": prompt_command.route_context,
+            "STUDY_SCREENING_RESULT_JSON": prompt_command.study_screening_result,
+            "SYSTEM_ANALYSIS_RESULT_JSON": prompt_command.system_analysis_result,
+            "FINAL_MEDICAL_RESULT_JSON": prompt_command.final_medical_result,
+        }
+        variables.update({key: value for key, value in optional.items() if value is not None})
+        return variables
+
+    @staticmethod
+    def _normalize_prompt_runtime_result(
+        *, rendered_prompt: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        messages = rendered_prompt.get("messages")
+        prompt = rendered_prompt.get("prompt")
+        if not isinstance(messages, list) and isinstance(prompt, Mapping):
+            messages = prompt.get("messages")
+        if not isinstance(messages, list) or not messages or not all(
+            isinstance(item, Mapping) for item in messages
+        ):
+            content = (
+                rendered_prompt.get("rendered_prompt")
+                or rendered_prompt.get("content")
+            )
+            if not isinstance(content, str) or not content:
+                raise AIRequestStateConflict("prompt_runtime_messages_invalid")
+            messages = [{"role": "user", "content": content}]
+        normalized_messages = [dict(item) for item in messages]
+        response_schema = rendered_prompt.get("output_schema")
+        response_format = rendered_prompt.get("response_format")
+        if not isinstance(response_schema, Mapping) and isinstance(
+            response_format, Mapping
+        ):
+            json_schema = response_format.get("json_schema")
+            if isinstance(json_schema, Mapping):
+                response_schema = json_schema.get("schema")
+        if not isinstance(response_schema, Mapping) or not response_schema:
+            raise AIRequestStateConflict("prompt_runtime_output_schema_missing")
+        generation_params: dict[str, Any] = {
+            "temperature": rendered_prompt.get("temperature", 0.2)
+        }
+        for key in ("top_p", "max_output_tokens"):
+            value = rendered_prompt.get(key)
+            if value is not None:
+                generation_params[key] = value
+        metadata = (
+            rendered_prompt.get("metadata")
+            if isinstance(rendered_prompt.get("metadata"), Mapping)
+            else {}
+        )
+        audit = {
+            "prompt_version_public_id": rendered_prompt.get(
+                "prompt_version_public_id"
+            )
+            or rendered_prompt.get("version_public_id"),
+            "prompt_content_hash": rendered_prompt.get("prompt_content_hash")
+            or rendered_prompt.get("content_hash"),
+            "prompt_release_public_id": rendered_prompt.get("release_public_id"),
+            "prompt_requested_variant": rendered_prompt.get("requested_variant")
+            or metadata.get("requested_variant"),
+            "prompt_resolved_variant": rendered_prompt.get("resolved_variant")
+            or metadata.get("resolved_variant"),
+            "prompt_fallback_used": bool(
+                rendered_prompt.get("fallback_used")
+                or metadata.get("fallback_used", False)
+            ),
+        }
+        return normalized_messages, generation_params, dict(response_schema), audit
 
     async def prepare_structured_call(
         self,
@@ -989,121 +1149,155 @@ class AIRequestService:
         prompt_command: XRayPromptCommand,
         trace_id: str,
         request_id: str,
+        route: AiModelRoute,
+        prompt_key: str,
+        module_code: str,
+        locale: str,
+        variant: str,
+        rendered_prompt: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Boundary A: persist a Logical Call plus its first prepared Attempt.
-
-        The caller owns the surrounding transaction and must commit before any
-        network I/O starts.  This path is reachable only when the frozen
-        ai-gateway-profile is provider-enabled/qualified and the runtime gate
-        allows it; otherwise callers must keep the provider-disabled path.
-        """
+        """Boundary A: persist one code-routed, Prompt-Runtime-rendered call."""
         if not self._runtime_gate_allows():
             raise AIRequestStateConflict("ai_gateway_runtime_gate_denied")
+        if len(route.models) != 1:
+            raise AIRequestStateConflict("ai_model_route_single_model_required")
         task = await self.task_dal.get_by_id(task_id)
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
         if task is None or stage is None or stage.task_id != task.id:
             raise AIRequestStateConflict("ai_call_stage_task_mismatch")
-        config = await self._resolve_task_stage_config(task=task, stage=stage)
-        if not is_v2_config(config) or config.status not in {"active", "retired"}:
-            raise AIRequestStateConflict("ai_call_config_state_invalid")
-        try:
-            gateway_profile = normalize_gateway_profile(config.gateway_profile_json)
-        except GatewayContractError as exc:
-            raise AIRequestStateConflict(str(exc)) from exc
-        if (
-            not gateway_profile["provider_enabled"]
-            or gateway_profile["qualification_status"] != "qualified"
-        ):
-            raise AIRequestStateConflict("provider_enabled_required")
-        try:
-            self.config_compiler.verify_frozen_integrity(config)
-        except AIControlValidationError as exc:
-            raise AIRequestStateConflict(str(exc)) from exc
-        self._validate_v2_task_config_snapshot(
-            task=task,
-            stage=stage,
-            config=config,
+
+        variables = self.prompt_runtime_variables(prompt_command=prompt_command)
+        messages, generation_params, response_schema, prompt_runtime_audit = (
+            self._normalize_prompt_runtime_result(rendered_prompt=rendered_prompt)
         )
-
-        lane = self._frozen_lane(config=config)
-        requested_model = lane.get("requested_model")
-        connection_id = lane.get("connection_id")
-        connection_sha256 = lane.get("connection_sha256")
-        provider_type = lane.get("provider_type")
-        api_format = lane.get("api_format")
-        generation_params = lane.get("generation_params")
-        if any(
-            not isinstance(value, str) or not value
-            for value in (
-                requested_model,
-                connection_id,
-                connection_sha256,
-                provider_type,
-                api_format,
-            )
-        ) or not isinstance(generation_params, Mapping):
-            raise AIRequestStateConflict("ai_call_model_snapshot_invalid")
-
-        budget_policy = config.budget_policy_json
+        budget_policy = task.budget_snapshot_json
         (
             max_prompt_chars,
             max_input_images,
-            _,
-            _,
-            _,
-        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
-        (
-            _,
-            _,
             max_total_calls,
             max_total_attempts,
             task_deadline_ms,
-        ) = self._validate_v2_budget_policy(
-            budget_policy=task.budget_snapshot_json
-        )
+        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
+        prompt_chars = len(json.dumps(messages, ensure_ascii=False, default=str))
+        if prompt_chars > max_prompt_chars:
+            raise AIRequestStateConflict("ai_call_prompt_budget_exceeded")
 
         manifest_sha = self._stage_manifest_sha256(stage=stage)
         image_count = self._v2_image_count(task=task, stage=stage)
         self._require_xray_image_count(
-            config=config,
-            task=task,
-            stage=stage,
-            image_count=image_count,
+            config=None, task=task, stage=stage, image_count=image_count
         )
         if image_count > max_input_images:
             raise AIRequestStateConflict("ai_call_image_budget_exceeded")
 
-        rendered, rendered_messages, _ = self._render_v2_messages(
-            config=config,
-            prompt_command=prompt_command,
-            max_prompt_chars=max_prompt_chars,
+        requested_model = route.models[0]
+        connection_id = "ms-ai-platform"
+        provider_type = "ms-ai-platform"
+        api_format = "chat-completions"
+        connection_sha256 = sha256_json(
+            {
+                "connection_id": connection_id,
+                "base_url": settings.AI_PLATFORM_OPENAI_BASE_URL.rstrip("/"),
+                "provider_type": provider_type,
+                "api_format": api_format,
+            }
         )
-        request, request_sha, logical_key = self._build_v2_request_facts(
-            task=task,
-            stage=stage,
-            config=config,
-            prompt_command=prompt_command,
-            rendered=rendered,
-            rendered_messages=rendered_messages,
-            manifest_sha=manifest_sha,
-            generation_params=generation_params,
-            budget_policy=budget_policy,
+        timeout_ms = max(1, round(settings.AI_PLATFORM_TIMEOUT_SECONDS * 1000))
+        image_url_ttl_seconds = 300
+        snapshot = task.request_snapshot_json or {}
+        bindings = snapshot.get("stage_ai_config_bindings")
+        binding = (
+            bindings.get(stage.stage_key) if isinstance(bindings, Mapping) else None
         )
-        budget_policy_sha256 = sha256_json(task.budget_snapshot_json)
+        config_id = (
+            binding.get("ai_config_id")
+            if isinstance(binding, Mapping)
+            else task.ai_config_id
+        )
+        config_sha256 = (
+            binding.get("config_sha256")
+            if isinstance(binding, Mapping)
+            else snapshot.get("config_sha256")
+        )
+        if not isinstance(config_id, str) or not config_id:
+            config_id = task.ai_config_id
+        if not isinstance(config_sha256, str) or len(config_sha256) != 64:
+            config_sha256 = task.request_sha256
+        release_fingerprint = (
+            binding.get("release_fingerprint")
+            if isinstance(binding, Mapping)
+            else snapshot.get("release_fingerprint")
+        )
+        context_sha256 = sha256_json(variables)
+        rendered_messages_sha256 = sha256_json(messages)
+        schema_sha256 = sha256_json(response_schema)
+        route_fact = {"models": list(route.models), "mode": route.mode}
+        prompt_fact = {
+            "service_code": settings.PROMPT_SERVICE_CODE,
+            "module_code": module_code,
+            "prompt_key": prompt_key,
+            "locale": locale,
+            "variant": variant,
+            "variables_sha256": context_sha256,
+            **prompt_runtime_audit,
+        }
+        request_fact = {
+            "task_id": task.id,
+            "stage_id": stage.id,
+            "prompt": prompt_fact,
+            "route": route_fact,
+            "messages_sha256": rendered_messages_sha256,
+            "schema_sha256": schema_sha256,
+            "manifest_sha256": manifest_sha,
+            "generation_params_sha256": sha256_json(generation_params),
+        }
+        request_sha = self._sha(request_fact)
+        logical_key = self._sha(
+            {
+                "stage": stage.id,
+                "input": stage.input_sha256,
+                "prompt_identity": {
+                    "service_code": settings.PROMPT_SERVICE_CODE,
+                    "module_code": module_code,
+                    "prompt_key": prompt_key,
+                    "locale": locale,
+                    "variant": variant,
+                    "variables_sha256": context_sha256,
+                },
+                "route": route_fact,
+                "manifest": manifest_sha,
+            }
+        )
+        budget_policy_sha256 = sha256_json(budget_policy)
         now = datetime.utcnow()
-        task_created_at = task.created_at
-        if not isinstance(task_created_at, datetime):
+        if not isinstance(task.created_at, datetime):
             raise AIRequestStateConflict("task_created_at_invalid")
-        deadline_at = task_created_at + timedelta(milliseconds=task_deadline_ms)
+        deadline_at = task.created_at + timedelta(milliseconds=task_deadline_ms)
+        runtime_request = {
+            "contract_version": "ms-image-ai-runtime.v1",
+            "prompt": prompt_fact,
+            "route": route_fact,
+            "connection_id": connection_id,
+            "connection_sha256": connection_sha256,
+            "provider_type": provider_type,
+            "api_format": api_format,
+            "generation_params": generation_params,
+            "response_schema": response_schema,
+            "allowed_actual_models": list(route.models),
+            "streaming_mode": "json",
+            "timeout_ms": timeout_ms,
+            "image_url_ttl_seconds": image_url_ttl_seconds,
+        }
         reservation = {
             "contract_version": "ai-budget-reservation.v1",
             "budget_policy_sha256": budget_policy_sha256,
             "reserved_call_units": 1,
             "reserved_attempts": 1,
-            "prompt_chars": len(rendered.rendered_text),
+            "prompt_chars": prompt_chars,
             "image_count": image_count,
             "deadline_at": deadline_at.isoformat(timespec="microseconds") + "Z",
             "reservation_status": "reserved",
+            "runtime_request": runtime_request,
         }
         call_values = {
             "id": new_opaque_id(),
@@ -1114,17 +1308,17 @@ class AIRequestService:
             "node_call_no": 1,
             "logical_call_key": logical_key,
             "idempotency_key": logical_key,
-            "ai_config_id": config.id,
-            "config_sha256": config.config_sha256,
-            "release_fingerprint": config.release_fingerprint,
-            "execution_mode": "single",
-            "context_sha256": rendered.context_sha256,
+            "ai_config_id": config_id,
+            "config_sha256": config_sha256,
+            "release_fingerprint": release_fingerprint,
+            "execution_mode": route.mode,
+            "context_sha256": context_sha256,
             "provider_type": provider_type,
             "requested_model": requested_model,
             "request_sha256": request_sha,
-            "rendered_prompt_sha256": rendered.rendered_prompt_sha256,
-            "rendered_messages_json": rendered_messages.messages_json,
-            "schema_sha256": config.output_schema_sha256,
+            "rendered_prompt_sha256": rendered_messages_sha256,
+            "rendered_messages_json": messages,
+            "schema_sha256": schema_sha256,
             "requested_image_manifest_sha256": manifest_sha,
             "image_count_requested": image_count,
             "attempt_count": 1,
@@ -1145,19 +1339,14 @@ class AIRequestService:
         )
         if prepared.status != "prepared":
             return self._structured_call_response(
-                call=prepared,
-                attempt=None,
-                winner=False,
+                call=prepared, attempt=None, winner=False
             )
         existing_attempt = await self.attempt_dal.get_by_call_attempt_no(
-            ai_call_id=prepared.id,
-            attempt_no=1,
+            ai_call_id=prepared.id, attempt_no=1
         )
         if existing_attempt is not None:
             return self._structured_call_response(
-                call=prepared,
-                attempt=existing_attempt,
-                winner=False,
+                call=prepared, attempt=existing_attempt, winner=False
             )
         attempt = await self.attempt_dal.create_idempotent(
             {
@@ -1186,15 +1375,13 @@ class AIRequestService:
         if attempt is None:
             raise AIRequestStateConflict("ai_call_attempt_create_conflict")
         return self._structured_call_response(
-            call=prepared,
-            attempt=attempt,
-            winner=False,
+            call=prepared, attempt=attempt, winner=False
         )
 
     async def prepare_retry_attempt(
         self, *, call_id: str, trace_id: str, request_id: str
     ) -> dict[str, Any]:
-        """Boundary A: create a genuinely new Attempt with a new idempotency key."""
+        """Boundary A: retry from the persisted invocation facts, never DB Config."""
         call = await self.call_dal.get_by_id_for_update(call_id)
         if call is None:
             raise AIRequestStateConflict("ai_call_not_found")
@@ -1204,13 +1391,8 @@ class AIRequestService:
             raise AIRequestStateConflict("ai_call_winner_already_selected")
         if call.status not in {"prepared", "running"}:
             raise AIRequestStateConflict("ai_call_retry_state_invalid")
-        config = await self.config_dal.get_by_id(call.ai_config_id)
-        if config is None or config.config_sha256 != call.config_sha256:
-            raise AIRequestStateConflict("ai_call_config_snapshot_mismatch")
-        lane = self._frozen_lane(config=config)
         reservation = call.budget_reservation_json
-        if not isinstance(reservation, Mapping):
-            raise AIRequestStateConflict("ai_call_budget_reservation_invalid")
+        runtime = self._runtime_request_snapshot(call=call)
         reserved_attempts = reservation.get("reserved_attempts")
         next_attempt_no = int(await self.attempt_dal.get_count(ai_call_id=call.id)) + 1
         if (
@@ -1233,11 +1415,11 @@ class AIRequestService:
                 "provider_idempotency_key": self._new_provider_idempotency_key(),
                 "trace_id": trace_id,
                 "request_id": request_id,
-                "connection_id": lane["connection_id"],
-                "connection_sha256": lane["connection_sha256"],
-                "provider_type": lane["provider_type"],
-                "api_format": lane["api_format"],
-                "requested_model": lane["requested_model"],
+                "connection_id": runtime["connection_id"],
+                "connection_sha256": runtime["connection_sha256"],
+                "provider_type": runtime["provider_type"],
+                "api_format": runtime["api_format"],
+                "requested_model": call.requested_model,
                 "request_sha256": call.request_sha256,
                 "image_count_sent": 0,
                 "status": "prepared",
@@ -1258,43 +1440,26 @@ class AIRequestService:
         if updated_call is None:
             raise AIRequestStateConflict("ai_call_attempt_count_conflict")
         return self._structured_call_response(
-            call=updated_call,
-            attempt=attempt,
-            winner=False,
+            call=updated_call, attempt=attempt, winner=False
         )
 
     async def load_attempt_for_network(self, *, attempt_id: str) -> dict[str, Any]:
-        """Freeze every fact needed by Boundary B before the DB transaction closes."""
+        """Freeze Boundary-B facts from the persisted invocation snapshot."""
         attempt = await self.attempt_dal.get_by_id(attempt_id)
         if attempt is None:
             raise AIRequestStateConflict("ai_call_attempt_not_found")
         call = await self.call_dal.get_by_id(attempt.ai_call_id)
         if call is None:
             raise AIRequestStateConflict("ai_call_not_found")
-        config = await self.config_dal.get_by_id(call.ai_config_id)
-        if config is None or config.config_sha256 != call.config_sha256:
-            raise AIRequestStateConflict("ai_call_config_snapshot_mismatch")
-        try:
-            gateway_profile = normalize_gateway_profile(config.gateway_profile_json)
-        except GatewayContractError as exc:
-            raise AIRequestStateConflict(str(exc)) from exc
+        runtime = self._runtime_request_snapshot(call=call)
         if (
-            not gateway_profile["provider_enabled"]
-            or gateway_profile["qualification_status"] != "qualified"
-        ):
-            raise AIRequestStateConflict("provider_enabled_required")
-        lane = self._frozen_lane(config=config)
-        if (
-            lane.get("connection_id") != attempt.connection_id
-            or lane.get("connection_sha256") != attempt.connection_sha256
+            runtime["connection_id"] != attempt.connection_id
+            or runtime["connection_sha256"] != attempt.connection_sha256
         ):
             raise AIRequestStateConflict("ai_call_attempt_connection_mismatch")
         if attempt.status != "prepared":
             raise AIRequestStateConflict("ai_call_attempt_network_state_invalid")
-        if (
-            call.status not in {"prepared", "running"}
-            or call.result_disposition != "pending"
-        ):
+        if call.status not in {"prepared", "running"} or call.result_disposition != "pending":
             raise AIRequestStateConflict("ai_call_network_state_invalid")
         messages = call.rendered_messages_json
         if not isinstance(messages, list) or not messages:
@@ -1307,7 +1472,7 @@ class AIRequestService:
         if call.winner_attempt_id is not None:
             raise AIRequestStateConflict("ai_call_winner_already_selected")
         self._require_xray_image_count(
-            config=config,
+            config=None,
             task=task,
             stage=stage,
             image_count=call.image_count_requested,
@@ -1328,29 +1493,26 @@ class AIRequestService:
             "provider_type": attempt.provider_type,
             "api_format": attempt.api_format,
             "requested_model": attempt.requested_model,
-            "allowed_actual_models": tuple(gateway_profile["allowed_actual_models"]),
-            "generation_params": dict(lane["generation_params"]),
-            "response_schema": dict(config.output_schema_json),
+            "allowed_actual_models": tuple(runtime["allowed_actual_models"]),
+            "strategy": runtime["route"]["mode"],
+            "generation_params": dict(runtime["generation_params"]),
+            "response_schema": dict(runtime["response_schema"]),
             "messages": tuple(dict(item) for item in messages),
-            "streaming_mode": gateway_profile["streaming_mode"],
-            "timeout_ms": lane["timeout_ms"],
+            "streaming_mode": runtime["streaming_mode"],
+            "timeout_ms": runtime["timeout_ms"],
             "provider_idempotency_key": attempt.provider_idempotency_key,
             "image_manifest_sha256": call.requested_image_manifest_sha256,
             "image_count_requested": call.image_count_requested,
             "image_inputs": image_inputs,
             "xray_image_contract_required": self._xray_image_contract_required(
-                config=config,
-                task=task,
-                stage=stage,
+                config=None, task=task, stage=stage
             ),
             "snapshot_contract_version": (task.request_snapshot_json or {}).get(
                 "snapshot_contract_version"
             ),
             "expected_species": (task.request_snapshot_json or {}).get("species"),
-            "image_url_ttl_seconds": gateway_profile["image_url_ttl_seconds"],
-            "report_generation_expected": self._report_generation_expected(
-                stage=stage
-            ),
+            "image_url_ttl_seconds": runtime["image_url_ttl_seconds"],
+            "report_generation_expected": self._report_generation_expected(stage=stage),
         }
 
     @staticmethod
@@ -1405,6 +1567,7 @@ class AIRequestService:
             timeout_ms=int(network_plan["timeout_ms"]),
             provider_idempotency_key=str(network_plan["provider_idempotency_key"]),
             image_manifest_sha256=network_plan.get("image_manifest_sha256"),
+            strategy=str(network_plan.get("strategy") or "race"),
         )
         payload = AIRequestService._build_gateway_payload(request=gateway_request)
         image_receipt = AIRequestService._image_receipt(
@@ -2098,13 +2261,14 @@ class AIRequestService:
         if getattr(stage, "stage_key", None) == "report_generation":
             return False
         snapshot = task.request_snapshot_json or {}
-        return (
-            snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V3
-            and requires_xray_runtime_image_contract(
-                modality_type=config.modality_type,
-                task_type=config.task_type,
-                profile_key=snapshot.get("profile_key", config.profile_key),
-            )
+        if snapshot.get("snapshot_contract_version") != TASK_REQUEST_SNAPSHOT_V3:
+            return False
+        if config is None:
+            return True
+        return requires_xray_runtime_image_contract(
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=snapshot.get("profile_key", config.profile_key),
         )
 
     @staticmethod

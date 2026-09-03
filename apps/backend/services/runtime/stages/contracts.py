@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.xray.prompt_commands import XRayPromptCommand
 
@@ -26,6 +27,11 @@ class StageAIRequest:
     """Pure AI request intent; persistence and transport remain Worker-owned."""
 
     prompt_command: XRayPromptCommand
+    prompt_key: str
+    route: AiModelRoute
+    module_code: str = "xray"
+    locale: str = "zh-CN"
+    variant: str = "default"
 
 
 @dataclass(frozen=True)

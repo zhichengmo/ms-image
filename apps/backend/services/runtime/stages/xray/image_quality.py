@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
@@ -26,6 +27,8 @@ class BatchImageQualityReviewStageHandler:
 
     handler_key = "batch_image_quality_review"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_image_quality", "dog": "xray_dog_image_quality"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         """校验 Stage 身份并返回唯一的一次多图质量复核请求意图。
@@ -35,12 +38,14 @@ class BatchImageQualityReviewStageHandler:
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("xray_image_quality_stage_invalid")
+        prompt_command = build_xray_image_quality_ai_request_command(
+            task=context.task, stage=stage
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_xray_image_quality_ai_request_command(
-                    task=context.task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

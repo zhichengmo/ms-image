@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from apps.backend.core.pipeline import StageResult
+from apps.backend.core.ai.model_route import AiModelRoute
+from apps.backend.core.pipeline import XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1, StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
     StageExecutionContext,
@@ -26,6 +27,12 @@ class XRayJointPrimaryReaderStageHandler:
 
     handler_key = "joint_primary_reader"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_primary", "dog": "xray_dog_primary"}
+    ADJUDICATION_PROMPT_KEYS = {
+        "cat": "xray_cat_primary_adjudication",
+        "dog": "xray_dog_primary_adjudication",
+    }
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         """校验 Stage 身份并返回唯一的 Primary 多图请求意图。"""
@@ -33,12 +40,18 @@ class XRayJointPrimaryReaderStageHandler:
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("joint_primary_stage_invalid")
+        prompt_command = build_primary_ai_request_command(task=task, stage=stage)
+        prompt_keys = (
+            self.ADJUDICATION_PROMPT_KEYS
+            if (task.request_snapshot_json or {}).get("profile_key")
+            == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+            else self.PROMPT_KEYS
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_primary_ai_request_command(
-                    task=task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=prompt_keys[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

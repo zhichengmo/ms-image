@@ -15,6 +15,8 @@ from apps.backend.core.ai.gateway.image_signer import (
     ImageSigningError,
 )
 from apps.backend.core.ai.gateway_client import GatewayClient
+from apps.backend.core.ai.prompt_runtime_client import PromptRuntimeClient
+from apps.backend.core.config import settings
 from apps.backend.services.runtime.service.ai_request_service import (
     AIRequestService,
     AIRequestStateConflict,
@@ -32,10 +34,12 @@ class StageExecutionWorker:
         session_factory_: async_sessionmaker[AsyncSession],
         gateway_client: GatewayClient | None = None,
         image_signer: AttemptImageSigner | None = None,
+        prompt_client: PromptRuntimeClient | None = None,
     ):
         self.session_factory = session_factory_
         self.gateway_client = gateway_client
         self.image_signer = image_signer
+        self.prompt_client = prompt_client
 
     async def execute(
         self,
@@ -73,6 +77,34 @@ class StageExecutionWorker:
                         trace_id=trace_id,
                         request_id=event_id,
                     )
+            if prepared.get("prompt_render_required"):
+                ai_request = prepared.get("ai_request")
+                if ai_request is None:
+                    raise StageExecutionStateConflict("ai_prompt_request_missing")
+                prompt_client = self.prompt_client or PromptRuntimeClient()
+                rendered_prompt = await prompt_client.render(
+                    service_code=settings.PROMPT_SERVICE_CODE,
+                    module_code=ai_request.module_code,
+                    prompt_key=ai_request.prompt_key,
+                    variables=AIRequestService.prompt_runtime_variables(
+                        prompt_command=ai_request.prompt_command
+                    ),
+                    locale=ai_request.locale,
+                    variant=ai_request.variant,
+                    trace_id=trace_id,
+                    request_id=event_id,
+                )
+                async with self.session_factory() as session:
+                    async with session.begin():
+                        prepared = await ImagingExecutionService(
+                            session
+                        ).prepare_stage_execution(
+                            stage_checkpoint_id=stage_id,
+                            owner_id=owner_id,
+                            trace_id=trace_id,
+                            request_id=event_id,
+                            rendered_prompt=rendered_prompt,
+                        )
             if prepared.get("pending_reconcile"):
                 return {
                     "outcome": "pending_reconcile",

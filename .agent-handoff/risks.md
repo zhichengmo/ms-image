@@ -115,10 +115,11 @@
 - **字段实施需要 migration 授权**：仅写 ORM 或只塞 Snapshot 都会造成物理 schema/查询合同不完整；本轮未生成 migration。
 - **展示 URL 不得永久持久化**：未来 view ticket 必须短 TTL、HTTPS、owner-check，不能写入 Task Snapshot、Localization 永久结果或日志，也不能在数据库事务内执行 OSS 签名。
 
-## 2026-09-03 — Git 交付与后续模型路由风险
+## 2026-09-03 — code-owned AI/Prompt 路由剩余风险
 
-- **Git 禁止强制覆盖**：当前分支原先没有 upstream；推送必须使用普通 `git push -u`。认证失败、远端同名分支冲突或非快进时立即停止，不得 force push。
-- **跨仓库修改尚未授权**：后续模型路由会涉及 `ms-image`、`ms-ai-fast` 和 `ms-ai-platform` 的边界核对；本轮只创建分支，不修改另外两个仓库。
-- **模型名与推理参数不可混淆**：目标是 `model=gpt-5.6-sol` 加 `reasoning_effort=xhigh`，不是 `model=gpt-5.6-sol-xhigh`。
-- **平台当前可能覆盖请求模型**：已定位 `ms-ai-platform/app/service/ai_proxy_service.py` 会用 Endpoint Config 的 model 覆盖请求；入口 Schema 也需核对是否保留 `reasoning_effort`。只改调用方映射可能不会真正切换 Provider 模型。
-- **不得新增第二套 AI owner**：`ms-image` 后续实现必须复用现有 AI Control、冻结 Config、`AIRequestService`、Gateway/Worker 链路；接口或 Stage 不得直接请求 Provider。
+- **真实外部 E2E 尚未运行**：当前仅 Mock Prompt→Gateway 和全量本地测试通过；Prompt Runtime、ms-ai-platform、DB、Broker 环境变量未配置且 Docker 不可用，因此 Provider 端真实模型选择仍为 `ENVIRONMENT_BLOCKED`。
+- **平台可能覆盖请求模型**：既有只读审计显示 `ms-ai-platform` Endpoint Config 可能覆盖调用方 `model`；在真实环境验证前，只能确认 ms-image 已发送 `gpt-5.6-sol`，不能声称 Provider 最终实际模型已切换。
+- **`xhigh` 明确延期**：本轮没有传递 `reasoning_effort`，也没有验证平台/Provider 对 `xhigh` 的支持；不得把模型名写成 `gpt-5.6-sol-xhigh`。
+- **历史 Config 分支是兼容边界**：新 XRay 调用不读取 Config DB；旧 frozen Task/replay 仍会读取历史 Config，这是有意兼容，不应误删或误判为新链依赖。
+- **数据库仍保存审计事实**：Task/Stage/Call/Attempt 与 runtime snapshot 继续持久化；“不用数据库”不代表删除可靠执行和审计记录。
+- **不得新增第二套 AI owner**：后续改动继续复用 `AIRequestService`、Gateway/Worker；Stage/API 不得直接请求 Provider。

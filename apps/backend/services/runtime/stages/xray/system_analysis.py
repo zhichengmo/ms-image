@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
@@ -26,18 +27,22 @@ class SystemAnalysisStageHandler:
 
     handler_key = "system_analysis"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_system_analysis", "dog": "xray_dog_system_analysis"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         """校验 Stage 身份并返回唯一的多图 SystemAnalysis 请求意图。"""
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("system_analysis_stage_invalid")
+        prompt_command = build_system_analysis_ai_request_command(
+            task=context.task, stage=stage
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_system_analysis_ai_request_command(
-                    task=context.task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

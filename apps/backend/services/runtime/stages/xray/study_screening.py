@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.ai.study_screening_contract import (
     XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
     XRayStudyScreeningContractError,
@@ -31,18 +32,22 @@ class StudyScreeningStageHandler:
 
     handler_key = "study_screening"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_study_screening", "dog": "xray_dog_study_screening"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         """校验 Stage 身份并返回唯一的多图 StudyScreening 请求意图。"""
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("study_screening_stage_invalid")
+        prompt_command = build_study_screening_ai_request_command(
+            task=context.task, stage=stage
+        )
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_study_screening_ai_request_command(
-                    task=context.task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 

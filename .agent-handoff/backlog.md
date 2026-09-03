@@ -15,8 +15,10 @@
 - [x] 创建功能提交 `ee2fa3a`，保存 X-Ray Runtime、宠物档案、Prompt/Schema/Postman 与测试资产。
 - [x] 创建补充提交 `2b7d66b`，保存按物种校验 full-chain Config 的 harness 改动。
 - [x] 提交现有文档和完整 handoff 历史，maintenance 最终无告警，并推送 `codex/xray-anatomy-localization-v1`。
-- [x] 创建并推送 `codex/per-flow-model-routing`，已设置 upstream；业务实现尚未开始。
-- [ ] 新分支后续目标：按接口/Stage 配置 `model` 与 `reasoning_effort`，先完成本仓库调用边界及跨仓库平台透传审计，再经用户确认实施范围。
+- [x] 创建并推送 `codex/per-flow-model-routing`，已设置 upstream。
+- [x] 新 XRay AI/Prompt 路由已改为 Stage 代码声明；新 Task 不读取 AI Config DB，历史任务保持兼容；Mock 全链和 381 个全量测试通过。
+- [ ] [ENVIRONMENT_REQUIRED] 提供 Prompt Runtime、ms-ai-platform、数据库和 Broker 环境后，补一次真实外部 Provider E2E。
+- [ ] [USER_DEFERRED] `reasoning_effort` / `xhigh` 本轮不处理；后续恢复时单独验证平台透传与 Provider 支持。
 
 ## 宠物档案迁移后续资格
 

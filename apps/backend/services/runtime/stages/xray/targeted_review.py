@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from apps.backend.core.ai.model_route import AiModelRoute
 from apps.backend.core.pipeline import StageResult
 from apps.backend.services.runtime.stages.contracts import (
     StageAIRequest,
@@ -26,6 +27,8 @@ class XRayTargetedReviewStageHandler:
 
     handler_key = "targeted_review"
     handler_version = "v1"
+    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    PROMPT_KEYS = {"cat": "xray_cat_targeted_review", "dog": "xray_dog_targeted_review"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
         """校验 Stage 身份并返回一次 TargetedReview 请求意图。"""
@@ -33,12 +36,12 @@ class XRayTargetedReviewStageHandler:
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("targeted_review_stage_invalid")
+        prompt_command = build_targeted_ai_request_command(task=task, stage=stage)
         return StageExecutionPlan(
             ai_request=StageAIRequest(
-                prompt_command=build_targeted_ai_request_command(
-                    task=task,
-                    stage=stage,
-                )
+                prompt_command=prompt_command,
+                prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
+                route=self.MODEL_ROUTE,
             )
         )
 
@@ -74,14 +77,16 @@ class XRayTargetedReviewStageHandler:
         snapshot = context.task.request_snapshot_json or {}
         bindings = snapshot.get("stage_ai_config_bindings") or {}
         binding = (
-            bindings.get("targeted_review")
-            if isinstance(bindings, Mapping)
-            else None
+            bindings.get("targeted_review") if isinstance(bindings, Mapping) else None
         )
-        dedicated_prompt = (
+        dedicated_prompt = snapshot.get("runtime_config_source") == "code" or (
             binding.get("prompt_key") if isinstance(binding, Mapping) else None
         ) in {"xray_cat_targeted_review", "xray_dog_targeted_review"}
-        if accepted and dedicated_prompt and parsed.get("targeted_candidate") is not None:
+        if (
+            accepted
+            and dedicated_prompt
+            and parsed.get("targeted_candidate") is not None
+        ):
             output["medical_status"] = "not_produced"
             output["error_code"] = "targeted_review_recursive_candidate_forbidden"
             return StageResult(

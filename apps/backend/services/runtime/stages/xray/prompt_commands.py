@@ -90,14 +90,11 @@ def build_primary_ai_request_command(*, task: Any, stage: Any) -> XRayPromptComm
         if snapshot.get("snapshot_contract_version") != TASK_REQUEST_SNAPSHOT_V3:
             raise PromptContractError("primary_adjudication_snapshot_v3_required")
         safe_context["targeted_focus_options"] = {
-            family: list(focuses)
-            for family, focuses in _TARGETED_FOCUS_OPTIONS.items()
+            family: list(focuses) for family, focuses in _TARGETED_FOCUS_OPTIONS.items()
         }
         quality_review = snapshot.get("quality_review")
         quality_results = (
-            quality_review.get("result")
-            if isinstance(quality_review, dict)
-            else None
+            quality_review.get("result") if isinstance(quality_review, dict) else None
         )
         if not isinstance(quality_results, dict):
             raise PromptContractError("primary_adjudication_quality_result_missing")
@@ -228,17 +225,15 @@ def build_targeted_ai_request_command(*, task: Any, stage: Any) -> XRayPromptCom
         TASK_REQUEST_SNAPSHOT_V3,
     }:
         bindings = snapshot.get("stage_ai_config_bindings") or {}
-        binding = bindings.get("targeted_review") if isinstance(bindings, dict) else None
-        dedicated_prompt = (
-            binding.get("prompt_key")
-            if isinstance(binding, dict)
-            else None
+        binding = (
+            bindings.get("targeted_review") if isinstance(bindings, dict) else None
+        )
+        dedicated_prompt = snapshot.get("runtime_config_source") == "code" or (
+            binding.get("prompt_key") if isinstance(binding, dict) else None
         ) in {"xray_cat_targeted_review", "xray_dog_targeted_review"}
         quality_review = snapshot.get("quality_review")
         quality_results = (
-            quality_review.get("result")
-            if isinstance(quality_review, dict)
-            else None
+            quality_review.get("result") if isinstance(quality_review, dict) else None
         )
         study_screening_result = stage_input.get("study_screening_result")
         system_analysis_result = stage_input.get("system_analysis_result")
@@ -284,9 +279,7 @@ def build_anatomy_localization_ai_request_command(
 
     snapshot = task.request_snapshot_json or {}
     if snapshot.get("snapshot_contract_version") != TASK_REQUEST_SNAPSHOT_V3:
-        raise PromptContractError(
-            "anatomy_localization_snapshot_v3_required"
-        )
+        raise PromptContractError("anatomy_localization_snapshot_v3_required")
     species = snapshot.get("species")
     if species not in {"cat", "dog"}:
         raise PromptContractError("xray_species_snapshot_invalid")
@@ -368,9 +361,7 @@ def build_study_screening_ai_request_command(
         raise PromptContractError("study_screening_image_count_invalid")
     quality_review = snapshot.get("quality_review")
     quality_results = (
-        quality_review.get("result")
-        if isinstance(quality_review, dict)
-        else None
+        quality_review.get("result") if isinstance(quality_review, dict) else None
     )
     if not isinstance(quality_results, dict):
         raise PromptContractError("study_screening_quality_results_missing")
@@ -380,9 +371,7 @@ def build_study_screening_ai_request_command(
         snapshot=snapshot,
         prompt_mode="study_screening",
     )
-    safe_context["resolved_manifest_sha256"] = snapshot.get(
-        "resolved_manifest_sha256"
-    )
+    safe_context["resolved_manifest_sha256"] = snapshot.get("resolved_manifest_sha256")
     return XRayPromptCommand(
         prompt_kind="study_screening",
         applicable_family_keys=(),
@@ -407,9 +396,7 @@ def build_system_analysis_ai_request_command(
         raise PromptContractError("system_analysis_image_count_invalid")
     quality_review = snapshot.get("quality_review")
     quality_results = (
-        quality_review.get("result")
-        if isinstance(quality_review, dict)
-        else None
+        quality_review.get("result") if isinstance(quality_review, dict) else None
     )
     if not isinstance(quality_results, dict):
         raise PromptContractError("system_analysis_quality_results_missing")
@@ -419,9 +406,7 @@ def build_system_analysis_ai_request_command(
         snapshot=snapshot,
         prompt_mode="system_analysis",
     )
-    safe_context["resolved_manifest_sha256"] = snapshot.get(
-        "resolved_manifest_sha256"
-    )
+    safe_context["resolved_manifest_sha256"] = snapshot.get("resolved_manifest_sha256")
     return XRayPromptCommand(
         prompt_kind="system_analysis",
         applicable_family_keys=(),
@@ -450,9 +435,7 @@ def build_report_generation_ai_request_command(
         raise PromptContractError("report_generation_source_sha_invalid")
     quality_review = snapshot.get("quality_review")
     quality_results = (
-        quality_review.get("result")
-        if isinstance(quality_review, dict)
-        else None
+        quality_review.get("result") if isinstance(quality_review, dict) else None
     )
     if not isinstance(quality_results, dict):
         raise PromptContractError("report_generation_quality_results_missing")
