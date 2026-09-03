@@ -123,6 +123,36 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.mark.parametrize(
+    ("declared_projection", "observed_projection", "expected"),
+    [
+        ("VD", "ventrodorsal", "consistent"),
+        ("ML", "mediolateral", "consistent"),
+        ("Lateral", "right_lateral", "consistent"),
+        ("Lateral", "left_lateral", "consistent"),
+        ("Lateral", "lateral_indeterminate", "indeterminate"),
+        ("Lateral", "ventrodorsal", "inconsistent"),
+        ("AP", "ventrodorsal", "indeterminate"),
+    ],
+)
+def test_image_quality_projection_alias_consistency(
+    declared_projection: str,
+    observed_projection: str,
+    expected: str,
+) -> None:
+    from apps.backend.core.ai.image_quality_contract import (
+        _expected_projection_consistency,
+    )
+
+    assert (
+        _expected_projection_consistency(
+            declared_projection=declared_projection,
+            observed_projection=observed_projection,
+        )
+        == expected
+    )
+
+
 def _request(
     *,
     images: tuple[GatewayImageInput, ...] = (),
@@ -165,7 +195,10 @@ def _network_plan(**overrides: Any) -> dict[str, Any]:
         "requested_model": "provider-model",
         "allowed_actual_models": ("provider-model",),
         "generation_params": {"temperature": 0.1, "max_output_tokens": 64},
-        "response_schema": SCHEMA,
+        "response_schema": {
+            **SCHEMA,
+            "x-ms-image-contract-version": "complete-medical-result.v1",
+        },
         "messages": ({"role": "user", "content": "analyze"},),
         "timeout_ms": 30_000,
         "provider_idempotency_key": "idem-1",
@@ -400,6 +433,36 @@ async def test_ai_request_provider_reject_is_definite_failure() -> None:
         "image_count": 0,
         "images": [],
     }
+    assert raised.value.provider_request_id is None
+    assert raised.value.actual_model is None
+    assert raised.value.usage_json is None
+    assert raised.value.response_sha256 is None
+
+
+@pytest.mark.anyio
+async def test_ai_request_gateway_parse_failure_has_no_provider_summary() -> None:
+    class FakeGateway:
+        async def chat_completions(self, payload, *, idempotency_key):
+            raise GatewayResponseParseError("provider_response_payload_invalid")
+
+    class FakeSigner:
+        async def sign(self, **kwargs):
+            return []
+
+    with pytest.raises(
+        GatewayDefiniteResponseError,
+        match="provider_response_payload_invalid",
+    ) as raised:
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(),
+            gateway_client=FakeGateway(),
+            image_signer=FakeSigner(),
+        )
+
+    assert raised.value.provider_request_id is None
+    assert raised.value.actual_model is None
+    assert raised.value.usage_json is None
+    assert raised.value.response_sha256 is None
 
 
 @pytest.mark.anyio
@@ -1024,17 +1087,13 @@ def test_task_species_config_binding_is_exact(
 
     for invalid in (
         SimpleNamespace(
-            config_key="xray_diagnose_dog"
-            if species == "cat"
-            else "xray_diagnose_cat",
+            config_key="xray_diagnose_dog" if species == "cat" else "xray_diagnose_cat",
             prompt_key=prompt_key,
             profile_key="xray_primary_v2",
         ),
         SimpleNamespace(
             config_key=config_key,
-            prompt_key="xray_dog_primary"
-            if species == "cat"
-            else "xray_cat_primary",
+            prompt_key="xray_dog_primary" if species == "cat" else "xray_cat_primary",
             profile_key="xray_primary_v2",
         ),
         SimpleNamespace(
@@ -1931,6 +1990,10 @@ async def test_stage_execution_worker_persists_receipt_on_definite_parse_failure
             image_receipt=receipt,
             image_manifest_sha256="b" * 64,
             image_count_sent=1,
+            provider_request_id="provider-request-1",
+            actual_model="provider-model",
+            usage_json={"total_tokens": 17},
+            response_sha256="c" * 64,
         )
 
     async def finalize_failure(self, **kwargs):
@@ -1975,6 +2038,10 @@ async def test_stage_execution_worker_persists_receipt_on_definite_parse_failure
         "image_receipt": receipt,
         "image_manifest_sha256": "b" * 64,
         "image_count_sent": 1,
+        "provider_request_id": "provider-request-1",
+        "actual_model": "provider-model",
+        "usage_json": {"total_tokens": 17},
+        "response_sha256": "c" * 64,
     }
     assert captured["stage"]["call_result"] == {
         "status": "failed",
@@ -3201,6 +3268,44 @@ async def test_xray_family_routing_v2_rejects_unapproved_focus_without_inference
 
 
 @pytest.mark.anyio
+async def test_xray_family_routing_v2_accepts_catalog_focus_key() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.family_routing import (
+        XRayFamilyRoutingV2StageHandler,
+    )
+
+    primary_result = _complete_medical_result_v2()
+    primary_result["targeted_candidate"] = {
+        "family_key": "thoracic",
+        "focus_key": "lung_pattern",
+        "reason": "肺野征象需要一次专项复核",
+        "source_finding_ids": ["finding-1"],
+    }
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1"),
+        stage=SimpleNamespace(
+            stage_key="family_routing",
+            input_json={
+                "previous_output_sha256": "a" * 64,
+                "previous_output": {
+                    "medical_status": "produced",
+                    "source_call_id": "call_1",
+                    "complete_medical_result": primary_result,
+                },
+            },
+        ),
+    )
+
+    plan = await XRayFamilyRoutingV2StageHandler().execute(context)
+
+    assert plan.completed_result is not None
+    assert plan.completed_result.output["route_signal"] == "targeted_review"
+    assert plan.completed_result.output["selected_focus_key"] == "lung_pattern"
+
+
+@pytest.mark.anyio
 async def test_targeted_route_evidence_is_frozen_into_dynamic_stage_input() -> None:
     from datetime import datetime
     from types import SimpleNamespace
@@ -3285,6 +3390,49 @@ async def test_targeted_route_evidence_is_frozen_into_dynamic_stage_input() -> N
     assert stage_input["route_reason_codes"] == ["primary_targeted_candidate"]
     assert captured["outbox"]["aggregate_id"] == captured["stage"]["id"]
     assert captured["task"]["values"]["execution_status"] == "queued"
+
+
+def test_dedicated_targeted_review_rejects_recursive_candidate() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.targeted_review import (
+        XRayTargetedReviewV2StageHandler,
+    )
+
+    context = StageExecutionContext(
+        task=SimpleNamespace(
+            request_snapshot_json={
+                "stage_ai_config_bindings": {
+                    "targeted_review": {
+                        "prompt_key": "xray_dog_targeted_review",
+                    }
+                }
+            }
+        ),
+        stage=SimpleNamespace(
+            stage_key="targeted_review",
+            input_json={"previous_output_sha256": "a" * 64},
+        ),
+    )
+
+    result = XRayTargetedReviewV2StageHandler().consume_ai_call(
+        context,
+        {
+            "call_id": "call_targeted_1",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": {
+                "result_schema_version": "xray-complete-medical-result.v2",
+                "targeted_candidate": {"family_key": "thoracic"},
+            },
+        },
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "targeted_review_recursive_candidate_forbidden"
+    assert result.output["medical_status"] == "not_produced"
+    assert "complete_medical_result" not in result.output
 
 
 def test_xray_v1_and_v2_profiles_keep_exact_handler_versions() -> None:
@@ -3989,7 +4137,10 @@ async def test_ai_request_rejects_cancelled_task_before_call_or_retry_creation()
 
 
 @pytest.mark.anyio
-async def test_finalize_definite_failure_projects_receipt_to_attempt_and_call() -> None:
+@pytest.mark.parametrize("usage_json", (None, {"total_tokens": 11}))
+async def test_finalize_definite_failure_projects_receipt_to_attempt_and_call(
+    usage_json: dict[str, Any] | None,
+) -> None:
     from types import SimpleNamespace
 
     attempt = SimpleNamespace(
@@ -4067,6 +4218,10 @@ async def test_finalize_definite_failure_projects_receipt_to_attempt_and_call() 
         image_receipt=receipt,
         image_manifest_sha256="d" * 64,
         image_count_sent=1,
+        provider_request_id="provider-request-1",
+        actual_model="provider-model",
+        usage_json=usage_json,
+        response_sha256="e" * 64,
     )
 
     expected_delivery = {
@@ -4074,16 +4229,29 @@ async def test_finalize_definite_failure_projects_receipt_to_attempt_and_call() 
         "image_count_sent": 1,
         "image_receipt_json": receipt,
     }
+    expected_provider_attempt = {
+        "provider_request_id": "provider-request-1",
+        "actual_model": "provider-model",
+        "usage_json": usage_json,
+        "response_sha256": "e" * 64,
+    }
+    expected_provider_call = {
+        "provider_request_id": "provider-request-1",
+        "actual_model": "provider-model",
+        "response_sha256": "e" * 64,
+    }
     assert captured["attempt"]["values"] == {
         "error_code": "provider_response_json_invalid",
         "finished_at": captured["attempt"]["values"]["finished_at"],
         **expected_delivery,
+        **expected_provider_attempt,
         "status": "failed",
         "next_reconcile_at": None,
     }
     assert captured["call"]["expected_version"] == call.state_version
     assert captured["call"]["values"] == {
         **expected_delivery,
+        **expected_provider_call,
         "status": "failed",
         "result_disposition": "failed",
         "error_code": "provider_response_json_invalid",
@@ -4215,6 +4383,55 @@ async def test_finalize_failure_rejects_partial_or_unknown_delivery_audit(
             image_receipt=image_receipt,
             image_manifest_sha256=image_manifest_sha256,
             image_count_sent=image_count_sent,
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    (
+        "unknown",
+        "provider_request_id",
+        "actual_model",
+        "usage_json",
+        "provider_response_sha256",
+    ),
+    (
+        (False, "provider-request-1", None, None, "e" * 64),
+        (False, "", "provider-model", None, "e" * 64),
+        (False, "p" * 161, "provider-model", None, "e" * 64),
+        (False, "provider-request-1", "", None, "e" * 64),
+        (False, "provider-request-1", "m" * 129, None, "e" * 64),
+        (False, "provider-request-1", "provider-model", None, "E" * 64),
+        (False, "provider-request-1", "provider-model", None, "z" * 64),
+        (False, None, None, {"total_tokens": 1}, None),
+        (False, "provider-request-1", "provider-model", [], "e" * 64),
+        (True, "provider-request-1", "provider-model", None, "e" * 64),
+    ),
+)
+async def test_finalize_failure_rejects_invalid_provider_response_audit(
+    unknown: bool,
+    provider_request_id: str | None,
+    actual_model: str | None,
+    usage_json: Any,
+    provider_response_sha256: str | None,
+) -> None:
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestStateConflict,
+    )
+
+    service = object.__new__(AIRequestService)
+    with pytest.raises(
+        AIRequestStateConflict,
+        match="ai_call_attempt_provider_response_audit_invalid",
+    ):
+        await service.finalize_attempt_failure(
+            attempt_id="attempt_1",
+            error_code="provider_response_json_invalid",
+            unknown=unknown,
+            provider_request_id=provider_request_id,
+            actual_model=actual_model,
+            usage_json=usage_json,
+            response_sha256=provider_response_sha256,
         )
 
 
@@ -4856,8 +5073,7 @@ async def test_xray_series_budget_accepts_qualified_multi_series_totals(
         async def list_for_study(self, study_id: str):
             assert study_id == "study_1"
             return [
-                SimpleNamespace(expected_image_count=value)
-                for value in existing_counts
+                SimpleNamespace(expected_image_count=value) for value in existing_counts
             ]
 
         async def create_idempotent(self, values):
@@ -4921,8 +5137,7 @@ async def test_xray_series_budget_rejects_invalid_or_excess_total(
 
         async def list_for_study(self, study_id: str):
             return [
-                SimpleNamespace(expected_image_count=value)
-                for value in existing_counts
+                SimpleNamespace(expected_image_count=value) for value in existing_counts
             ]
 
         async def create_idempotent(self, values):
@@ -5088,9 +5303,7 @@ async def test_xray_prepare_locks_study_and_rejects_sixth_slot(
     service.image_dal = ImageDal()
     service._owned_session = owned_session
     method = (
-        service.prepare_multipart_upload
-        if multipart
-        else service.prepare_direct_upload
+        service.prepare_multipart_upload if multipart else service.prepare_direct_upload
     )
 
     with pytest.raises(
@@ -5184,9 +5397,7 @@ async def test_xray_prepare_idempotent_uploading_replay_does_not_recount_capacit
     service._owned_session = owned_session
     service._response = lambda image: image
     method = (
-        service.prepare_multipart_upload
-        if multipart
-        else service.prepare_direct_upload
+        service.prepare_multipart_upload if multipart else service.prepare_direct_upload
     )
 
     result = await method(
@@ -5294,3 +5505,2886 @@ async def test_network_boundary_rejects_expanded_image_count_mismatch() -> None:
             ),
             image_signer=Signer(),
         )
+
+
+def _anatomy_localization_receipt(image_count: int = 2) -> dict[str, Any]:
+    return {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": image_count,
+        "images": [
+            {
+                "sequence_no": index,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "series_sequence_no": index,
+                "image_id": f"image_{index}",
+                "logical_image_key": f"logical_{index}",
+                "image_version_no": 1,
+                "projection": "VD" if index == 1 else "Lateral",
+                "projection_provenance": {
+                    "source": "caller_declared",
+                    "schema_version": "xray-projection.v1",
+                },
+                "sha256": f"{index}" * 64,
+                "size_bytes": index * 10,
+                "mime_type": "image/jpeg",
+            }
+            for index in range(1, image_count + 1)
+        ],
+    }
+
+
+def _anatomy_localization_result(
+    *, image_count: int = 2, species: str = "cat"
+) -> dict[str, Any]:
+    receipt = _anatomy_localization_receipt(image_count)
+    return {
+        "contract_version": "xray-anatomy-localization.v1",
+        "label_contract_version": "xray-anatomy-labels.v1",
+        "species": species,
+        "result_status": "complete",
+        "images": [
+            {
+                "image_id": item["image_id"],
+                "series_id": item["series_id"],
+                "sequence_no": item["sequence_no"],
+                "projection": item["projection"],
+                "series_manifest_sha256": item["series_manifest_sha256"],
+                "status": "localized",
+                "reason_code": None,
+                "organs": [
+                    {
+                        "system": "cardiovascular",
+                        "label": "heart",
+                        "bbox": [0.1, 0.2, 0.8, 0.9],
+                    }
+                ],
+            }
+            for item in receipt["images"]
+        ],
+    }
+
+
+def _anatomy_localization_query_facts():
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.core.imaging.manifest import manifest_sha256
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    ordered_images = [
+        {
+            "image_id": f"image_{index}",
+            "series_id": "series_1",
+            "logical_image_key": f"logical_{index}",
+            "image_version_no": 1,
+            "sequence_no": index,
+            "image_role": "original",
+            "image_kind": "instance",
+            "file_format": "jpg",
+            "projection": "VD" if index == 1 else "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+            "storage_profile": "primary",
+            "object_key": f"objects/{index}.jpg",
+            "object_version_id": None,
+            "sha256": f"{index}" * 64,
+            "size_bytes": index * 10,
+            "content_type": "image/jpeg",
+        }
+        for index in (1, 2)
+    ]
+    series_manifest_sha256 = manifest_sha256(ordered_images).sha256
+    frozen_series = [
+        {
+            "series_id": "series_1",
+            "series_key": "series-key-1",
+            "series_no": 1,
+            "manifest_contract_version": "series-image-manifest.v2",
+            "manifest_sha256": series_manifest_sha256,
+            "actual_image_count": 2,
+            "ordered_images": ordered_images,
+        }
+    ]
+    resolved_manifest_sha256 = manifest_sha256(
+        [
+            {
+                "series_id": "series_1",
+                "series_key": "series-key-1",
+                "series_no": 1,
+                "actual_image_count": 2,
+                "manifest_sha256": series_manifest_sha256,
+            }
+        ]
+    ).sha256
+    receipt = {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": 2,
+        "images": [
+            {
+                "sequence_no": index,
+                "series_id": "series_1",
+                "series_manifest_sha256": series_manifest_sha256,
+                "series_sequence_no": index,
+                "image_id": item["image_id"],
+                "logical_image_key": item["logical_image_key"],
+                "image_version_no": item["image_version_no"],
+                "projection": item["projection"],
+                "projection_provenance": item["projection_provenance"],
+                "sha256": item["sha256"],
+                "size_bytes": item["size_bytes"],
+                "mime_type": item["content_type"],
+            }
+            for index, item in enumerate(ordered_images, start=1)
+        ],
+    }
+    result = _anatomy_localization_result()
+    for result_image, receipt_image in zip(
+        result["images"], receipt["images"], strict=True
+    ):
+        for key in (
+            "image_id",
+            "series_id",
+            "sequence_no",
+            "projection",
+            "series_manifest_sha256",
+        ):
+            result_image[key] = receipt_image[key]
+
+    output_schema = AIConfigCompiler._output_schema(
+        profile_key="xray_anatomy_localization_v1"
+    )
+    config = SimpleNamespace(
+        id="config_1",
+        profile_key="xray_anatomy_localization_v1",
+        task_type="anatomy_localization",
+        config_sha256="a" * 64,
+        output_schema_sha256=sha256_json(output_schema),
+        output_schema_json=output_schema,
+        compiled_pipeline_sha256="b" * 64,
+    )
+    snapshot = {
+        "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        "species": "cat",
+        "resolved_manifest_sha256": resolved_manifest_sha256,
+        "series": frozen_series,
+        "ai_config_id": config.id,
+        "config_sha256": config.config_sha256,
+        "output_schema_sha256": config.output_schema_sha256,
+        "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+    }
+    task = SimpleNamespace(
+        id="task_1",
+        requester_id="caller_1",
+        task_type="anatomy_localization",
+        execution_status="completed",
+        ai_medical_status="not_produced",
+        report_required=False,
+        current_report_id=None,
+        study_id="study_1",
+        study_revision_id="revision_1",
+        ai_config_id=config.id,
+        request_snapshot_json=snapshot,
+    )
+    output = {
+        "source_call_id": "call_1",
+        "anatomy_localization_result": deepcopy(result),
+    }
+    stages = [
+        SimpleNamespace(
+            id="stage_1",
+            stage_no=1,
+            stage_key="study_preparation",
+            handler_key="study_preparation",
+            handler_version="v1",
+            status="completed",
+            output_json={"study_revision_id": "revision_1"},
+            output_sha256=None,
+        ),
+        SimpleNamespace(
+            id="stage_2",
+            stage_no=2,
+            stage_key="anatomy_localization",
+            handler_key="anatomy_localization",
+            handler_version="v1",
+            status="completed",
+            output_json=output,
+            output_sha256=sha256_json(output),
+        ),
+    ]
+    call = SimpleNamespace(
+        id="call_1",
+        task_id=task.id,
+        stage_checkpoint_id=stages[1].id,
+        ai_config_id=config.id,
+        config_sha256=config.config_sha256,
+        schema_sha256=config.output_schema_sha256,
+        status="succeeded",
+        result_disposition="accepted",
+        attempt_count=1,
+        winner_attempt_id="attempt_1",
+        parsed_result_json=deepcopy(result),
+        image_receipt_json=receipt,
+        image_count_requested=2,
+        image_count_sent=2,
+        requested_image_manifest_sha256=resolved_manifest_sha256,
+        sent_image_manifest_sha256=resolved_manifest_sha256,
+    )
+    attempt = SimpleNamespace(
+        id="attempt_1",
+        ai_call_id=call.id,
+        attempt_no=1,
+        status="succeeded",
+    )
+    facts = {
+        "task": task,
+        "stages": stages,
+        "call": call,
+        "attempt": attempt,
+        "attempt_count": 1,
+        "config": config,
+        "result": result,
+        "receipt": receipt,
+    }
+
+    async def get_task(_task_id: str):
+        return facts["task"]
+
+    async def list_stages(_task_id: str):
+        return facts["stages"]
+
+    async def get_call(_call_id: str):
+        return facts["call"]
+
+    async def get_config(_config_id: str):
+        return facts["config"]
+
+    async def get_attempt_count(**_kwargs):
+        return facts["attempt_count"]
+
+    async def get_attempt(**_kwargs):
+        return facts["attempt"]
+
+    service = object.__new__(TaskService)
+    service.task_dal = SimpleNamespace(get_by_id=get_task)
+    service.stage_dal = SimpleNamespace(list_for_task=list_stages)
+    service.call_dal = SimpleNamespace(get_by_id=get_call)
+    service.config_dal = SimpleNamespace(get_by_id=get_config)
+    service.attempt_dal = SimpleNamespace(
+        get_count=get_attempt_count,
+        get_by_call_attempt_no=get_attempt,
+    )
+    service.config_compiler = SimpleNamespace(
+        verify_frozen_integrity=lambda _config: None
+    )
+    return service, facts
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_query_returns_only_verified_lineage() -> None:
+    from types import SimpleNamespace
+
+    service, facts = _anatomy_localization_query_facts()
+
+    response = await service.get_anatomy_localization(
+        task_id="task_1",
+        caller=SimpleNamespace(subject_id="caller_1"),
+    )
+
+    assert response.task_id == "task_1"
+    assert response.stage_checkpoint_id == "stage_2"
+    assert response.source_call_id == "call_1"
+    assert response.output_sha256 == facts["stages"][1].output_sha256
+    assert response.result.model_dump(mode="json") == facts["result"]
+    assert facts["task"].report_required is False
+    assert facts["task"].current_report_id is None
+    assert facts["task"].ai_medical_status == "not_produced"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("mutation", "error_code"),
+    (
+        (
+            lambda facts: setattr(facts["task"], "task_type", "diagnose"),
+            "task_not_anatomy_localization",
+        ),
+        (
+            lambda facts: setattr(facts["task"], "execution_status", "running"),
+            "anatomy_localization_not_ready",
+        ),
+        (
+            lambda facts: setattr(facts["task"], "report_required", True),
+            "anatomy_localization_not_ready",
+        ),
+        (
+            lambda facts: setattr(facts["task"], "current_report_id", "report_1"),
+            "anatomy_localization_not_ready",
+        ),
+        (
+            lambda facts: setattr(facts["task"], "ai_medical_status", "produced"),
+            "anatomy_localization_not_ready",
+        ),
+    ),
+)
+async def test_anatomy_localization_query_rejects_invalid_task_state(
+    mutation,
+    error_code: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskStateConflictError,
+    )
+
+    service, facts = _anatomy_localization_query_facts()
+    mutation(facts)
+
+    with pytest.raises(TaskStateConflictError, match=error_code):
+        await service.get_anatomy_localization(
+            task_id="task_1",
+            caller=SimpleNamespace(subject_id="caller_1"),
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda facts: facts["stages"].pop(0),
+        lambda facts: setattr(facts["stages"][1], "handler_version", "v2"),
+        lambda facts: setattr(facts["stages"][1], "output_sha256", "0" * 64),
+        lambda facts: setattr(facts["call"], "task_id", "task_other"),
+        lambda facts: setattr(facts["call"], "stage_checkpoint_id", "stage_other"),
+        lambda facts: setattr(facts["call"], "ai_config_id", "config_other"),
+        lambda facts: setattr(facts["call"], "status", "failed"),
+        lambda facts: setattr(facts["call"], "result_disposition", "rejected"),
+        lambda facts: setattr(facts["call"], "attempt_count", 2),
+        lambda facts: facts.update(attempt_count=2),
+        lambda facts: setattr(facts["attempt"], "attempt_no", 2),
+        lambda facts: setattr(facts["attempt"], "ai_call_id", "call_other"),
+        lambda facts: setattr(facts["attempt"], "status", "failed"),
+        lambda facts: setattr(facts["call"], "winner_attempt_id", "attempt_other"),
+        lambda facts: setattr(facts["call"], "schema_sha256", "0" * 64),
+        lambda facts: facts["config"].output_schema_json.update(
+            {"x-ms-image-contract-version": "unknown.v1"}
+        ),
+        lambda facts: facts["task"].request_snapshot_json.update(
+            {"config_sha256": "0" * 64}
+        ),
+        lambda facts: facts["call"]
+        .parsed_result_json["images"][0]["organs"][0]
+        .update({"bbox": [0.2, 0.2, 0.8, 0.9]}),
+        lambda facts: facts["call"].image_receipt_json["images"].reverse(),
+    ),
+)
+async def test_anatomy_localization_query_fails_closed_on_lineage_drift(
+    mutation,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskStateConflictError,
+    )
+
+    service, facts = _anatomy_localization_query_facts()
+    mutation(facts)
+
+    with pytest.raises(
+        TaskStateConflictError,
+        match="anatomy_localization_lineage_invalid",
+    ):
+        await service.get_anatomy_localization(
+            task_id="task_1",
+            caller=SimpleNamespace(subject_id="caller_1"),
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "service_error",
+    ("not_found", "access_denied"),
+)
+async def test_anatomy_localization_endpoint_hides_missing_and_non_owner_tasks(
+    service_error: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.api.api_v1.endpoints.anatomy_localizations import (
+        get_anatomy_localization,
+    )
+    from apps.backend.services.runtime.service.task_service import (
+        TaskAccessDeniedError,
+        TaskNotFoundError,
+    )
+
+    error = (
+        TaskNotFoundError("task_not_found")
+        if service_error == "not_found"
+        else TaskAccessDeniedError("task_access_denied")
+    )
+
+    class FakeService:
+        async def get_anatomy_localization(self, **_kwargs):
+            raise error
+
+    class FakeDB:
+        rolled_back = False
+
+        async def rollback(self):
+            self.rolled_back = True
+
+    db = FakeDB()
+    response = await get_anatomy_localization(
+        task_id="task_1",
+        context=SimpleNamespace(subject_id="caller_other"),
+        service=FakeService(),
+        db=db,
+    )
+
+    assert response.status_code == 404
+    assert db.rolled_back is True
+    assert b'"error_code":4041' in response.body
+
+
+@pytest.mark.anyio
+async def test_evaluation_export_rejects_localization_without_current_report() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.evaluation_control.service.evaluation_export_service import (
+        EvaluationExportService,
+        EvaluationExportValidationError,
+    )
+
+    _service, facts = _anatomy_localization_query_facts()
+
+    async def get_task(_task_id: str):
+        return facts["task"]
+
+    export_service = object.__new__(EvaluationExportService)
+    export_service.task_dal = SimpleNamespace(get_by_id=get_task)
+
+    with pytest.raises(
+        EvaluationExportValidationError,
+        match="evaluation_export_report_missing",
+    ):
+        await export_service._build_case_row(
+            spec=SimpleNamespace(task_id="task_1", report_id=None),
+            payload=SimpleNamespace(),
+        )
+
+
+@pytest.mark.parametrize("image_count", (1, 6))
+def test_anatomy_localization_task_gate_rejects_out_of_range_counts(
+    image_count: int,
+) -> None:
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    with pytest.raises(
+        TaskStateConflictError,
+        match="xray_task_image_count_out_of_range",
+    ):
+        TaskService._require_xray_task_image_count(
+            modality_type="xray",
+            task_type="anatomy_localization",
+            profile_key="xray_anatomy_localization_v1",
+            image_count=image_count,
+        )
+
+
+@pytest.mark.parametrize("image_count", (2, 3, 4, 5))
+def test_anatomy_localization_task_gate_accepts_qualified_counts(
+    image_count: int,
+) -> None:
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    TaskService._require_xray_task_image_count(
+        modality_type="xray",
+        task_type="anatomy_localization",
+        profile_key="xray_anatomy_localization_v1",
+        image_count=image_count,
+    )
+
+
+def test_anatomy_localization_task_schema_and_config_binding_are_exact() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.schemas.task import TaskCreate
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_1",
+        task_type="anatomy_localization",
+        species="cat",
+        trace_id="trace_1",
+    )
+    assert payload.clinical_context is None
+    with pytest.raises(
+        ValidationError,
+        match="task_species_required_for_anatomy_localization",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_2",
+            task_type="anatomy_localization",
+            trace_id="trace_2",
+        )
+    with pytest.raises(
+        ValidationError,
+        match="task_clinical_context_diagnose_only",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_3",
+            task_type="anatomy_localization",
+            species="cat",
+            clinical_context=_clinical_context_v1(),
+            trace_id="trace_3",
+        )
+
+    TaskService._validate_species_config_binding(
+        config=SimpleNamespace(
+            config_key="xray_anatomy_localization_cat",
+            prompt_key="xray_cat_anatomy_localization",
+            profile_key="xray_anatomy_localization_v1",
+        ),
+        task_type="anatomy_localization",
+        species="cat",
+    )
+    with pytest.raises(TaskStateConflictError, match="task_config_invalid"):
+        TaskService._validate_species_config_binding(
+            config=SimpleNamespace(
+                config_key="xray_anatomy_localization_cat",
+                prompt_key="xray_cat_anatomy_localization",
+                profile_key="xray_primary_v2",
+            ),
+            task_type="anatomy_localization",
+            species="cat",
+        )
+
+
+@pytest.mark.parametrize(
+    ("config_key", "prompt_key", "profile_key", "task_type", "species"),
+    (
+        (
+            "xray_anatomy_localization_dog",
+            "xray_dog_anatomy_localization",
+            "xray_anatomy_localization_v1",
+            "anatomy_localization",
+            "cat",
+        ),
+        (
+            "xray_anatomy_localization_cat",
+            "xray_dog_anatomy_localization",
+            "xray_anatomy_localization_v1",
+            "anatomy_localization",
+            "cat",
+        ),
+        (
+            "xray_anatomy_localization_cat",
+            "xray_cat_anatomy_localization",
+            "xray_primary_v2",
+            "anatomy_localization",
+            "cat",
+        ),
+        (
+            "xray_anatomy_localization_cat",
+            "xray_cat_anatomy_localization",
+            "xray_anatomy_localization_v1",
+            "diagnose",
+            "cat",
+        ),
+    ),
+)
+def test_anatomy_localization_task_config_cross_bindings_fail_closed(
+    config_key: str,
+    prompt_key: str,
+    profile_key: str,
+    task_type: str,
+    species: str,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
+
+    with pytest.raises(TaskStateConflictError, match="task_config_invalid"):
+        TaskService._validate_species_config_binding(
+            config=SimpleNamespace(
+                config_key=config_key,
+                prompt_key=prompt_key,
+                profile_key=profile_key,
+            ),
+            task_type=task_type,
+            species=species,
+        )
+
+
+def test_anatomy_localization_profile_has_two_stages_and_one_provider_stage() -> None:
+    from apps.backend.core.pipeline import (
+        XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+        build_default_registry,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.stages.registry import resolve_stage_handler
+
+    contract, _ = compile_profile_contract(
+        XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+        build_default_registry(),
+    )
+    assert [item["stage_key"] for item in contract["stages"]] == [
+        "study_preparation",
+        "anatomy_localization",
+    ]
+    assert [item["provider_required"] for item in contract["stages"]] == [
+        False,
+        True,
+    ]
+    assert contract["conditional_edges"] == []
+    assert contract["dynamic_stage_definitions"] == []
+    handler = resolve_stage_handler(
+        handler_key="anatomy_localization",
+        handler_version="v1",
+    )
+    assert handler.handler_key == "anatomy_localization"
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_stage_builds_one_pure_ai_request_and_consumes_it() -> (
+    None
+):
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import manifest_sha256
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.anatomy_localization import (
+        AnatomyLocalizationStageHandler,
+    )
+
+    ordered_images = [
+        {
+            "image_id": f"image_{index}",
+            "series_id": "series_1",
+            "logical_image_key": f"logical_{index}",
+            "image_version_no": 1,
+            "sequence_no": index,
+            "image_role": "original",
+            "image_kind": "instance",
+            "file_format": "jpg",
+            "projection": "VD" if index == 1 else "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+            "storage_profile": "primary",
+            "object_key": f"objects/{index}.jpg",
+            "object_version_id": None,
+            "sha256": f"{index}" * 64,
+            "size_bytes": index * 10,
+            "content_type": "image/jpeg",
+        }
+        for index in (1, 2)
+    ]
+    series_manifest = manifest_sha256(ordered_images).sha256
+    study_manifest = manifest_sha256(
+        [
+            {
+                "series_id": "series_1",
+                "series_key": "series-key-1",
+                "series_no": 1,
+                "actual_image_count": 2,
+                "manifest_sha256": series_manifest,
+            }
+        ]
+    ).sha256
+    context = StageExecutionContext(
+        task=SimpleNamespace(
+            id="task_1",
+            request_snapshot_json={
+                "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+                "species": "cat",
+                "resolved_manifest_sha256": study_manifest,
+                "series": [
+                    {
+                        "series_id": "series_1",
+                        "series_key": "series-key-1",
+                        "series_no": 1,
+                        "manifest_contract_version": "series-image-manifest.v2",
+                        "manifest_sha256": series_manifest,
+                        "actual_image_count": 2,
+                        "ordered_images": ordered_images,
+                    }
+                ],
+            },
+        ),
+        stage=SimpleNamespace(
+            stage_key="anatomy_localization",
+            input_json={"study_revision_id": "revision_1"},
+        ),
+    )
+    handler = AnatomyLocalizationStageHandler()
+    plan = await handler.execute(context)
+    assert plan.completed_result is None
+    assert plan.ai_request is not None
+    safe_context = plan.ai_request.prompt_command.safe_context
+    assert set(safe_context) == {
+        "task_id",
+        "study_revision_id",
+        "species",
+        "resolved_manifest_sha256",
+        "ordered_image_refs",
+    }
+    assert "clinical_context_allowlist" not in safe_context
+
+    result = _anatomy_localization_result()
+    consumed = handler.consume_ai_call(
+        context,
+        {
+            "call_id": "call_1",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": result,
+        },
+    )
+    assert consumed.status == "completed"
+    assert consumed.output == {
+        "source_call_id": "call_1",
+        "anatomy_localization_result": result,
+    }
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_prepare_structured_call_creates_one_call_and_attempt() -> (
+    None
+):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestService,
+        AIRequestStateConflict,
+    )
+
+    budget = {
+        "contract_version": "ai-budget-policy.v1",
+        "max_prompt_chars": 120_000,
+        "max_input_images": 5,
+        "max_total_calls": 1,
+        "max_total_attempts": 1,
+        "task_deadline_ms": 120_000,
+        "reserve_before_send": True,
+    }
+    budget_sha = sha256_json(budget)
+    lane = {
+        "lane_key": "primary",
+        "connection_id": "connection_1",
+        "connection_sha256": "1" * 64,
+        "provider_type": "openai_compatible",
+        "api_format": "chat-completions",
+        "requested_model": "provider-model",
+        "max_attempts": 1,
+        "timeout_ms": 120_000,
+        "generation_params": {
+            "temperature": 0.1,
+            "top_p": 1.0,
+            "max_output_tokens": 8_192,
+        },
+    }
+    config = SimpleNamespace(
+        id="config_1",
+        status="active",
+        config_contract_version="ai-config.v2",
+        config_key="xray_anatomy_localization_cat",
+        version="1.0.0",
+        modality_type="xray",
+        task_type="anatomy_localization",
+        profile_key="xray_anatomy_localization_v1",
+        config_sha256="2" * 64,
+        release_fingerprint="3" * 64,
+        prompt_content_sha256="4" * 64,
+        model_snapshot_sha256="5" * 64,
+        output_schema_sha256="6" * 64,
+        compiled_pipeline_sha256="7" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+        gateway_profile_json={
+            "contract_version": "ai-gateway-profile.v1",
+            "adapter_key": "openai-compatible",
+            "provider_enabled": True,
+            "qualification_status": "qualified",
+            "streaming_mode": "json",
+            "image_url_ttl_seconds": 300,
+            "allowed_actual_models": ["provider-model"],
+        },
+        model_snapshot_json={"lanes": [lane]},
+        budget_policy_json=budget,
+    )
+    snapshot = {
+        "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        "ai_config_id": config.id,
+        "config_key": config.config_key,
+        "config_version": config.version,
+        "config_contract_version": config.config_contract_version,
+        "config_sha256": config.config_sha256,
+        "release_fingerprint": config.release_fingerprint,
+        "prompt_content_sha256": config.prompt_content_sha256,
+        "model_snapshot_sha256": config.model_snapshot_sha256,
+        "output_schema_sha256": config.output_schema_sha256,
+        "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+        "stage_registry_contract_version": config.stage_registry_contract_version,
+        "series": [{"actual_image_count": 2}],
+    }
+    task = SimpleNamespace(
+        id="task_1",
+        ai_config_id=config.id,
+        modality_type="xray",
+        task_type="anatomy_localization",
+        request_snapshot_json=snapshot,
+        compiled_pipeline_sha256=config.compiled_pipeline_sha256,
+        stage_registry_contract_version=config.stage_registry_contract_version,
+        budget_snapshot_json=budget,
+        budget_reserved_json={
+            "contract_version": "task-budget-reservation.v1",
+            "budget_policy_sha256": budget_sha,
+            "reserved_call_units": 0,
+            "reserved_attempts": 0,
+        },
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+        attempt_no=1,
+        cancel_requested_at=None,
+        execution_status="running",
+        state_version=1,
+    )
+    stage = SimpleNamespace(
+        id="stage_2",
+        task_id=task.id,
+        retry_count=0,
+        input_json={"manifest_sha256": "8" * 64},
+        input_sha256="9" * 64,
+    )
+
+    class NestedTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class FakeDB:
+        def begin_nested(self):
+            return NestedTransaction()
+
+    class FakeCallDal:
+        def __init__(self) -> None:
+            self.db = FakeDB()
+            self.created: list[Any] = []
+            self.by_logical_key: dict[str, Any] = {}
+
+        async def get_by_logical_key_for_update(self, logical_call_key: str):
+            return self.by_logical_key.get(logical_call_key)
+
+        async def create_data(self, values: dict[str, Any], *, v_return_obj: bool):
+            assert v_return_obj is True
+            item = SimpleNamespace(
+                **values,
+                state_version=1,
+                winner_attempt_id=None,
+                error_code=None,
+                parsed_result_json=None,
+            )
+            self.created.append(item)
+            self.by_logical_key[item.logical_call_key] = item
+            return item
+
+        async def get_by_id_for_update(self, call_id: str):
+            return next((item for item in self.created if item.id == call_id), None)
+
+    class FakeTaskDal:
+        async def get_by_id(self, task_id: str):
+            return task if task_id == task.id else None
+
+        async def get_by_id_for_update(self, task_id: str):
+            return task if task_id == task.id else None
+
+        async def cas_update(self, **kwargs):
+            assert kwargs["task_id"] == task.id
+            task.budget_reserved_json = kwargs["values"]["budget_reserved_json"]
+            task.state_version += 1
+            return task
+
+    class FakeAttemptDal:
+        def __init__(self) -> None:
+            self.created: list[Any] = []
+
+        async def get_by_call_attempt_no(self, *, ai_call_id: str, attempt_no: int):
+            return next(
+                (
+                    item
+                    for item in self.created
+                    if item.ai_call_id == ai_call_id and item.attempt_no == attempt_no
+                ),
+                None,
+            )
+
+        async def create_idempotent(self, values: dict[str, Any]):
+            item = SimpleNamespace(**values, error_code=None)
+            self.created.append(item)
+            return item
+
+        async def get_count(self, *, ai_call_id: str):
+            return sum(item.ai_call_id == ai_call_id for item in self.created)
+
+    call_dal = FakeCallDal()
+    attempt_dal = FakeAttemptDal()
+    service = object.__new__(AIRequestService)
+    service.call_dal = call_dal
+    service.attempt_dal = attempt_dal
+    service.task_dal = FakeTaskDal()
+
+    async def get_stage(stage_id: str):
+        return stage if stage_id == stage.id else None
+
+    async def get_config(config_id: str):
+        return config if config_id == config.id else None
+
+    service.stage_dal = SimpleNamespace(get_by_id=get_stage)
+    service.config_dal = SimpleNamespace(get_by_id=get_config)
+    service.config_compiler = SimpleNamespace(
+        verify_frozen_integrity=lambda _config: None
+    )
+    service._runtime_gate_allows = lambda: True
+    service._render_v2_messages = lambda **_kwargs: (
+        SimpleNamespace(
+            rendered_text="localization prompt",
+            rendered_prompt_sha256="a" * 64,
+            context_sha256="b" * 64,
+        ),
+        SimpleNamespace(messages_json=[], messages_sha256="c" * 64),
+        {},
+    )
+    service._build_v2_request_facts = lambda **_kwargs: (
+        {},
+        "d" * 64,
+        "logical-localization-1",
+    )
+    prompt_command = SimpleNamespace(prompt_kind="anatomy_localization")
+
+    first = await service.prepare_structured_call(
+        task_id=task.id,
+        stage_checkpoint_id=stage.id,
+        prompt_command=prompt_command,
+        trace_id="trace_1",
+        request_id="request_1",
+    )
+    second = await service.prepare_structured_call(
+        task_id=task.id,
+        stage_checkpoint_id=stage.id,
+        prompt_command=prompt_command,
+        trace_id="trace_1",
+        request_id="request_1",
+    )
+
+    assert first["call_id"] == second["call_id"]
+    assert first["attempt_id"] == second["attempt_id"]
+    assert first["network_required"] is True
+    assert len(call_dal.created) == 1
+    assert len(attempt_dal.created) == 1
+    call = call_dal.created[0]
+    attempt = attempt_dal.created[0]
+    assert call.execution_mode == "single"
+    assert call.attempt_count == 1
+    assert call.budget_reservation_json["reserved_call_units"] == 1
+    assert call.budget_reservation_json["reserved_attempts"] == 1
+    assert lane["lane_key"] == "primary"
+    assert lane["max_attempts"] == 1
+    assert attempt.ai_call_id == call.id
+    assert attempt.attempt_no == 1
+
+    with pytest.raises(
+        AIRequestStateConflict,
+        match="ai_call_attempt_budget_exceeded",
+    ):
+        await service.prepare_retry_attempt(
+            call_id=call.id,
+            trace_id="trace_retry",
+            request_id="request_retry",
+        )
+    assert len(attempt_dal.created) == 1
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_code"),
+    (
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[-0.1, 0.2, 0.8, 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[0.1, 0.2, 1.1, 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[float("nan"), 0.2, 0.8, 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[0.1, 0.2, float("inf"), 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[0.1, 0.2, 0.1, 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[0.1, 0.9, 0.8, 0.2]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                bbox=[0.8, 0.2, 0.1, 0.9]
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(label="unknown"),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"][0].update(
+                system="respiratory"
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result["images"][0]["organs"].append(
+                deepcopy(result["images"][0]["organs"][0])
+            ),
+            "anatomy_localization_organ_invalid",
+        ),
+        (
+            lambda result: result.update(result_status="partial"),
+            "anatomy_localization_result_status_invalid",
+        ),
+    ),
+)
+def test_anatomy_localization_validator_rejects_bbox_label_and_status_drift(
+    mutation,
+    error_code: str,
+) -> None:
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        AnatomyLocalizationContractError,
+        validate_anatomy_localization_result_contract,
+    )
+
+    result = _anatomy_localization_result()
+    mutation(result)
+    with pytest.raises(AnatomyLocalizationContractError, match=error_code):
+        validate_anatomy_localization_result_contract(
+            result=result,
+            schema_contract_version="xray-anatomy-localization.v1",
+            image_receipt=_anatomy_localization_receipt(),
+            expected_species="cat",
+        )
+
+
+@pytest.mark.parametrize(
+    ("image_ordinal", "field_name", "invalid_value"),
+    (
+        (1, "image_id", "wrong-image"),
+        (1, "series_id", "wrong-series"),
+        (1, "sequence_no", 99),
+        (2, "projection", "DV"),
+        (1, "series_manifest_sha256", "f" * 64),
+    ),
+)
+def test_anatomy_localization_validator_reports_exact_lineage_mismatch(
+    image_ordinal: int,
+    field_name: str,
+    invalid_value: Any,
+) -> None:
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        AnatomyLocalizationContractError,
+        validate_anatomy_localization_result_contract,
+    )
+
+    result = _anatomy_localization_result()
+    result["images"][image_ordinal - 1][field_name] = invalid_value
+    expected_error = f"anatomy_localization_image_{image_ordinal}_{field_name}_mismatch"
+    with pytest.raises(
+        AnatomyLocalizationContractError,
+        match=expected_error,
+    ) as raised:
+        validate_anatomy_localization_result_contract(
+            result=result,
+            schema_contract_version="xray-anatomy-localization.v1",
+            image_receipt=_anatomy_localization_receipt(),
+            expected_species="cat",
+        )
+
+    assert str(raised.value) == expected_error
+    assert len(expected_error) <= 80
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda receipt: (
+            receipt["images"].pop(),
+            receipt.update(image_count=1),
+        ),
+        lambda receipt: (
+            receipt["images"].append(
+                {
+                    **deepcopy(receipt["images"][-1]),
+                    "sequence_no": 3,
+                    "series_sequence_no": 3,
+                    "image_id": "image_3",
+                    "logical_image_key": "logical_3",
+                    "sha256": "3" * 64,
+                }
+            ),
+            receipt.update(image_count=3),
+        ),
+        lambda receipt: receipt["images"].__setitem__(
+            1, deepcopy(receipt["images"][0])
+        ),
+        lambda receipt: receipt["images"].reverse(),
+        lambda receipt: receipt["images"][0].update(projection="DV"),
+    ),
+)
+def test_anatomy_localization_receipt_must_exactly_match_frozen_snapshot(
+    mutation,
+) -> None:
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        AnatomyLocalizationContractError,
+        validate_anatomy_localization_receipt_against_snapshot,
+    )
+
+    _service, facts = _anatomy_localization_query_facts()
+    receipt = deepcopy(facts["call"].image_receipt_json)
+    mutation(receipt)
+    with pytest.raises(
+        AnatomyLocalizationContractError,
+        match="anatomy_localization_snapshot_receipt_mismatch",
+    ):
+        validate_anatomy_localization_receipt_against_snapshot(
+            snapshot=facts["task"].request_snapshot_json,
+            image_receipt=receipt,
+        )
+
+
+@pytest.mark.parametrize(
+    ("schema_contract_version", "expected_species", "result_species", "error_code"),
+    (
+        (
+            None,
+            "cat",
+            "cat",
+            "provider_result_contract_version_unsupported",
+        ),
+        (
+            "unknown-contract.v1",
+            "cat",
+            "cat",
+            "provider_result_contract_version_unsupported",
+        ),
+        (
+            "xray-anatomy-localization.v1",
+            "hamster",
+            "cat",
+            "anatomy_localization_expected_species_invalid",
+        ),
+        (
+            "xray-anatomy-localization.v1",
+            "cat",
+            "dog",
+            "anatomy_localization_result_identity_invalid",
+        ),
+    ),
+)
+def test_anatomy_localization_validator_rejects_unfrozen_identity(
+    schema_contract_version: str | None,
+    expected_species: str,
+    result_species: str,
+    error_code: str,
+) -> None:
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        AnatomyLocalizationContractError,
+        validate_anatomy_localization_result_contract,
+    )
+
+    with pytest.raises(AnatomyLocalizationContractError, match=error_code):
+        validate_anatomy_localization_result_contract(
+            result=_anatomy_localization_result(species=result_species),
+            schema_contract_version=schema_contract_version,
+            image_receipt=_anatomy_localization_receipt(),
+            expected_species=expected_species,
+        )
+
+
+def test_anatomy_localization_validator_accepts_partial_and_unavailable() -> None:
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        validate_anatomy_localization_result_contract,
+    )
+
+    partial = _anatomy_localization_result()
+    partial["images"][1].update(
+        status="not_localized",
+        reason_code="insufficient_localization_evidence",
+        organs=[],
+    )
+    partial["result_status"] = "partial"
+    assert (
+        validate_anatomy_localization_result_contract(
+            result=partial,
+            schema_contract_version="xray-anatomy-localization.v1",
+            image_receipt=_anatomy_localization_receipt(),
+            expected_species="cat",
+        )
+        == partial
+    )
+
+    unavailable = deepcopy(partial)
+    unavailable["images"][0].update(
+        status="not_localized",
+        reason_code="no_supported_anatomy_visible",
+        organs=[],
+    )
+    unavailable["result_status"] = "unavailable"
+    assert (
+        validate_anatomy_localization_result_contract(
+            result=unavailable,
+            schema_contract_version="xray-anatomy-localization.v1",
+            image_receipt=_anatomy_localization_receipt(),
+            expected_species="cat",
+        )
+        == unavailable
+    )
+
+
+@pytest.mark.anyio
+async def test_network_localization_lineage_rejection_preserves_provider_summary() -> (
+    None
+):
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+
+    receipt = _anatomy_localization_receipt()
+    rejected_result = _anatomy_localization_result()
+    rejected_result["images"][1]["projection"] = "DV"
+    provider_body = {
+        "choices": [{"message": {"content": json.dumps(rejected_result)}}],
+        "model": "provider-model",
+        "usage": {"total_tokens": 23},
+    }
+
+    class Signer:
+        async def sign(self, **_kwargs):
+            return [
+                GatewayImageInput(
+                    sequence_no=item["sequence_no"],
+                    mime_type=item["mime_type"],
+                    signed_url=(
+                        f"https://bucket.example/{item['image_id']}.jpg?signature=x"
+                    ),
+                )
+                for item in receipt["images"]
+            ]
+
+    class Gateway:
+        async def chat_completions(self, *_args, **_kwargs):
+            return {
+                "request_id": "provider-request-1",
+                "body": provider_body,
+            }
+
+    with pytest.raises(GatewayDefiniteResponseError) as raised:
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(
+                response_schema=AIConfigCompiler._output_schema(
+                    profile_key="xray_anatomy_localization_v1"
+                ),
+                image_count_requested=2,
+                image_inputs=tuple(receipt["images"]),
+                snapshot_contract_version=TASK_REQUEST_SNAPSHOT_V3,
+                xray_image_contract_required=True,
+                expected_species="cat",
+            ),
+            gateway_client=Gateway(),
+            image_signer=Signer(),
+        )
+
+    assert str(raised.value) == "anatomy_localization_image_2_projection_mismatch"
+    assert raised.value.provider_request_id == "provider-request-1"
+    assert raised.value.actual_model == "provider-model"
+    assert raised.value.usage_json == {"total_tokens": 23}
+    assert raised.value.response_sha256 == response_sha256(provider_body)
+
+
+@pytest.mark.anyio
+async def test_network_dispatches_localization_by_frozen_schema_contract() -> None:
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+
+    receipt = _anatomy_localization_receipt()
+    result = _anatomy_localization_result()
+
+    class Signer:
+        async def sign(self, **_kwargs):
+            return [
+                GatewayImageInput(
+                    sequence_no=item["sequence_no"],
+                    mime_type=item["mime_type"],
+                    signed_url=(
+                        f"https://bucket.example/{item['image_id']}.jpg?signature=x"
+                    ),
+                )
+                for item in receipt["images"]
+            ]
+
+    class Gateway:
+        async def chat_completions(self, *_args, **_kwargs):
+            return {
+                "request_id": "provider-request-1",
+                "body": {
+                    "choices": [{"message": {"content": json.dumps(result)}}],
+                    "model": "provider-model",
+                },
+            }
+
+    response = await AIRequestService.execute_gateway_attempt_network(
+        network_plan=_network_plan(
+            response_schema=AIConfigCompiler._output_schema(
+                profile_key="xray_anatomy_localization_v1"
+            ),
+            image_count_requested=2,
+            image_inputs=tuple(receipt["images"]),
+            snapshot_contract_version=TASK_REQUEST_SNAPSHOT_V3,
+            xray_image_contract_required=True,
+            expected_species="cat",
+        ),
+        gateway_client=Gateway(),
+        image_signer=Signer(),
+    )
+    assert response["execution"].parsed_result_json == result
+
+    class EmptySigner:
+        async def sign(self, **_kwargs):
+            return []
+
+    class GenericGateway:
+        async def chat_completions(self, *_args, **_kwargs):
+            return {
+                "request_id": "provider-request-2",
+                "body": {
+                    "choices": [{"message": {"content": json.dumps({"result": "ok"})}}],
+                    "model": "provider-model",
+                },
+            }
+
+    with pytest.raises(
+        GatewayContractError,
+        match="provider_result_contract_version_unsupported",
+    ):
+        await AIRequestService.execute_gateway_attempt_network(
+            network_plan=_network_plan(
+                response_schema=SCHEMA,
+                image_count_requested=0,
+            ),
+            gateway_client=GenericGateway(),
+            image_signer=EmptySigner(),
+        )
+
+
+def _study_screening_receipt() -> dict[str, Any]:
+    return {
+        "contract_version": AI_IMAGE_RECEIPT_V2,
+        "image_count": 2,
+        "images": [
+            {
+                "sequence_no": 1,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "series_sequence_no": 1,
+                "image_id": "image_1",
+                "logical_image_key": "logical_1",
+                "image_version_no": 1,
+                "projection": "VD",
+                "projection_provenance": {
+                    "source": "caller_declared",
+                    "schema_version": "xray-projection.v1",
+                },
+                "sha256": "a" * 64,
+                "size_bytes": 10,
+                "mime_type": "image/jpeg",
+            },
+            {
+                "sequence_no": 2,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "series_sequence_no": 2,
+                "image_id": "image_2",
+                "logical_image_key": "logical_2",
+                "image_version_no": 1,
+                "projection": "Lateral",
+                "projection_provenance": {
+                    "source": "caller_declared",
+                    "schema_version": "xray-projection.v1",
+                },
+                "sha256": "b" * 64,
+                "size_bytes": 20,
+                "mime_type": "image/jpeg",
+            },
+        ],
+    }
+
+
+def _study_screening_result() -> dict[str, Any]:
+    return {
+        "contract_version": "xray-study-screening.v1",
+        "species": "cat",
+        "study_quality_status": "diagnostic",
+        "coverage_summary": {
+            "view_adequacy": "adequate",
+            "summary": "Two frozen source images were screened.",
+            "assessed_families": ["thoracic"],
+        },
+        "technical_limitations": [],
+        "emergency_signals": [],
+        "screening_findings": [],
+        "families_requiring_analysis": ["thoracic"],
+        "families_not_assessed": [],
+        "source_refs": [
+            {
+                "source_ref_id": "source_1",
+                "image_id": "image_1",
+                "sequence_no": 1,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "projection": "VD",
+            },
+            {
+                "source_ref_id": "source_2",
+                "image_id": "image_2",
+                "sequence_no": 2,
+                "series_id": "series_1",
+                "series_manifest_sha256": "1" * 64,
+                "projection": "Lateral",
+            },
+        ],
+    }
+
+
+def test_task_create_quality_review_reference_is_screening_bound() -> None:
+    from apps.backend.schemas.task import TaskCreate
+
+    payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_1",
+        task_type="diagnose",
+        species="cat",
+        quality_review_task_id=" quality_task_1 ",
+        trace_id="trace_1",
+    )
+    assert payload.quality_review_task_id == "quality_task_1"
+
+    screening_payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_2",
+        task_type="xray_study_screening",
+        species="cat",
+        quality_review_task_id=" quality_task_1 ",
+        trace_id="trace_2",
+    )
+    assert screening_payload.quality_review_task_id == "quality_task_1"
+
+    with pytest.raises(
+        ValidationError,
+        match="task_species_required_for_xray_study_screening",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_3",
+            task_type="xray_study_screening",
+            quality_review_task_id="quality_task_1",
+            trace_id="trace_3",
+        )
+
+    with pytest.raises(
+        ValidationError,
+        match="task_quality_review_reference_diagnose_only",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_4",
+            task_type="xray_quality_control",
+            species="cat",
+            quality_review_task_id="quality_task_1",
+            trace_id="trace_4",
+        )
+
+
+def test_study_screening_v2_task_type_uses_isolated_config_slot() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.xray_contract import (
+        XRAY_STUDY_SCREENING_TASK_TYPE,
+        requires_xray_runtime_image_contract,
+    )
+    from apps.backend.core.pipeline import XRAY_STUDY_SCREENING_PROFILE_V2
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    assert TaskService.TASK_PROFILES[XRAY_STUDY_SCREENING_TASK_TYPE] == frozenset(
+        {XRAY_STUDY_SCREENING_PROFILE_V2}
+    )
+    assert (
+        TaskService._config_key_for_task(
+            task_type=XRAY_STUDY_SCREENING_TASK_TYPE,
+            species="cat",
+        )
+        == "xray_study_screening_cat"
+    )
+    TaskService._validate_species_config_binding(
+        config=SimpleNamespace(
+            config_key="xray_study_screening_cat",
+            prompt_key="xray_cat_study_screening",
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+        ),
+        task_type=XRAY_STUDY_SCREENING_TASK_TYPE,
+        species="cat",
+    )
+    assert requires_xray_runtime_image_contract(
+        modality_type="xray",
+        task_type=XRAY_STUDY_SCREENING_TASK_TYPE,
+        profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+    )
+
+
+def test_diagnose_full_chain_uses_xray_image_contract() -> None:
+    from apps.backend.core.imaging.xray_contract import (
+        requires_exact_xray_five_image_config_contract,
+        requires_xray_runtime_image_contract,
+    )
+    from apps.backend.core.pipeline import XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+
+    assert requires_xray_runtime_image_contract(
+        modality_type="xray",
+        task_type="diagnose",
+        profile_key=XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    )
+    assert requires_exact_xray_five_image_config_contract(
+        modality_type="xray",
+        task_type="diagnose",
+        profile_key=XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    )
+
+
+@pytest.mark.anyio
+async def test_study_screening_stage_builds_quality_bound_request_and_consumes_it() -> (
+    None
+):
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import manifest_sha256
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.study_screening import (
+        StudyScreeningStageHandler,
+    )
+
+    ordered_images = [
+        {
+            "image_id": f"image_{index}",
+            "series_id": "series_1",
+            "logical_image_key": f"logical_{index}",
+            "image_version_no": 1,
+            "sequence_no": index,
+            "image_role": "original",
+            "image_kind": "instance",
+            "file_format": "jpg",
+            "projection": "VD" if index == 1 else "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+            "storage_profile": "primary",
+            "object_key": f"objects/{index}.jpg",
+            "object_version_id": None,
+            "sha256": ("a" if index == 1 else "b") * 64,
+            "size_bytes": index * 10,
+            "content_type": "image/jpeg",
+        }
+        for index in (1, 2)
+    ]
+    series_manifest = manifest_sha256(ordered_images).sha256
+    study_manifest = manifest_sha256(
+        [
+            {
+                "series_id": "series_1",
+                "series_key": "series-key-1",
+                "series_no": 1,
+                "actual_image_count": 2,
+                "manifest_sha256": series_manifest,
+            }
+        ]
+    ).sha256
+    quality_result = {"contract_version": "xray-image-quality.v1", "images": []}
+    context = StageExecutionContext(
+        task=SimpleNamespace(
+            id="task_1",
+            request_snapshot_json={
+                "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+                "species": "cat",
+                "resolved_manifest_sha256": study_manifest,
+                "quality_review": {"result": quality_result},
+                "series": [
+                    {
+                        "series_id": "series_1",
+                        "series_key": "series-key-1",
+                        "series_no": 1,
+                        "manifest_contract_version": "series-image-manifest.v2",
+                        "manifest_sha256": series_manifest,
+                        "actual_image_count": 2,
+                        "ordered_images": ordered_images,
+                    }
+                ],
+            },
+        ),
+        stage=SimpleNamespace(
+            stage_key="study_screening",
+            input_json={"study_revision_id": "revision_1"},
+        ),
+    )
+    handler = StudyScreeningStageHandler()
+    plan = await handler.execute(context)
+    assert plan.completed_result is None
+    assert plan.ai_request is not None
+    command = plan.ai_request.prompt_command
+    assert command.prompt_kind == "study_screening"
+    assert command.quality_results == quality_result
+    assert command.safe_context["task_id"] == "task_1"
+    assert command.safe_context["study_revision_id"] == "revision_1"
+    assert command.safe_context["species"] == "cat"
+    assert command.safe_context["resolved_manifest_sha256"] == study_manifest
+    assert len(command.safe_context["ordered_image_refs"]) == 2
+
+    variables = AIRequestService._v2_safe_variables(
+        config=SimpleNamespace(
+            prompt_variables_json={
+                "contract_version": "prompt-variables.v1",
+                "required": [
+                    "SAFE_STUDY_CONTEXT_JSON",
+                    "QUALITY_RESULTS_JSON",
+                    "OUTPUT_SCHEMA_JSON",
+                ],
+                "optional": [],
+            },
+            output_schema_json={"type": "object"},
+        ),
+        prompt_command=command,
+    )
+    assert variables == {
+        "SAFE_STUDY_CONTEXT_JSON": command.safe_context,
+        "QUALITY_RESULTS_JSON": quality_result,
+        "OUTPUT_SCHEMA_JSON": {"type": "object"},
+    }
+
+    result = _study_screening_result()
+    consumed = handler.consume_ai_call(
+        context,
+        {
+            "call_id": "call_1",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": result,
+        },
+    )
+    assert consumed.status == "completed"
+    assert consumed.output == {
+        "source_call_id": "call_1",
+        "study_screening_result": result,
+    }
+
+
+@pytest.mark.anyio
+async def test_study_screening_stage_config_binding_is_resolved_and_validated() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.services.runtime.service.ai_request_service import (
+        AIRequestStateConflict,
+    )
+
+    budget = {
+        "contract_version": "ai-budget-policy.v1",
+        "max_prompt_chars": 120000,
+        "max_input_images": 5,
+        "max_total_calls": 2,
+        "max_total_attempts": 2,
+        "task_deadline_ms": 120000,
+        "reserve_before_send": True,
+    }
+    stage_config = SimpleNamespace(
+        id="stage_config_1",
+        config_key="xray_study_screening_cat",
+        version="1.0.0",
+        profile_key="xray_study_screening_v1",
+        prompt_key="xray_cat_study_screening",
+        activation_scope="global",
+        scope_key="global",
+        config_sha256="1" * 64,
+        release_fingerprint="2" * 64,
+        prompt_content_sha256="3" * 64,
+        model_snapshot_sha256="4" * 64,
+        output_schema_sha256="5" * 64,
+        compiled_pipeline_sha256="6" * 64,
+        stage_registry_contract_version="stage-registry.v1",
+        budget_policy_json=budget,
+        task_type="diagnose",
+    )
+    binding = {
+        "ai_config_id": stage_config.id,
+        "config_key": stage_config.config_key,
+        "config_version": stage_config.version,
+        "profile_key": stage_config.profile_key,
+        "prompt_key": stage_config.prompt_key,
+        "activation_scope": stage_config.activation_scope,
+        "scope_key": stage_config.scope_key,
+        "config_sha256": stage_config.config_sha256,
+        "release_fingerprint": stage_config.release_fingerprint,
+        "prompt_content_sha256": stage_config.prompt_content_sha256,
+        "model_snapshot_sha256": stage_config.model_snapshot_sha256,
+        "output_schema_sha256": stage_config.output_schema_sha256,
+        "compiled_pipeline_sha256": stage_config.compiled_pipeline_sha256,
+        "stage_registry_contract_version": (
+            stage_config.stage_registry_contract_version
+        ),
+        "budget_policy_sha256": sha256_json(budget),
+    }
+    root_pipeline_sha = "7" * 64
+    snapshot = {
+        "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        "profile_key": "xray_diagnose_study_screening_v1",
+        "species": "cat",
+        "compiled_pipeline_sha256": root_pipeline_sha,
+        "stage_registry_contract_version": "stage-registry.v1",
+        "stage_ai_config_bindings": {"study_screening": binding},
+    }
+    task = SimpleNamespace(
+        ai_config_id="root_config_1",
+        task_type="diagnose",
+        request_snapshot_json=snapshot,
+        budget_snapshot_json=budget,
+        budget_reserved_json={"budget_policy_sha256": sha256_json(budget)},
+        compiled_pipeline_sha256=root_pipeline_sha,
+        stage_registry_contract_version="stage-registry.v1",
+    )
+    stage = SimpleNamespace(stage_key="study_screening")
+
+    class FakeConfigDal:
+        async def get_by_id(self, config_id: str):
+            return stage_config if config_id == stage_config.id else None
+
+    service = object.__new__(AIRequestService)
+    service.config_dal = FakeConfigDal()
+    assert await service._resolve_task_stage_config(task=task, stage=stage) is (
+        stage_config
+    )
+    service._validate_v2_task_config_snapshot(
+        task=task,
+        stage=stage,
+        config=stage_config,
+    )
+
+    snapshot["stage_ai_config_bindings"]["study_screening"] = {
+        **binding,
+        "prompt_content_sha256": "f" * 64,
+    }
+    with pytest.raises(AIRequestStateConflict, match="task_config_snapshot_mismatch"):
+        service._validate_v2_task_config_snapshot(
+            task=task,
+            stage=stage,
+            config=stage_config,
+        )
+
+
+@pytest.mark.anyio
+async def test_ai_request_config_resolution_preserves_historical_root_binding() -> None:
+    from types import SimpleNamespace
+
+    root_config = SimpleNamespace(id="root_config_1")
+    task = SimpleNamespace(
+        ai_config_id=root_config.id,
+        request_snapshot_json={},
+    )
+    stage = SimpleNamespace(stage_key="joint_primary_reader")
+
+    class FakeConfigDal:
+        async def get_by_id(self, config_id: str):
+            return root_config if config_id == root_config.id else None
+
+    service = object.__new__(AIRequestService)
+    service.config_dal = FakeConfigDal()
+    assert await service._resolve_task_stage_config(task=task, stage=stage) is (
+        root_config
+    )
+
+
+def test_study_screening_validator_enforces_frozen_source_lineage() -> None:
+    from apps.backend.core.ai.study_screening_contract import (
+        XRayStudyScreeningContractError,
+        validate_xray_study_screening_result_contract,
+    )
+
+    result = _study_screening_result()
+    assert (
+        validate_xray_study_screening_result_contract(
+            result=result,
+            schema_contract_version="xray-study-screening.v1",
+            image_receipt=_study_screening_receipt(),
+            expected_species="cat",
+        )
+        == result
+    )
+
+    drifted = deepcopy(result)
+    drifted["source_refs"][0]["projection"] = "DV"
+    with pytest.raises(
+        XRayStudyScreeningContractError,
+        match="study_screening_source_projection_mismatch",
+    ):
+        validate_xray_study_screening_result_contract(
+            result=drifted,
+            schema_contract_version="xray-study-screening.v1",
+            image_receipt=_study_screening_receipt(),
+            expected_species="cat",
+        )
+
+
+def _study_screening_provider_v2_result() -> dict[str, Any]:
+    result = _study_screening_result()
+    result["contract_version"] = "xray-study-screening-provider.v2"
+    result["source_refs"] = [
+        {
+            "source_ref_id": item["source_ref_id"],
+            "image_id": item["image_id"],
+        }
+        for item in result["source_refs"]
+    ]
+    return result
+
+
+def test_study_screening_v2_canonicalizes_only_receipt_owned_lineage() -> None:
+    from apps.backend.core.ai.study_screening_contract import (
+        XRAY_STUDY_SCREENING_CANONICAL_CONTRACT_V2,
+        XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+        canonicalize_xray_study_screening_result,
+        validate_xray_study_screening_provider_result_contract,
+    )
+
+    provider_result = _study_screening_provider_v2_result()
+    provider_before = deepcopy(provider_result)
+    receipt = _study_screening_receipt()
+    receipt["images"][0]["projection"] = "UNKNOWN"
+
+    validated = validate_xray_study_screening_provider_result_contract(
+        result=provider_result,
+        schema_contract_version=XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+        image_receipt=receipt,
+        expected_species="cat",
+    )
+    canonical = canonicalize_xray_study_screening_result(
+        provider_result=provider_result,
+        schema_contract_version=XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+        image_receipt=receipt,
+        expected_species="cat",
+    )
+
+    assert validated == provider_before
+    assert provider_result == provider_before
+    assert canonical["contract_version"] == (XRAY_STUDY_SCREENING_CANONICAL_CONTRACT_V2)
+    assert canonical["source_refs"] == [
+        {
+            "source_ref_id": "source_1",
+            "image_id": "image_1",
+            "sequence_no": 1,
+            "series_id": "series_1",
+            "series_manifest_sha256": "1" * 64,
+            "projection": "UNKNOWN",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+        },
+        {
+            "source_ref_id": "source_2",
+            "image_id": "image_2",
+            "sequence_no": 2,
+            "series_id": "series_1",
+            "series_manifest_sha256": "1" * 64,
+            "projection": "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+        },
+    ]
+    assert canonical["coverage_summary"] == provider_before["coverage_summary"]
+    assert canonical["screening_findings"] == provider_before["screening_findings"]
+
+
+@pytest.mark.parametrize(
+    ("case", "error_code"),
+    [
+        ("duplicate_image", "study_screening_source_ref_invalid"),
+        ("unknown_image", "study_screening_source_image_not_sent"),
+        ("incomplete_coverage", "study_screening_source_coverage_mismatch"),
+        ("unknown_cross_reference", "study_screening_cross_reference_invalid"),
+        ("provider_projection_override", "study_screening_source_ref_invalid"),
+    ],
+)
+def test_study_screening_v2_provider_anchor_fail_closed(
+    case: str,
+    error_code: str,
+) -> None:
+    from apps.backend.core.ai.study_screening_contract import (
+        XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+        XRayStudyScreeningContractError,
+        validate_xray_study_screening_provider_result_contract,
+    )
+
+    result = _study_screening_provider_v2_result()
+    if case == "duplicate_image":
+        result["source_refs"][1]["image_id"] = "image_1"
+    elif case == "unknown_image":
+        result["source_refs"][1]["image_id"] = "image_missing"
+    elif case == "incomplete_coverage":
+        result["source_refs"] = result["source_refs"][:1]
+    elif case == "unknown_cross_reference":
+        result["screening_findings"] = [
+            {
+                "finding_id": "finding_1",
+                "family_key": "thoracic",
+                "label": "screening signal",
+                "description": "requires analysis",
+                "screening_disposition": "requires_analysis",
+                "source_ref_ids": ["source_missing"],
+            }
+        ]
+    elif case == "provider_projection_override":
+        result["source_refs"][0]["projection"] = "DV"
+    else:  # pragma: no cover - protects the parametrized fixture itself.
+        raise AssertionError(case)
+
+    with pytest.raises(XRayStudyScreeningContractError, match=error_code):
+        validate_xray_study_screening_provider_result_contract(
+            result=result,
+            schema_contract_version=XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+            image_receipt=_study_screening_receipt(),
+            expected_species="cat",
+        )
+
+
+def test_study_screening_v2_stage_outputs_canonical_result_and_requires_receipt() -> (
+    None
+):
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.registry import resolve_stage_handler
+
+    provider_result = _study_screening_provider_v2_result()
+    context = StageExecutionContext(
+        task=SimpleNamespace(request_snapshot_json={"species": "cat"}),
+        stage=SimpleNamespace(stage_key="study_screening"),
+    )
+    handler = resolve_stage_handler(
+        handler_key="study_screening",
+        handler_version="v2",
+    )
+
+    completed = handler.consume_ai_call(
+        context,
+        {
+            "call_id": "call_v2",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": provider_result,
+            "image_receipt_json": _study_screening_receipt(),
+        },
+    )
+    assert completed.status == "completed"
+    assert completed.output["source_call_id"] == "call_v2"
+    assert completed.output["study_screening_result"]["contract_version"] == (
+        "xray-study-screening.v2"
+    )
+    assert (
+        completed.output["study_screening_result"]["source_refs"][0]["projection"]
+        == "VD"
+    )
+    assert provider_result == _study_screening_provider_v2_result()
+
+    failed = handler.consume_ai_call(
+        context,
+        {
+            "call_id": "call_without_receipt",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": provider_result,
+        },
+    )
+    assert failed.status == "failed"
+    assert failed.error_code == "study_screening_source_receipt_invalid"
+    assert "study_screening_result" not in failed.output
+
+
+def test_internal_ai_call_responses_include_frozen_image_receipt() -> None:
+    from types import SimpleNamespace
+
+    receipt = _study_screening_receipt()
+    call = SimpleNamespace(
+        id="call_1",
+        status="succeeded",
+        result_disposition="accepted",
+        winner_attempt_id="attempt_1",
+        error_code=None,
+        parsed_result_json=_study_screening_provider_v2_result(),
+        image_receipt_json=receipt,
+        rendered_prompt_sha256="1" * 64,
+        schema_sha256="2" * 64,
+    )
+    attempt = SimpleNamespace(id="attempt_1", status="succeeded", error_code=None)
+
+    structured = AIRequestService._structured_call_response(
+        call=call,
+        attempt=attempt,
+        winner=True,
+    )
+    replayed = AIRequestService._call_response(call)
+
+    assert structured["image_receipt_json"] == receipt
+    assert replayed["image_receipt_json"] == receipt
+    assert structured["parsed_result_json"] == call.parsed_result_json
+    assert replayed["parsed_result_json"] == call.parsed_result_json
+
+
+def _system_analysis_result() -> dict[str, Any]:
+    families = (
+        "thoracic",
+        "abdominal",
+        "axial_orthopedic",
+        "appendicular_orthopedic",
+        "head_neck",
+    )
+    systems = []
+    for family in families:
+        systems.append(
+            {
+                "family_key": family,
+                "assessment_status": "assessed",
+                "visible_structures": [f"{family} visible structure"],
+                "findings": (
+                    [
+                        {
+                            "finding_id": "finding_thoracic_1",
+                            "label": "localized opacity",
+                            "description": "A localized opacity requires review.",
+                            "certainty": "low",
+                            "alternative_explanations": ["positioning effect"],
+                            "source_ref_ids": ["source_1"],
+                        }
+                    ]
+                    if family == "thoracic"
+                    else []
+                ),
+                "normal_counterevidence": [
+                    {
+                        "evidence_id": f"evidence_{family}_1",
+                        "description": f"No additional {family} signal identified.",
+                        "source_ref_ids": ["source_1", "source_2"],
+                    }
+                ],
+                "limitations": [],
+                "source_ref_ids": ["source_1", "source_2"],
+            }
+        )
+    return {
+        "contract_version": "xray-system-analysis.v1",
+        "species": "cat",
+        "systems": systems,
+        "cross_system_patterns": [],
+        "unresolved_conflicts": [],
+        "source_refs": [
+            {"source_ref_id": "source_1", "image_id": "image_1"},
+            {"source_ref_id": "source_2", "image_id": "image_2"},
+        ],
+    }
+
+
+def test_system_analysis_task_type_uses_quality_bound_isolated_config() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.xray_contract import (
+        XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        requires_exact_xray_five_image_config_contract,
+        requires_xray_runtime_image_contract,
+    )
+    from apps.backend.core.pipeline import XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+    from apps.backend.schemas.task import TaskCreate
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    payload = TaskCreate(
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_system_analysis_1",
+        task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        species="cat",
+        quality_review_task_id=" quality_task_1 ",
+        trace_id="trace_system_analysis_1",
+    )
+    assert payload.quality_review_task_id == "quality_task_1"
+    with pytest.raises(
+        ValidationError,
+        match="task_species_required_for_xray_system_analysis",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_system_analysis_2",
+            task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+            quality_review_task_id="quality_task_1",
+            trace_id="trace_system_analysis_2",
+        )
+
+    assert TaskService.TASK_PROFILES[XRAY_SYSTEM_ANALYSIS_TASK_TYPE] == frozenset(
+        {XRAY_SYSTEM_ANALYSIS_PROFILE_V1}
+    )
+    assert (
+        TaskService._config_key_for_task(
+            task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+            species="cat",
+        )
+        == "xray_system_analysis_cat"
+    )
+    TaskService._validate_species_config_binding(
+        config=SimpleNamespace(
+            config_key="xray_system_analysis_cat",
+            prompt_key="xray_cat_system_analysis",
+            profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+        ),
+        task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        species="cat",
+    )
+    assert requires_xray_runtime_image_contract(
+        modality_type="xray",
+        task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+    )
+    assert requires_exact_xray_five_image_config_contract(
+        modality_type="xray",
+        task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+    )
+
+
+@pytest.mark.anyio
+async def test_system_analysis_stage_uses_frozen_quality_and_consumes_accepted_result() -> (
+    None
+):
+    from types import SimpleNamespace
+
+    from apps.backend.core.imaging.manifest import manifest_sha256
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+    from apps.backend.services.runtime.stages.xray.system_analysis import (
+        SystemAnalysisStageHandler,
+    )
+
+    ordered_images = [
+        {
+            "image_id": f"image_{index}",
+            "series_id": "series_1",
+            "logical_image_key": f"logical_{index}",
+            "image_version_no": 1,
+            "sequence_no": index,
+            "image_role": "original",
+            "image_kind": "instance",
+            "file_format": "jpg",
+            "projection": "VD" if index == 1 else "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+            "storage_profile": "primary",
+            "object_key": f"objects/{index}.jpg",
+            "object_version_id": None,
+            "sha256": ("a" if index == 1 else "b") * 64,
+            "size_bytes": index * 10,
+            "content_type": "image/jpeg",
+        }
+        for index in (1, 2)
+    ]
+    series_manifest = manifest_sha256(ordered_images).sha256
+    study_manifest = manifest_sha256(
+        [
+            {
+                "series_id": "series_1",
+                "series_key": "series-key-1",
+                "series_no": 1,
+                "actual_image_count": 2,
+                "manifest_sha256": series_manifest,
+            }
+        ]
+    ).sha256
+    quality_result = {
+        "contract_version": "xray-image-quality.v1",
+        "species": "cat",
+        "images": [],
+    }
+    context = StageExecutionContext(
+        task=SimpleNamespace(
+            id="task_system_analysis_1",
+            request_snapshot_json={
+                "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+                "species": "cat",
+                "resolved_manifest_sha256": study_manifest,
+                "quality_review": {"result": quality_result},
+                "series": [
+                    {
+                        "series_id": "series_1",
+                        "series_key": "series-key-1",
+                        "series_no": 1,
+                        "manifest_contract_version": "series-image-manifest.v2",
+                        "manifest_sha256": series_manifest,
+                        "actual_image_count": 2,
+                        "ordered_images": ordered_images,
+                    }
+                ],
+            },
+        ),
+        stage=SimpleNamespace(
+            stage_key="system_analysis",
+            input_json={"study_revision_id": "revision_1"},
+        ),
+    )
+    handler = SystemAnalysisStageHandler()
+    plan = await handler.execute(context)
+    assert plan.completed_result is None
+    assert plan.ai_request is not None
+    command = plan.ai_request.prompt_command
+    assert command.prompt_kind == "system_analysis"
+    assert command.quality_results == quality_result
+    assert command.safe_context["task_id"] == "task_system_analysis_1"
+    assert command.safe_context["species"] == "cat"
+    assert command.safe_context["resolved_manifest_sha256"] == study_manifest
+    assert len(command.safe_context["ordered_image_refs"]) == 2
+
+    variables = AIRequestService._v2_safe_variables(
+        config=SimpleNamespace(
+            prompt_variables_json={
+                "contract_version": "prompt-variables.v1",
+                "required": [
+                    "SAFE_STUDY_CONTEXT_JSON",
+                    "QUALITY_RESULTS_JSON",
+                    "OUTPUT_SCHEMA_JSON",
+                ],
+                "optional": [],
+            },
+            output_schema_json={"type": "object"},
+        ),
+        prompt_command=command,
+    )
+    assert variables == {
+        "SAFE_STUDY_CONTEXT_JSON": command.safe_context,
+        "QUALITY_RESULTS_JSON": quality_result,
+        "OUTPUT_SCHEMA_JSON": {"type": "object"},
+    }
+
+    result = _system_analysis_result()
+    consumed = handler.consume_ai_call(
+        context,
+        {
+            "call_id": "call_system_analysis_1",
+            "status": "succeeded",
+            "result_disposition": "accepted",
+            "parsed_result_json": result,
+        },
+    )
+    assert consumed.status == "completed"
+    assert consumed.output == {
+        "source_call_id": "call_system_analysis_1",
+        "system_analysis_result": result,
+    }
+
+
+@pytest.mark.parametrize(
+    ("case", "error_code"),
+    [
+        ("duplicate_source_id", "system_analysis_source_ref_invalid"),
+        ("duplicate_image", "system_analysis_source_ref_invalid"),
+        ("unknown_image", "system_analysis_source_image_not_sent"),
+        ("incomplete_coverage", "system_analysis_source_coverage_mismatch"),
+        ("unknown_nested_source", "system_analysis_cross_reference_invalid"),
+        ("missing_family", "system_analysis_family_coverage_invalid"),
+        ("duplicate_family", "system_analysis_family_coverage_invalid"),
+        ("invalid_not_assessed", "system_analysis_assessment_status_invalid"),
+        ("invalid_family_reference", "system_analysis_family_reference_invalid"),
+        ("duplicate_item_id", "system_analysis_item_id_invalid"),
+    ],
+)
+def test_system_analysis_validator_fails_closed(
+    case: str,
+    error_code: str,
+) -> None:
+    from apps.backend.core.ai.system_analysis_contract import (
+        XRAY_SYSTEM_ANALYSIS_CONTRACT_V1,
+        XRaySystemAnalysisContractError,
+        validate_xray_system_analysis_result_contract,
+    )
+
+    result = _system_analysis_result()
+    if case == "duplicate_source_id":
+        result["source_refs"][1]["source_ref_id"] = "source_1"
+    elif case == "duplicate_image":
+        result["source_refs"][1]["image_id"] = "image_1"
+    elif case == "unknown_image":
+        result["source_refs"][1]["image_id"] = "image_missing"
+    elif case == "incomplete_coverage":
+        result["source_refs"] = result["source_refs"][:1]
+    elif case == "unknown_nested_source":
+        result["systems"][0]["findings"][0]["source_ref_ids"] = ["source_missing"]
+    elif case == "missing_family":
+        result["systems"] = result["systems"][:-1]
+    elif case == "duplicate_family":
+        result["systems"][-1]["family_key"] = "thoracic"
+    elif case == "invalid_not_assessed":
+        result["systems"][0]["assessment_status"] = "not_assessed"
+    elif case == "invalid_family_reference":
+        result["cross_system_patterns"] = [
+            {
+                "pattern_id": "pattern_1",
+                "description": "cross-system pattern",
+                "interpretation": "requires review",
+                "family_keys": ["thoracic", "unknown_family"],
+                "source_ref_ids": ["source_1"],
+            }
+        ]
+    elif case == "duplicate_item_id":
+        finding = deepcopy(result["systems"][0]["findings"][0])
+        result["systems"][0]["findings"].append(finding)
+    else:  # pragma: no cover - protects the parametrized fixture itself.
+        raise AssertionError(case)
+
+    with pytest.raises(XRaySystemAnalysisContractError, match=error_code):
+        validate_xray_system_analysis_result_contract(
+            result=result,
+            schema_contract_version=XRAY_SYSTEM_ANALYSIS_CONTRACT_V1,
+            image_receipt=_study_screening_receipt(),
+            expected_species="cat",
+        )
+
+
+@pytest.mark.anyio
+async def test_network_dispatches_system_analysis_by_frozen_schema_contract() -> None:
+    from apps.backend.core.pipeline import XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+    from apps.backend.services.ai_control.service.config_compiler import (
+        AIConfigCompiler,
+    )
+
+    receipt = _study_screening_receipt()
+    result = _system_analysis_result()
+
+    class Signer:
+        async def sign(self, **_kwargs):
+            return [
+                GatewayImageInput(
+                    sequence_no=item["sequence_no"],
+                    mime_type=item["mime_type"],
+                    signed_url=(
+                        f"https://bucket.example/{item['image_id']}.jpg?signature=x"
+                    ),
+                )
+                for item in receipt["images"]
+            ]
+
+    class Gateway:
+        async def chat_completions(self, *_args, **_kwargs):
+            return {
+                "request_id": "provider-request-system-analysis-1",
+                "body": {
+                    "choices": [{"message": {"content": json.dumps(result)}}],
+                    "model": "provider-model",
+                },
+            }
+
+    response = await AIRequestService.execute_gateway_attempt_network(
+        network_plan=_network_plan(
+            response_schema=AIConfigCompiler._output_schema(
+                profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+            ),
+            image_count_requested=2,
+            image_inputs=tuple(receipt["images"]),
+            snapshot_contract_version=TASK_REQUEST_SNAPSHOT_V3,
+            xray_image_contract_required=True,
+            expected_species="cat",
+        ),
+        gateway_client=Gateway(),
+        image_signer=Signer(),
+    )
+    assert response["execution"].parsed_result_json == result
+    assert response["image_receipt"] == receipt
+
+
+def test_full_chain_primary_consumes_frozen_quality_screening_and_system_lineage() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting import PromptContractError
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.core.imaging.manifest import manifest_sha256
+    from apps.backend.core.pipeline import XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+    from apps.backend.services.runtime.stages.xray.prompt_commands import (
+        build_primary_ai_request_command,
+    )
+
+    quality_result = {"contract_version": "xray-image-quality.v1", "images": []}
+    ordered_images = [
+        {
+            "image_id": f"image_{index}",
+            "series_id": "series_1",
+            "logical_image_key": f"logical_{index}",
+            "image_version_no": 1,
+            "sequence_no": index,
+            "image_role": "original",
+            "image_kind": "instance",
+            "file_format": "jpg",
+            "projection": "VD" if index == 1 else "Lateral",
+            "projection_provenance": {
+                "source": "caller_declared",
+                "schema_version": "xray-projection.v1",
+            },
+            "storage_profile": "primary",
+            "object_key": f"objects/{index}.jpg",
+            "object_version_id": None,
+            "sha256": ("a" if index == 1 else "b") * 64,
+            "size_bytes": index * 10,
+            "content_type": "image/jpeg",
+        }
+        for index in (1, 2)
+    ]
+    series_manifest = manifest_sha256(ordered_images).sha256
+    frozen_series = [
+        {
+            "series_id": "series_1",
+            "series_key": "series-key-1",
+            "series_no": 1,
+            "manifest_contract_version": "series-image-manifest.v2",
+            "manifest_sha256": series_manifest,
+            "actual_image_count": 2,
+            "ordered_images": ordered_images,
+        }
+    ]
+    study_manifest = manifest_sha256(
+        [
+            {
+                "series_id": "series_1",
+                "series_key": "series-key-1",
+                "series_no": 1,
+                "actual_image_count": 2,
+                "manifest_sha256": series_manifest,
+            }
+        ]
+    ).sha256
+    screening_output = {"study_screening_result": {"screening": "accepted"}}
+    system_output = {"system_analysis_result": {"analysis": "accepted"}}
+    upstream_results = {
+        "study_screening": {
+            "source_stage_id": "screening_stage_1",
+            "source_output_sha256": sha256_json(screening_output),
+            "result": screening_output,
+        },
+        "system_analysis": {
+            "source_stage_id": "system_stage_1",
+            "source_output_sha256": sha256_json(system_output),
+            "result": system_output,
+        },
+    }
+    task = SimpleNamespace(
+        id="diagnose_task_1",
+        request_snapshot_json={
+            "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+            "profile_key": XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            "species": "cat",
+            "quality_review": {"result": quality_result},
+            "resolved_manifest_sha256": study_manifest,
+            "series": frozen_series,
+        },
+    )
+    stage = SimpleNamespace(
+        stage_key="joint_primary_reader",
+        input_json={
+            "study_revision_id": "revision_1",
+            "upstream_results": upstream_results,
+        },
+    )
+
+    command = build_primary_ai_request_command(task=task, stage=stage)
+
+    assert command.prompt_kind == "primary"
+    assert command.quality_results == quality_result
+    assert command.safe_context["targeted_focus_options"]["thoracic"] == [
+        "lung_pattern",
+        "cardiovascular_contour",
+    ]
+    assert command.study_screening_result == screening_output[
+        "study_screening_result"
+    ]
+    assert command.system_analysis_result == system_output[
+        "system_analysis_result"
+    ]
+
+    tampered = deepcopy(upstream_results)
+    tampered["system_analysis"]["result"]["system_analysis_result"] = {
+        "analysis": "tampered"
+    }
+    stage.input_json["upstream_results"] = tampered
+    with pytest.raises(
+        PromptContractError,
+        match="primary_adjudication_upstream_lineage_invalid",
+    ):
+        build_primary_ai_request_command(task=task, stage=stage)
+
+
+def test_report_generation_is_zero_image_and_preserves_frozen_medical_truth() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.core.ai.report_generation_contract import (
+        XRayReportGenerationContractError,
+        validate_xray_report_generation_result_contract,
+    )
+    from apps.backend.core.pipeline import XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+    from apps.backend.services.runtime.stages.xray.prompt_commands import (
+        build_report_generation_ai_request_command,
+    )
+
+    complete_result = _complete_medical_result_v2()
+    decision_output = {
+        "medical_status": "produced",
+        "complete_medical_result": complete_result,
+        "source_call_id": "decision_source_call_1",
+    }
+    task = SimpleNamespace(
+        id="diagnose_task_1",
+        request_snapshot_json={
+            "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+            "profile_key": XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            "species": "cat",
+            "quality_review": {
+                "result": {
+                    "contract_version": "xray-image-quality.v1",
+                    "images": [],
+                }
+            },
+            "series": [{"actual_image_count": 2}],
+        },
+    )
+    stage = SimpleNamespace(
+        stage_key="report_generation",
+        input_json={
+            "study_revision_id": "revision_1",
+            "previous_output": decision_output,
+            "previous_output_sha256": sha256_json(decision_output),
+        },
+    )
+    command = build_report_generation_ai_request_command(task=task, stage=stage)
+
+    assert AIRequestService._v2_image_count(task=task, stage=stage) == 0
+    AIRequestService._require_xray_image_count(
+        config=SimpleNamespace(
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key="xray_report_generation_v1",
+        ),
+        task=task,
+        stage=stage,
+        image_count=0,
+    )
+    assert command.final_medical_result == {
+        "source_result_sha256": sha256_json(decision_output),
+        "final_medical_result": complete_result,
+    }
+
+    provider_result = {
+        "result_schema_version": "xray-final-report.v1",
+        "source_result_sha256": sha256_json(decision_output),
+        "medical_status": complete_result["medical_status"],
+        "final_medical_result": deepcopy(complete_result),
+        "report": {"summary": "format-only report"},
+    }
+    accepted = validate_xray_report_generation_result_contract(
+        result=provider_result,
+        schema_contract_version="xray-final-report.v1",
+        expected_source_result_sha256=sha256_json(decision_output),
+        expected_final_medical_result=complete_result,
+    )
+    assert accepted["final_medical_result"] == complete_result
+
+    rewritten = deepcopy(provider_result)
+    rewritten["final_medical_result"]["summary"] = "rewritten diagnosis"
+    with pytest.raises(
+        XRayReportGenerationContractError,
+        match="report_generation_medical_result_rewritten",
+    ):
+        validate_xray_report_generation_result_contract(
+            result=rewritten,
+            schema_contract_version="xray-final-report.v1",
+            expected_source_result_sha256=sha256_json(decision_output),
+            expected_final_medical_result=complete_result,
+        )
+
+
+@pytest.mark.anyio
+async def test_full_chain_decision_schedules_report_generation_without_early_report(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.prompting.contracts import sha256_json
+    from apps.backend.core.pipeline import (
+        StageResult,
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        build_default_registry,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.service import imaging_execution_service
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    contract, pipeline_sha = compile_profile_contract(
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        build_default_registry(),
+    )
+    task = SimpleNamespace(
+        id="diagnose_task_1",
+        study_revision_id="revision_1",
+        compiled_pipeline_sha256=pipeline_sha,
+        attempt_no=1,
+        state_version=9,
+        trace_id="trace_1",
+        cancel_requested_at=None,
+        execution_status="running",
+        request_snapshot_json={
+            "profile_key": XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            "resolved_manifest_sha256": "a" * 64,
+            "compiled_profile": contract,
+        },
+    )
+    stage = SimpleNamespace(
+        id="decision_stage_1",
+        task_id=task.id,
+        stage_key="decision_finalization",
+        stage_no=7,
+        state_version=3,
+        lease_generation=1,
+        input_json={"upstream_results": {}},
+    )
+    output = {
+        "medical_status": "produced",
+        "complete_medical_result": _complete_medical_result_v2(),
+        "source_call_id": "primary_call_1",
+    }
+    captured: dict[str, Any] = {}
+
+    class FakeStageDal:
+        async def finish_with_lease(self, **kwargs):
+            return SimpleNamespace(**{**stage.__dict__, **kwargs["values"]})
+
+        async def create_idempotent(self, values):
+            captured["next_stage"] = values
+            return SimpleNamespace(**values)
+
+    class FakeOutboxDal:
+        async def create_idempotent(self, values):
+            captured["event"] = values
+            return SimpleNamespace(**values)
+
+    class FakeTaskDal:
+        async def cas_update(self, **kwargs):
+            captured["task_values"] = kwargs["values"]
+            return SimpleNamespace(**{**task.__dict__, **kwargs["values"]})
+
+    class RejectReportService:
+        def __init__(self, _db):
+            raise AssertionError("DecisionFinalization must not persist the report")
+
+    monkeypatch.setattr(
+        imaging_execution_service,
+        "ReportService",
+        RejectReportService,
+    )
+    service = object.__new__(ImagingExecutionService)
+    service.stage_dal = FakeStageDal()
+    service.outbox_dal = FakeOutboxDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service._apply_stage_result(
+        task=task,
+        stage=stage,
+        owner_id="worker_1",
+        result=StageResult(status="completed", output=output),
+    )
+
+    assert result == output
+    assert captured["next_stage"]["stage_key"] == "report_generation"
+    assert captured["next_stage"]["handler_version"] == "v1"
+    assert captured["next_stage"]["input_json"]["previous_output"] == output
+    assert captured["next_stage"]["input_json"]["previous_output_sha256"] == (
+        sha256_json(output)
+    )
+    assert captured["next_stage"]["input_json"]["upstream_results"][
+        "decision_finalization"
+    ]["source_output_sha256"] == sha256_json(output)
+    assert captured["task_values"] == {
+        "execution_status": "queued",
+        "ai_medical_status": "not_produced",
+    }
+
+
+@pytest.mark.anyio
+async def test_report_generation_acceptance_persists_one_report_and_failure_persists_none(
+    monkeypatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.core.pipeline import StageResult, XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+    from apps.backend.services.runtime.service import imaging_execution_service
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+
+    complete_result = _complete_medical_result_v2()
+    task = SimpleNamespace(
+        id="diagnose_task_1",
+        state_version=11,
+        cancel_requested_at=None,
+        execution_status="running",
+        request_snapshot_json={"profile_key": XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1},
+    )
+    stage = SimpleNamespace(
+        id="report_stage_1",
+        task_id=task.id,
+        stage_key="report_generation",
+        state_version=4,
+        lease_generation=2,
+        input_json={},
+    )
+    accepted_output = {
+        "source_call_id": "report_call_1",
+        "medical_status": "produced",
+        "complete_medical_result": complete_result,
+        "report_generation_result": {
+            "result_schema_version": "xray-final-report.v1",
+            "final_medical_result": deepcopy(complete_result),
+        },
+    }
+    captured: dict[str, Any] = {"reports": []}
+
+    class FakeStageDal:
+        async def finish_with_lease(self, **kwargs):
+            captured["stage_values"] = kwargs["values"]
+            return SimpleNamespace(**{**stage.__dict__, **kwargs["values"]})
+
+    class FakeTaskDal:
+        async def get_by_id_for_update(self, task_id):
+            assert task_id == task.id
+            return task
+
+        async def cas_update(self, **kwargs):
+            captured["task_values"] = kwargs["values"]
+            return SimpleNamespace(**{**task.__dict__, **kwargs["values"]})
+
+    class FakeReportService:
+        def __init__(self, db):
+            assert db == "db"
+
+        async def finalize(self, **kwargs):
+            captured["reports"].append(kwargs)
+            return SimpleNamespace(id="report_1")
+
+    monkeypatch.setattr(
+        imaging_execution_service,
+        "ReportService",
+        FakeReportService,
+    )
+    service = object.__new__(ImagingExecutionService)
+    service.outbox_dal = SimpleNamespace(db="db")
+    service.stage_dal = FakeStageDal()
+    service.task_dal = FakeTaskDal()
+
+    result = await service._apply_stage_result(
+        task=task,
+        stage=stage,
+        owner_id="worker_1",
+        result=StageResult(status="completed", output=accepted_output),
+    )
+
+    assert result == accepted_output
+    assert len(captured["reports"]) == 1
+    assert captured["reports"][0]["finalization_stage_id"] == stage.id
+    assert captured["reports"][0]["source_call_id"] == "report_call_1"
+    assert (
+        captured["reports"][0]["content"]["complete_medical_result"]
+        == complete_result
+    )
+
+    captured["reports"].clear()
+    failed_output = {"source_call_id": "report_call_2", "error_code": "provider_500"}
+    failed = await service._apply_stage_result(
+        task=task,
+        stage=stage,
+        owner_id="worker_1",
+        result=StageResult(
+            status="failed",
+            output=failed_output,
+            error_code="provider_500",
+        ),
+    )
+
+    assert failed == failed_output
+    assert captured["reports"] == []
+    assert captured["task_values"]["execution_status"] == "failed"
+    assert captured["task_values"]["ai_medical_status"] == "not_produced"

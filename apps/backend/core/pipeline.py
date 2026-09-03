@@ -58,6 +58,16 @@ class StageRegistry:
 ZERO_MODEL_PROFILE = "zero_model_replay_v1"
 XRAY_PRIMARY_PROFILE_V2 = "xray_primary_v2"
 XRAY_TARGETED_REVIEW_PROFILE_V2 = "xray_targeted_review_v2"
+XRAY_ANATOMY_LOCALIZATION_PROFILE_V1 = "xray_anatomy_localization_v1"
+XRAY_IMAGE_QUALITY_PROFILE_V1 = "xray_image_quality_v1"
+XRAY_STUDY_SCREENING_PROFILE_V1 = "xray_study_screening_v1"
+XRAY_STUDY_SCREENING_PROFILE_V2 = "xray_study_screening_v2"
+XRAY_SYSTEM_ANALYSIS_PROFILE_V1 = "xray_system_analysis_v1"
+XRAY_REPORT_GENERATION_PROFILE_V1 = "xray_report_generation_v1"
+XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1 = "xray_diagnose_full_chain_v1"
+XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1 = (
+    "xray_diagnose_study_screening_v1"
+)
 
 
 def build_default_registry() -> StageRegistry:
@@ -81,6 +91,31 @@ def build_default_registry() -> StageRegistry:
     registry.register(
         StageDefinition("decision_finalization", "decision_finalization", "v2", False)
     )
+    registry.register(
+        StageDefinition(
+            "anatomy_localization", "anatomy_localization", "v1", True
+        )
+    )
+    registry.register(
+        StageDefinition(
+            "batch_image_quality_review",
+            "batch_image_quality_review",
+            "v1",
+            True,
+        )
+    )
+    registry.register(
+        StageDefinition("study_screening", "study_screening", "v1", True)
+    )
+    registry.register(
+        StageDefinition("study_screening", "study_screening", "v2", True)
+    )
+    registry.register(
+        StageDefinition("system_analysis", "system_analysis", "v1", True)
+    )
+    registry.register(
+        StageDefinition("report_generation", "report_generation", "v1", True)
+    )
     return registry
 
 
@@ -96,6 +131,45 @@ def compile_profile_contract(
         ],
         XRAY_PRIMARY_PROFILE_V2: [
             ("study_preparation", "v1"),
+            ("joint_primary_reader", "v2"),
+            ("decision_finalization", "v2"),
+        ],
+        XRAY_ANATOMY_LOCALIZATION_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("anatomy_localization", "v1"),
+        ],
+        XRAY_IMAGE_QUALITY_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("batch_image_quality_review", "v1"),
+        ],
+        XRAY_STUDY_SCREENING_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("study_screening", "v1"),
+        ],
+        XRAY_STUDY_SCREENING_PROFILE_V2: [
+            ("study_preparation", "v1"),
+            ("study_screening", "v2"),
+        ],
+        XRAY_SYSTEM_ANALYSIS_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("system_analysis", "v1"),
+        ],
+        XRAY_REPORT_GENERATION_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("report_generation", "v1"),
+        ],
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("study_screening", "v2"),
+            ("system_analysis", "v1"),
+            ("joint_primary_reader", "v2"),
+            ("family_routing", "v2"),
+            ("decision_finalization", "v2"),
+            ("report_generation", "v1"),
+        ],
+        XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1: [
+            ("study_preparation", "v1"),
+            ("study_screening", "v1"),
             ("joint_primary_reader", "v2"),
             ("decision_finalization", "v2"),
         ],
@@ -139,9 +213,19 @@ def compile_profile_contract(
         "conditional_edges": [],
         "dynamic_stage_definitions": [],
     }
-    if profile_key in {"xray_targeted_review_v1", XRAY_TARGETED_REVIEW_PROFILE_V2}:
+    if profile_key in {
+        "xray_targeted_review_v1",
+        XRAY_TARGETED_REVIEW_PROFILE_V2,
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    }:
         targeted_version = (
-            "v2" if profile_key == XRAY_TARGETED_REVIEW_PROFILE_V2 else "v1"
+            "v2"
+            if profile_key
+            in {
+                XRAY_TARGETED_REVIEW_PROFILE_V2,
+                XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            }
+            else "v1"
         )
         targeted = registry.resolve(
             handler_key="targeted_review", handler_version=targeted_version
@@ -198,6 +282,14 @@ __all__ = [
     "StageRegistry",
     "StageResult",
     "ZERO_MODEL_PROFILE",
+    "XRAY_ANATOMY_LOCALIZATION_PROFILE_V1",
+    "XRAY_IMAGE_QUALITY_PROFILE_V1",
+    "XRAY_STUDY_SCREENING_PROFILE_V1",
+    "XRAY_STUDY_SCREENING_PROFILE_V2",
+    "XRAY_SYSTEM_ANALYSIS_PROFILE_V1",
+    "XRAY_REPORT_GENERATION_PROFILE_V1",
+    "XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1",
+    "XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1",
     "XRAY_PRIMARY_PROFILE_V2",
     "XRAY_TARGETED_REVIEW_PROFILE_V2",
     "build_default_registry",

@@ -30,10 +30,27 @@ def normalize_prompt_message_contract(
         or not user_context_keys
         or len(user_context_keys) != len(set(user_context_keys))
         or any(
-            key not in {"SAFE_STUDY_CONTEXT_JSON", "PRIMARY_RESULT_JSON"}
+            key not in {
+                "SAFE_STUDY_CONTEXT_JSON",
+                "PRIMARY_RESULT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "ROUTE_CONTEXT_JSON",
+                "STUDY_SCREENING_RESULT_JSON",
+                "SYSTEM_ANALYSIS_RESULT_JSON",
+                "FINAL_MEDICAL_RESULT_JSON",
+                "REPORT_SCHEMA_JSON",
+            }
             for key in user_context_keys
         )
-        or "SAFE_STUDY_CONTEXT_JSON" not in user_context_keys
+        or (
+            "SAFE_STUDY_CONTEXT_JSON" not in user_context_keys
+            and set(user_context_keys)
+            != {
+                "FINAL_MEDICAL_RESULT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "REPORT_SCHEMA_JSON",
+            }
+        )
     ):
         raise PromptMessageContractError("prompt_message_contract_invalid")
     return {

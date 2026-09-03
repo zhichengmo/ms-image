@@ -28,6 +28,13 @@ class ReportStateConflictError(ReportServiceError):
 
 
 class ReportService:
+    """负责 Report 的确定性持久化、版本指针和调用方隔离查询。
+
+    报告内容来自已经完成的 ``decision_finalization`` 或 ``report_generation`` Stage。本
+    Service 不构造 Prompt、不发起 AI Logical Call；它只校验来源血缘、执行幂等/CAS
+    状态转换，并通过现有 DAL 持久化既有最终内容。
+    """
+
     def __init__(self, db: AsyncSession):
         self.report_dal = ReportDal(db)
         self.task_dal = TaskDal(db)
@@ -46,6 +53,19 @@ class ReportService:
         medical_status: str,
         content: dict[str, Any],
     ) -> ReportResponse | None:
+        """从最终完成 Stage 的事实创建或复用最终 Report。
+
+        前置合同：``medical_status`` 必须属于允许持久化的状态；``content`` 必须携带相同
+        医学状态；来源 checkpoint 必须属于该 Task，且是允许的最终来源 Stage。
+
+        幂等单位是 ``source_stage_checkpoint_id``。同一来源 Stage 的 Call、医学状态和内容
+        SHA 完全一致时返回原 Report；任一事实冲突都拒绝。Task 已取消、失败、死信或已经
+        完成时不可再次 finalize；``report_required=false`` 时返回 ``None``，不建 Report。
+
+        新建成功后，旧当前版本会通过 CAS 标为 ``superseded``，Task 再通过 CAS 写入
+        ``current_report_id``、终态和医学状态。该过程只持久化输入内容，不做二次诊断、
+        报告润色或 Provider 调用。
+        """
         if medical_status not in PERSISTED_MEDICAL_STATUSES:
             raise ReportStateConflictError("report_medical_status_invalid")
         if not isinstance(content, dict) or "medical_status" not in content:
@@ -62,7 +82,7 @@ class ReportService:
             task is None
             or stage is None
             or stage.task_id != task.id
-            or stage.stage_key != "decision_finalization"
+            or stage.stage_key not in {"decision_finalization", "report_generation"}
         ):
             raise ReportStateConflictError("report_finalization_source_invalid")
 
@@ -137,6 +157,11 @@ class ReportService:
         return self._response(report)
 
     async def get_current(self, *, task_id: str) -> ReportResponse | None:
+        """按 Task 内部身份读取 current Report，不执行调用方归属校验。
+
+        仅接受 ``final`` 或 ``published`` 状态；Task 尚无 current 指针时返回 ``None``。
+        该方法供受控内部调用，外部 API 应使用 ``get_current_for_requester``。
+        """
         task = await self.task_dal.get_by_id(task_id)
         if task is None:
             raise ReportNotFoundError("task_not_found")
@@ -153,6 +178,11 @@ class ReportService:
         task_id: str,
         requester_id: str,
     ) -> ReportResponse | None:
+        """在校验 Task 属主后返回当前 final/published Report。
+
+        Task 不存在或不属于调用方时统一按未找到处理，避免泄露其他调用方资源；没有当前
+        Report 时正常返回 ``None``。本方法为纯读，不等待 Task，也不生成或发布 Report。
+        """
         task = await self.task_dal.get_by_id(task_id)
         if task is None or task.requester_id != requester_id:
             raise ReportNotFoundError("task_not_found")
@@ -177,7 +207,17 @@ class ReportService:
             raise ReportNotFoundError("report_not_found")
         return self._response(report)
 
-    async def list_for_requester(self, *, task_id: str, requester_id: str) -> list[ReportResponse]:
+    async def list_for_requester(
+        self,
+        *,
+        task_id: str,
+        requester_id: str,
+    ) -> list[ReportResponse]:
+        """在校验 Task 属主后返回该 Task 的全部 Report revision。
+
+        返回值保留 DAL 中的版本事实，可能包含 current、superseded 或 void；该读取不会
+        修改 current 指针、重算内容、发布报告或触发 AI。
+        """
         task = await self.task_dal.get_by_id(task_id)
         if task is None or task.requester_id != requester_id:
             raise ReportNotFoundError("task_not_found")

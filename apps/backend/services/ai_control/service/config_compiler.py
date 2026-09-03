@@ -15,9 +15,28 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from apps.backend.core.ai.config_contract import AI_CONFIG_V2
+from apps.backend.core.ai.anatomy_localization_contract import (
+    ANATOMY_LABEL_CONTRACT_V1,
+    ANATOMY_LOCALIZATION_CONTRACT_V1,
+    AnatomyLocalizationContractError,
+    anatomy_label_contract_sha256,
+)
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
     normalize_gateway_profile,
+)
+from apps.backend.core.ai.image_quality_contract import (
+    XRAY_IMAGE_QUALITY_CONTRACT_V1,
+)
+from apps.backend.core.ai.study_screening_contract import (
+    XRAY_STUDY_SCREENING_CONTRACT_V1,
+    XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+)
+from apps.backend.core.ai.system_analysis_contract import (
+    XRAY_SYSTEM_ANALYSIS_CONTRACT_V1,
+)
+from apps.backend.core.ai.report_generation_contract import (
+    XRAY_FINAL_REPORT_CONTRACT_V1,
 )
 from apps.backend.core.ai.connection_contract import (
     ConnectionContractError,
@@ -35,13 +54,26 @@ from apps.backend.core.ai.prompting.renderer import (
 )
 from apps.backend.core.ai.xray_result_contract import COMPLETE_MEDICAL_RESULT_V2
 from apps.backend.core.imaging.xray_contract import (
+    XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
+    XRAY_IMAGE_QUALITY_TASK_TYPE,
+    XRAY_STUDY_SCREENING_TASK_TYPE,
+    XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
     XRAY_STUDY_MAX_IMAGE_COUNT,
-    requires_xray_runtime_image_contract,
+    requires_exact_xray_five_image_config_contract,
 )
 from apps.backend.core.pipeline import (
     PipelineContractError,
     StageRegistry,
+    ZERO_MODEL_PROFILE,
+    XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+    XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+    XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    XRAY_IMAGE_QUALITY_PROFILE_V1,
     XRAY_PRIMARY_PROFILE_V2,
+    XRAY_REPORT_GENERATION_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V2,
+    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
     XRAY_TARGETED_REVIEW_PROFILE_V2,
     compile_profile_contract,
 )
@@ -60,10 +92,64 @@ _OUTPUT_SCHEMA_V1_RELATIVE_PATH = Path(
 _OUTPUT_SCHEMA_V2_RELATIVE_PATH = Path(
     "prompts/xray/complete_medical_result.v2.schema.json"
 )
-_OUTPUT_SCHEMA_V1_CONTRACT_VERSION = "complete-medical-result.v1"
-_V2_RESULT_PROFILES = frozenset(
-    {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+_OUTPUT_SCHEMA_ANATOMY_LOCALIZATION_V1_RELATIVE_PATH = Path(
+    "prompts/xray/anatomy_localization.v1.schema.json"
 )
+_OUTPUT_SCHEMA_IMAGE_QUALITY_V1_RELATIVE_PATH = Path(
+    "prompts/xray/image_quality.v1.schema.json"
+)
+_OUTPUT_SCHEMA_STUDY_SCREENING_V1_RELATIVE_PATH = Path(
+    "prompts/xray/study_screening.v1.schema.json"
+)
+_OUTPUT_SCHEMA_STUDY_SCREENING_V2_RELATIVE_PATH = Path(
+    "prompts/xray/study_screening.v2.schema.json"
+)
+_OUTPUT_SCHEMA_SYSTEM_ANALYSIS_V1_RELATIVE_PATH = Path(
+    "prompts/xray/system_analysis.v1.schema.json"
+)
+_OUTPUT_SCHEMA_REPORT_GENERATION_V1_RELATIVE_PATH = Path(
+    "prompts/xray/final_report.v1.schema.json"
+)
+_OUTPUT_SCHEMA_V1_CONTRACT_VERSION = "complete-medical-result.v1"
+_V1_RESULT_PROFILES = frozenset(
+    {ZERO_MODEL_PROFILE, "xray_primary_v1", "xray_targeted_review_v1"}
+)
+_V2_RESULT_PROFILES = frozenset(
+    {
+        XRAY_PRIMARY_PROFILE_V2,
+        XRAY_TARGETED_REVIEW_PROFILE_V2,
+        XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    }
+)
+_ANATOMY_LOCALIZATION_PROMPT_BINDINGS = {
+    "xray_anatomy_localization_cat": "xray_cat_anatomy_localization",
+    "xray_anatomy_localization_dog": "xray_dog_anatomy_localization",
+}
+_IMAGE_QUALITY_PROMPT_BINDINGS = {
+    "xray_image_quality_cat": "xray_cat_image_quality",
+    "xray_image_quality_dog": "xray_dog_image_quality",
+}
+_STUDY_SCREENING_PROMPT_BINDINGS = {
+    "xray_study_screening_cat": "xray_cat_study_screening",
+    "xray_study_screening_dog": "xray_dog_study_screening",
+}
+_SYSTEM_ANALYSIS_PROMPT_BINDINGS = {
+    "xray_system_analysis_cat": "xray_cat_system_analysis",
+    "xray_system_analysis_dog": "xray_dog_system_analysis",
+}
+_TARGETED_REVIEW_PROMPT_BINDINGS = {
+    "xray_targeted_review_cat": "xray_cat_targeted_review",
+    "xray_targeted_review_dog": "xray_dog_targeted_review",
+}
+_REPORT_GENERATION_PROMPT_BINDINGS = {
+    "xray_report_generation_cat": "xray_cat_report_generation",
+    "xray_report_generation_dog": "xray_dog_report_generation",
+}
+_FULL_CHAIN_PRIMARY_PROMPT_BINDINGS = {
+    "xray_diagnose_cat": "xray_cat_primary_adjudication",
+    "xray_diagnose_dog": "xray_dog_primary_adjudication",
+}
 
 
 @dataclass(frozen=True)
@@ -109,12 +195,32 @@ class AIConfigCompiler:
 
     @staticmethod
     def _output_schema(*, profile_key: str) -> dict[str, Any]:
-        if profile_key in _V2_RESULT_PROFILES:
+        if profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1:
+            relative_path = _OUTPUT_SCHEMA_ANATOMY_LOCALIZATION_V1_RELATIVE_PATH
+            contract_version = ANATOMY_LOCALIZATION_CONTRACT_V1
+        elif profile_key == XRAY_IMAGE_QUALITY_PROFILE_V1:
+            relative_path = _OUTPUT_SCHEMA_IMAGE_QUALITY_V1_RELATIVE_PATH
+            contract_version = XRAY_IMAGE_QUALITY_CONTRACT_V1
+        elif profile_key == XRAY_STUDY_SCREENING_PROFILE_V1:
+            relative_path = _OUTPUT_SCHEMA_STUDY_SCREENING_V1_RELATIVE_PATH
+            contract_version = XRAY_STUDY_SCREENING_CONTRACT_V1
+        elif profile_key == XRAY_STUDY_SCREENING_PROFILE_V2:
+            relative_path = _OUTPUT_SCHEMA_STUDY_SCREENING_V2_RELATIVE_PATH
+            contract_version = XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2
+        elif profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1:
+            relative_path = _OUTPUT_SCHEMA_SYSTEM_ANALYSIS_V1_RELATIVE_PATH
+            contract_version = XRAY_SYSTEM_ANALYSIS_CONTRACT_V1
+        elif profile_key == XRAY_REPORT_GENERATION_PROFILE_V1:
+            relative_path = _OUTPUT_SCHEMA_REPORT_GENERATION_V1_RELATIVE_PATH
+            contract_version = XRAY_FINAL_REPORT_CONTRACT_V1
+        elif profile_key in _V2_RESULT_PROFILES:
             relative_path = _OUTPUT_SCHEMA_V2_RELATIVE_PATH
             contract_version = COMPLETE_MEDICAL_RESULT_V2
-        else:
+        elif profile_key in _V1_RESULT_PROFILES:
             relative_path = _OUTPUT_SCHEMA_V1_RELATIVE_PATH
             contract_version = _OUTPUT_SCHEMA_V1_CONTRACT_VERSION
+        else:
+            raise AIControlValidationError("output_schema_profile_unsupported")
         root = Path(__file__).resolve().parents[5]
         path = root / relative_path
         try:
@@ -132,6 +238,20 @@ class AIConfigCompiler:
             raise AIControlValidationError("output_schema_contract_version_conflict")
         result = dict(loaded)
         result["x-ms-image-contract-version"] = contract_version
+        if profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1:
+            try:
+                label_sha256 = anatomy_label_contract_sha256()
+            except AnatomyLocalizationContractError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if (
+                result.get("x-ms-image-label-contract-version")
+                != ANATOMY_LABEL_CONTRACT_V1
+                or result.get("x-ms-image-label-contract-sha256")
+                != label_sha256
+            ):
+                raise AIControlValidationError(
+                    "anatomy_localization_schema_label_contract_mismatch"
+                )
         return result
 
     @staticmethod
@@ -202,12 +322,142 @@ class AIConfigCompiler:
         profile_key: str,
         variables_json: Mapping[str, Any],
         message_contract: Mapping[str, Any] | None,
+        prompt_key: str | None = None,
     ) -> None:
         """Enforce Profile-specific structured context at freeze and replay time."""
+        if profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1:
+            expected_context = [
+                "SAFE_STUDY_CONTEXT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "STUDY_SCREENING_RESULT_JSON",
+                "SYSTEM_ANALYSIS_RESULT_JSON",
+            ]
+            if message_contract is None or message_contract.get(
+                "user_context_keys"
+            ) != expected_context:
+                raise AIControlValidationError(
+                    "xray_primary_adjudication_prompt_message_contract_invalid"
+                )
+            try:
+                required, optional = PromptRenderer.declared_variables(
+                    variables_json
+                )
+            except PromptRenderError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if required != {*expected_context, "OUTPUT_SCHEMA_JSON"} or optional:
+                raise AIControlValidationError(
+                    "xray_primary_adjudication_prompt_variables_invalid"
+                )
+            return
+        if profile_key in {
+            XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+            XRAY_IMAGE_QUALITY_PROFILE_V1,
+        }:
+            if message_contract is None or message_contract.get(
+                "user_context_keys"
+            ) != ["SAFE_STUDY_CONTEXT_JSON"]:
+                raise AIControlValidationError(
+                    "anatomy_localization_prompt_message_contract_invalid"
+                    if profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+                    else "xray_image_quality_prompt_message_contract_invalid"
+                )
+            try:
+                required, optional = PromptRenderer.declared_variables(
+                    variables_json
+                )
+            except PromptRenderError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if required != {
+                "SAFE_STUDY_CONTEXT_JSON",
+                "OUTPUT_SCHEMA_JSON",
+            } or optional:
+                raise AIControlValidationError(
+                    "anatomy_localization_prompt_variables_invalid"
+                    if profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+                    else "xray_image_quality_prompt_variables_invalid"
+                )
+            return
+        if profile_key == XRAY_REPORT_GENERATION_PROFILE_V1:
+            expected_context = [
+                "FINAL_MEDICAL_RESULT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "REPORT_SCHEMA_JSON",
+            ]
+            if message_contract is None or message_contract.get(
+                "user_context_keys"
+            ) != expected_context:
+                raise AIControlValidationError(
+                    "xray_report_generation_prompt_message_contract_invalid"
+                )
+            try:
+                required, optional = PromptRenderer.declared_variables(
+                    variables_json
+                )
+            except PromptRenderError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if required != set(expected_context) or optional:
+                raise AIControlValidationError(
+                    "xray_report_generation_prompt_variables_invalid"
+                )
+            return
+        if profile_key in {
+            XRAY_STUDY_SCREENING_PROFILE_V1,
+            XRAY_STUDY_SCREENING_PROFILE_V2,
+            XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+        }:
+            if message_contract is None or message_contract.get(
+                "user_context_keys"
+            ) != ["SAFE_STUDY_CONTEXT_JSON", "QUALITY_RESULTS_JSON"]:
+                raise AIControlValidationError(
+                    "xray_system_analysis_prompt_message_contract_invalid"
+                    if profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+                    else "xray_study_screening_prompt_message_contract_invalid"
+                )
+            try:
+                required, optional = PromptRenderer.declared_variables(
+                    variables_json
+                )
+            except PromptRenderError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if required != {
+                "SAFE_STUDY_CONTEXT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "OUTPUT_SCHEMA_JSON",
+            } or optional:
+                raise AIControlValidationError(
+                    "xray_system_analysis_prompt_variables_invalid"
+                    if profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+                    else "xray_study_screening_prompt_variables_invalid"
+                )
+            return
         if profile_key not in {
             "xray_targeted_review_v1",
             XRAY_TARGETED_REVIEW_PROFILE_V2,
         }:
+            return
+        if prompt_key in _TARGETED_REVIEW_PROMPT_BINDINGS.values():
+            expected_context = [
+                "SAFE_STUDY_CONTEXT_JSON",
+                "PRIMARY_RESULT_JSON",
+                "ROUTE_CONTEXT_JSON",
+                "QUALITY_RESULTS_JSON",
+                "STUDY_SCREENING_RESULT_JSON",
+                "SYSTEM_ANALYSIS_RESULT_JSON",
+            ]
+            if message_contract is None or message_contract.get(
+                "user_context_keys"
+            ) != expected_context:
+                raise AIControlValidationError(
+                    "xray_targeted_review_prompt_message_contract_invalid"
+                )
+            try:
+                required, optional = PromptRenderer.declared_variables(variables_json)
+            except PromptRenderError as exc:
+                raise AIControlValidationError(str(exc)) from exc
+            if required != {*expected_context, "OUTPUT_SCHEMA_JSON"} or optional:
+                raise AIControlValidationError(
+                    "xray_targeted_review_prompt_variables_invalid"
+                )
             return
         if message_contract is None:
             raise AIControlValidationError(
@@ -226,6 +476,272 @@ class AIConfigCompiler:
         if "PRIMARY_RESULT_JSON" not in required | optional:
             raise AIControlValidationError(
                 "config_targeted_prompt_primary_result_variable_required"
+            )
+
+    @staticmethod
+    def _validate_localization_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        localization_selected = (
+            task_type == XRAY_ANATOMY_LOCALIZATION_TASK_TYPE
+            or profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+            or config_key in _ANATOMY_LOCALIZATION_PROMPT_BINDINGS
+            or prompt_key in _ANATOMY_LOCALIZATION_PROMPT_BINDINGS.values()
+        )
+        if not localization_selected:
+            return
+        expected_prompt_key = _ANATOMY_LOCALIZATION_PROMPT_BINDINGS.get(config_key)
+        if (
+            modality_type != "xray"
+            or task_type != XRAY_ANATOMY_LOCALIZATION_TASK_TYPE
+            or profile_key != XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or activation_scope != "global"
+            or scope_key != "global"
+        ):
+            raise AIControlValidationError(
+                "anatomy_localization_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_full_chain_primary_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        primary_selected = (
+            profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+            or prompt_key in _FULL_CHAIN_PRIMARY_PROMPT_BINDINGS.values()
+        )
+        if not primary_selected:
+            return
+        expected_prompt_key = _FULL_CHAIN_PRIMARY_PROMPT_BINDINGS.get(config_key)
+        scope_is_valid = (
+            activation_scope == "global" and scope_key == "global"
+        ) or (
+            activation_scope == "experiment"
+            and isinstance(scope_key, str)
+            and bool(scope_key.strip())
+        )
+        if (
+            modality_type != "xray"
+            or task_type != "diagnose"
+            or profile_key != XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or not scope_is_valid
+        ):
+            raise AIControlValidationError(
+                "xray_primary_adjudication_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_image_quality_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        quality_selected = (
+            task_type == XRAY_IMAGE_QUALITY_TASK_TYPE
+            or profile_key == XRAY_IMAGE_QUALITY_PROFILE_V1
+            or config_key in _IMAGE_QUALITY_PROMPT_BINDINGS
+            or prompt_key in _IMAGE_QUALITY_PROMPT_BINDINGS.values()
+        )
+        if not quality_selected:
+            return
+        expected_prompt_key = _IMAGE_QUALITY_PROMPT_BINDINGS.get(config_key)
+        if (
+            modality_type != "xray"
+            or task_type != XRAY_IMAGE_QUALITY_TASK_TYPE
+            or profile_key != XRAY_IMAGE_QUALITY_PROFILE_V1
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or activation_scope != "global"
+            or scope_key != "global"
+        ):
+            raise AIControlValidationError(
+                "xray_image_quality_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_study_screening_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        screening_selected = (
+            profile_key
+            in {
+                XRAY_STUDY_SCREENING_PROFILE_V1,
+                XRAY_STUDY_SCREENING_PROFILE_V2,
+            }
+            or config_key in _STUDY_SCREENING_PROMPT_BINDINGS
+            or prompt_key in _STUDY_SCREENING_PROMPT_BINDINGS.values()
+        )
+        if not screening_selected:
+            return
+        expected_prompt_key = _STUDY_SCREENING_PROMPT_BINDINGS.get(config_key)
+        scope_is_valid = (
+            activation_scope == "global" and scope_key == "global"
+        ) or (
+            activation_scope == "experiment"
+            and isinstance(scope_key, str)
+            and bool(scope_key.strip())
+        )
+        if (
+            modality_type != "xray"
+            or (
+                profile_key == XRAY_STUDY_SCREENING_PROFILE_V1
+                and task_type != "diagnose"
+            )
+            or (
+                profile_key == XRAY_STUDY_SCREENING_PROFILE_V2
+                and task_type
+                not in {"diagnose", XRAY_STUDY_SCREENING_TASK_TYPE}
+            )
+            or profile_key
+            not in {
+                XRAY_STUDY_SCREENING_PROFILE_V1,
+                XRAY_STUDY_SCREENING_PROFILE_V2,
+            }
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or not scope_is_valid
+        ):
+            raise AIControlValidationError(
+                "xray_study_screening_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_system_analysis_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        analysis_selected = (
+            task_type == XRAY_SYSTEM_ANALYSIS_TASK_TYPE
+            or profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+            or config_key in _SYSTEM_ANALYSIS_PROMPT_BINDINGS
+            or prompt_key in _SYSTEM_ANALYSIS_PROMPT_BINDINGS.values()
+        )
+        if not analysis_selected:
+            return
+        expected_prompt_key = _SYSTEM_ANALYSIS_PROMPT_BINDINGS.get(config_key)
+        scope_is_valid = (
+            activation_scope == "global" and scope_key == "global"
+        ) or (
+            activation_scope == "experiment"
+            and isinstance(scope_key, str)
+            and bool(scope_key.strip())
+        )
+        if (
+            modality_type != "xray"
+            or task_type not in {"diagnose", XRAY_SYSTEM_ANALYSIS_TASK_TYPE}
+            or profile_key != XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or not scope_is_valid
+        ):
+            raise AIControlValidationError(
+                "xray_system_analysis_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_report_generation_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        report_selected = (
+            profile_key == XRAY_REPORT_GENERATION_PROFILE_V1
+            or config_key in _REPORT_GENERATION_PROMPT_BINDINGS
+            or prompt_key in _REPORT_GENERATION_PROMPT_BINDINGS.values()
+        )
+        if not report_selected:
+            return
+        expected_prompt_key = _REPORT_GENERATION_PROMPT_BINDINGS.get(config_key)
+        scope_is_valid = (
+            activation_scope == "global" and scope_key == "global"
+        ) or (
+            activation_scope == "experiment"
+            and isinstance(scope_key, str)
+            and bool(scope_key.strip())
+        )
+        if (
+            modality_type != "xray"
+            or task_type != "diagnose"
+            or profile_key != XRAY_REPORT_GENERATION_PROFILE_V1
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or not scope_is_valid
+        ):
+            raise AIControlValidationError(
+                "xray_report_generation_config_binding_invalid"
+            )
+
+    @staticmethod
+    def _validate_targeted_review_source_binding(
+        *,
+        config_key: Any,
+        modality_type: Any,
+        task_type: Any,
+        profile_key: Any,
+        activation_scope: Any,
+        scope_key: Any,
+        prompt_key: Any,
+    ) -> None:
+        targeted_selected = (
+            config_key in _TARGETED_REVIEW_PROMPT_BINDINGS
+            or prompt_key in _TARGETED_REVIEW_PROMPT_BINDINGS.values()
+        )
+        if not targeted_selected:
+            return
+        expected_prompt_key = _TARGETED_REVIEW_PROMPT_BINDINGS.get(config_key)
+        if (
+            modality_type != "xray"
+            or task_type != "diagnose"
+            or profile_key != XRAY_TARGETED_REVIEW_PROFILE_V2
+            or expected_prompt_key is None
+            or prompt_key != expected_prompt_key
+            or activation_scope != "experiment"
+            or not isinstance(scope_key, str)
+            or not scope_key.strip()
+        ):
+            raise AIControlValidationError(
+                "xray_targeted_review_config_binding_invalid"
             )
 
     @staticmethod
@@ -290,6 +806,10 @@ class AIConfigCompiler:
         capability: Mapping[str, Any],
         required_logical_calls: int,
         xray_image_contract_required: bool = False,
+        exact_single_call_attempt_required: bool = False,
+        exact_single_call_error_code: str = (
+            "anatomy_localization_single_call_budget_required"
+        ),
     ) -> None:
         try:
             budget = BudgetPolicyContract.model_validate(budget_policy)
@@ -317,6 +837,14 @@ class AIConfigCompiler:
             raise AIControlValidationError("config_image_budget_exceeds_connection")
         if normalized["max_total_calls"] < required_logical_calls:
             raise AIControlValidationError("config_call_budget_exceeded")
+        if exact_single_call_attempt_required and (
+            required_logical_calls != 1
+            or normalized["max_total_calls"] != 1
+            or normalized["max_total_attempts"] != 1
+        ):
+            raise AIControlValidationError(
+                exact_single_call_error_code
+            )
         max_attempts = lane.get("max_attempts")
         timeout_ms = lane.get("timeout_ms")
         generation = lane.get("generation_params")
@@ -362,6 +890,69 @@ class AIConfigCompiler:
             or pool.id != source["model_pool_id"]
         ):
             raise AIControlValidationError("config_source_id_mismatch")
+        self._validate_localization_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_full_chain_primary_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_image_quality_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_study_screening_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_system_analysis_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_targeted_review_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
+        self._validate_report_generation_source_binding(
+            config_key=source["config_key"],
+            modality_type=source["modality_type"],
+            task_type=source["task_type"],
+            profile_key=source["profile_key"],
+            activation_scope=source["activation_scope"],
+            scope_key=source["scope_key"],
+            prompt_key=prompt.prompt_key,
+        )
         if require_validated_sources:
             if pool.status != "validated":
                 raise AIControlValidationError("config_pool_validated_required")
@@ -377,6 +968,7 @@ class AIConfigCompiler:
             profile_key=str(source["profile_key"]),
             variables_json=prompt.variables_json,
             message_contract=prompt_message_contract,
+            prompt_key=prompt.prompt_key,
         )
         lane_plan = self._validated_lane_plan(pool)
         lanes = lane_plan["lanes"]
@@ -477,12 +1069,40 @@ class AIConfigCompiler:
             capability=capabilities[0],
             required_logical_calls=self._required_logical_calls(compiled_pipeline),
             xray_image_contract_required=(
-                requires_xray_runtime_image_contract(
+                requires_exact_xray_five_image_config_contract(
                     modality_type=source["modality_type"],
                     task_type=source["task_type"],
                     profile_key=source["profile_key"],
                 )
-                and source["profile_key"] == XRAY_PRIMARY_PROFILE_V2
+            ),
+            exact_single_call_attempt_required=(
+                source["profile_key"]
+                in {
+                    XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+                    XRAY_IMAGE_QUALITY_PROFILE_V1,
+                    XRAY_STUDY_SCREENING_PROFILE_V2,
+                    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+                    XRAY_REPORT_GENERATION_PROFILE_V1,
+                }
+            ),
+            exact_single_call_error_code=(
+                "xray_image_quality_single_call_budget_required"
+                if source["profile_key"] == XRAY_IMAGE_QUALITY_PROFILE_V1
+                else (
+                    "xray_study_screening_single_call_budget_required"
+                    if source["profile_key"] == XRAY_STUDY_SCREENING_PROFILE_V2
+                    else (
+                        "xray_system_analysis_single_call_budget_required"
+                        if source["profile_key"]
+                        == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+                        else (
+                            "xray_report_generation_single_call_budget_required"
+                            if source["profile_key"]
+                            == XRAY_REPORT_GENERATION_PROFILE_V1
+                            else "anatomy_localization_single_call_budget_required"
+                        )
+                    )
+                )
             ),
         )
 
@@ -641,6 +1261,113 @@ class AIConfigCompiler:
             raise AIControlValidationError("config_model_snapshot_sha_mismatch")
         if sha256_json(config.output_schema_json) != config.output_schema_sha256:
             raise AIControlValidationError("config_schema_snapshot_sha_mismatch")
+        self._validate_localization_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_full_chain_primary_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_image_quality_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_study_screening_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_system_analysis_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_targeted_review_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        self._validate_report_generation_source_binding(
+            config_key=config.config_key,
+            modality_type=config.modality_type,
+            task_type=config.task_type,
+            profile_key=config.profile_key,
+            activation_scope=config.activation_scope,
+            scope_key=config.scope_key,
+            prompt_key=config.prompt_key,
+        )
+        if (
+            config.profile_key == XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+            and config.output_schema_json
+            != self._output_schema(profile_key=config.profile_key)
+        ):
+            raise AIControlValidationError(
+                "anatomy_localization_schema_snapshot_mismatch"
+            )
+        if (
+            config.profile_key == XRAY_IMAGE_QUALITY_PROFILE_V1
+            and config.output_schema_json
+            != self._output_schema(profile_key=config.profile_key)
+        ):
+            raise AIControlValidationError(
+                "xray_image_quality_schema_snapshot_mismatch"
+            )
+        if (
+            config.profile_key
+            in {
+                XRAY_STUDY_SCREENING_PROFILE_V1,
+                XRAY_STUDY_SCREENING_PROFILE_V2,
+            }
+            and config.output_schema_json
+            != self._output_schema(profile_key=config.profile_key)
+        ):
+            raise AIControlValidationError(
+                "xray_study_screening_schema_snapshot_mismatch"
+            )
+        if (
+            config.profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+            and config.output_schema_json
+            != self._output_schema(profile_key=config.profile_key)
+        ):
+            raise AIControlValidationError(
+                "xray_system_analysis_schema_snapshot_mismatch"
+            )
+        if (
+            config.profile_key == XRAY_REPORT_GENERATION_PROFILE_V1
+            and config.output_schema_json
+            != self._output_schema(profile_key=config.profile_key)
+        ):
+            raise AIControlValidationError(
+                "xray_report_generation_schema_snapshot_mismatch"
+            )
         try:
             pipeline, pipeline_sha = compile_profile_contract(
                 config.profile_key, self.registry
@@ -689,12 +1416,34 @@ class AIConfigCompiler:
                 config.compiled_pipeline_json
             ),
             xray_image_contract_required=(
-                requires_xray_runtime_image_contract(
+                requires_exact_xray_five_image_config_contract(
                     modality_type=config.modality_type,
                     task_type=config.task_type,
                     profile_key=config.profile_key,
                 )
-                and config.profile_key == XRAY_PRIMARY_PROFILE_V2
+            ),
+            exact_single_call_attempt_required=(
+                config.profile_key
+                in {
+                    XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+                    XRAY_IMAGE_QUALITY_PROFILE_V1,
+                    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+                    XRAY_REPORT_GENERATION_PROFILE_V1,
+                }
+            ),
+            exact_single_call_error_code=(
+                "xray_image_quality_single_call_budget_required"
+                if config.profile_key == XRAY_IMAGE_QUALITY_PROFILE_V1
+                else (
+                    "xray_system_analysis_single_call_budget_required"
+                    if config.profile_key == XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+                    else (
+                        "xray_report_generation_single_call_budget_required"
+                        if config.profile_key
+                        == XRAY_REPORT_GENERATION_PROFILE_V1
+                        else "anatomy_localization_single_call_budget_required"
+                    )
+                )
             ),
         )
         gateway_profile_raw = getattr(config, "gateway_profile_json", None)
@@ -752,6 +1501,7 @@ class AIConfigCompiler:
                 profile_key=str(config.profile_key),
                 variables_json=config.prompt_variables_json,
                 message_contract=prompt_message_contract,
+                prompt_key=config.prompt_key,
             )
             receipt_sha256 = getattr(config, "prompt_source_receipt_sha256", None)
             if receipt_sha256 is not None and (

@@ -40,11 +40,21 @@ class GatewayDefiniteResponseError(GatewayContractError):
         image_receipt: Mapping[str, Any],
         image_manifest_sha256: str | None,
         image_count_sent: int,
+        provider_request_id: str | None = None,
+        actual_model: str | None = None,
+        usage_json: Mapping[str, Any] | None = None,
+        response_sha256: str | None = None,
     ) -> None:
         super().__init__(error_code)
         self.image_receipt = dict(image_receipt)
         self.image_manifest_sha256 = image_manifest_sha256
         self.image_count_sent = image_count_sent
+        self.provider_request_id = provider_request_id
+        self.actual_model = actual_model
+        self.usage_json = (
+            dict(usage_json) if isinstance(usage_json, Mapping) else None
+        )
+        self.response_sha256 = response_sha256
 
 
 class GatewayRejectedError(GatewayDefiniteResponseError):

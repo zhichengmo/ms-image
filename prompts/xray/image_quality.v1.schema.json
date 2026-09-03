@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XRayImageQualityV1",
+  "x-ms-image-contract-version": "xray-image-quality.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "species",
+    "result_status",
+    "images"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "xray-image-quality.v1"
+    },
+    "species": {
+      "type": "string",
+      "enum": [
+        "cat",
+        "dog"
+      ]
+    },
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "partial",
+        "unavailable"
+      ]
+    },
+    "images": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "image_id",
+          "sequence_no",
+          "is_valid_xray",
+          "species_consistency",
+          "primary_body_part",
+          "visible_body_parts",
+          "observed_projection",
+          "projection_consistency",
+          "quality_status",
+          "quality_issue_codes"
+        ],
+        "properties": {
+          "image_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "sequence_no": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "is_valid_xray": {
+            "type": "boolean"
+          },
+          "species_consistency": {
+            "type": "string",
+            "enum": [
+              "consistent",
+              "inconsistent",
+              "indeterminate"
+            ]
+          },
+          "primary_body_part": {
+            "type": "string",
+            "enum": [
+              "head_neck",
+              "thorax",
+              "abdomen",
+              "axial_skeleton",
+              "appendicular_skeleton",
+              "other",
+              "indeterminate"
+            ]
+          },
+          "visible_body_parts": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 7,
+            "items": {
+              "type": "string",
+              "enum": [
+                "head_neck",
+                "thorax",
+                "abdomen",
+                "axial_skeleton",
+                "appendicular_skeleton",
+                "other",
+                "indeterminate"
+              ]
+            }
+          },
+          "observed_projection": {
+            "type": "string",
+            "enum": [
+              "right_lateral",
+              "left_lateral",
+              "lateral_indeterminate",
+              "ventrodorsal",
+              "dorsoventral",
+              "craniocaudal",
+              "caudocranial",
+              "mediolateral",
+              "lateromedial",
+              "oblique",
+              "open_mouth",
+              "other",
+              "indeterminate"
+            ]
+          },
+          "projection_consistency": {
+            "type": "string",
+            "enum": [
+              "consistent",
+              "inconsistent",
+              "indeterminate"
+            ]
+          },
+          "quality_status": {
+            "type": "string",
+            "enum": [
+              "diagnostic",
+              "limited",
+              "non_diagnostic"
+            ]
+          },
+          "quality_issue_codes": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 11,
+            "items": {
+              "type": "string",
+              "enum": [
+                "positioning",
+                "rotation",
+                "anatomy_cutoff",
+                "underexposure",
+                "overexposure",
+                "low_contrast",
+                "motion",
+                "artifact",
+                "marker_missing",
+                "projection_indeterminate",
+                "non_xray_or_unsupported"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

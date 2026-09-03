@@ -28,7 +28,16 @@ TASK_EXECUTION_STATUSES = frozenset(
         "dead_letter",
     }
 )
-TASK_TYPES = frozenset({"replay", "diagnose"})
+TASK_TYPES = frozenset(
+    {
+        "replay",
+        "diagnose",
+        "anatomy_localization",
+        "xray_quality_control",
+        "xray_study_screening",
+        "xray_system_analysis",
+    }
+)
 
 
 class TaskClinicalContextSource(BaseModel):
@@ -88,12 +97,32 @@ class TaskCreate(BaseModel):
     request_id: str = Field(min_length=1, max_length=128)
     task_type: str = Field(default="replay", min_length=1, max_length=48)
     species: str | None = Field(default=None, max_length=16)
+    quality_review_task_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+    )
+    pet_profile_id: str | None = Field(default=None, min_length=1, max_length=64)
     clinical_context: TaskClinicalContext | None = None
     trace_id: str = Field(min_length=1, max_length=128)
 
     @field_validator("study_id", "study_revision_id", "request_id", "trace_id")
     @classmethod
     def normalize_text(cls, value: str) -> str:
+        return normalize_required_text(value)
+
+    @field_validator("quality_review_task_id")
+    @classmethod
+    def normalize_optional_task_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_required_text(value)
+
+    @field_validator("pet_profile_id")
+    @classmethod
+    def normalize_optional_pet_profile_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return normalize_required_text(value)
 
     @field_validator("task_type")
@@ -115,11 +144,27 @@ class TaskCreate(BaseModel):
         return normalized
 
     @model_validator(mode="after")
-    def require_species_for_diagnose(self) -> "TaskCreate":
+    def validate_task_context(self) -> "TaskCreate":
         if self.task_type == "diagnose" and self.species is None:
             raise ValueError("task_species_required_for_diagnose")
+        if self.task_type == "anatomy_localization" and self.species is None:
+            raise ValueError("task_species_required_for_anatomy_localization")
+        if self.task_type == "xray_quality_control" and self.species is None:
+            raise ValueError("task_species_required_for_xray_quality_control")
+        if self.task_type == "xray_study_screening" and self.species is None:
+            raise ValueError("task_species_required_for_xray_study_screening")
+        if self.task_type == "xray_system_analysis" and self.species is None:
+            raise ValueError("task_species_required_for_xray_system_analysis")
         if self.task_type != "diagnose" and self.clinical_context is not None:
             raise ValueError("task_clinical_context_diagnose_only")
+        if self.task_type != "diagnose" and self.pet_profile_id is not None:
+            raise ValueError("task_pet_profile_diagnose_only")
+        if (
+            self.task_type
+            not in {"diagnose", "xray_study_screening", "xray_system_analysis"}
+            and self.quality_review_task_id is not None
+        ):
+            raise ValueError("task_quality_review_reference_diagnose_only")
         return self
 
 

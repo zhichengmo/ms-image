@@ -1,0 +1,29 @@
+{
+  "contract_version": "xray-anatomy-labels.v1",
+  "systems": [
+    {
+      "system": "cardiovascular",
+      "labels": ["heart", "aorta", "pulmonary_artery", "caudal_vena_cava"]
+    },
+    {
+      "system": "respiratory",
+      "labels": ["lung_left", "lung_right", "trachea", "carina", "diaphragm", "mediastinum"]
+    },
+    {
+      "system": "digestive",
+      "labels": ["liver", "stomach", "small_intestine", "large_intestine", "spleen"]
+    },
+    {
+      "system": "urogenital",
+      "labels": ["kidney_left", "kidney_right", "bladder"]
+    },
+    {
+      "system": "axial_skeletal",
+      "labels": ["thoracic_spine", "lumbar_spine", "cervical_spine", "caudal_vertebrae", "ribs", "sternum", "pelvis", "skull"]
+    },
+    {
+      "system": "appendicular",
+      "labels": ["scapula", "humerus", "radius", "ulna", "femur", "tibia", "fibula", "patella", "carpal_bones", "tarsal_bones", "metacarpal_bones", "metatarsal_bones"]
+    }
+  ]
+}

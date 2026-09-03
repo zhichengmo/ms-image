@@ -1,0 +1,4375 @@
+{
+  "info": {
+    "_postman_id": "6c69a0a4-93cd-4b7a-9d45-2f8b7cd5e125",
+    "name": "MS-Image X-Ray 2-5图完整诊断链",
+    "description": "基于当前 ms-image 源码路由生成。覆盖 29 个 Runtime、6 个 Runtime Admin、31 个 AI Control 已实现接口，以及 5 个默认跳过的 PROPOSED 分割接口。主链真实目标：2–5 张原始 X-Ray → OSS → Image Validation → Study ready → diagnose Task → Worker → Primary/可选 Targeted → final Report。Collection 不包含真实 Token、Provider Secret 或影像。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 使用说明与环境门禁",
+      "description": "先填写 Runtime/Admin/AI Control Token、2–5 张本地真实 X-Ray 的绝对路径、SHA256、字节数和体位。Runner/Newman 建议设置 1–2 秒请求间隔；动态轮询在手工 Send 模式下不会自动跳转。",
+      "item": [
+        {
+          "name": "00. 初始化本次 2至5 图运行变量",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/health"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (![2,3,4,5].includes(count)) throw new Error(\"image_count 必须是 2、3、4 或 5\");",
+                  "const species = (pm.collectionVariables.get(\"species\") || \"\").toLowerCase();",
+                  "if (![\"cat\",\"dog\"].includes(species)) throw new Error(\"species 必须是 cat 或 dog\");",
+                  "const guid = pm.variables.replaceIn(\"{{$guid}}\");",
+                  "const runId = Date.now() + \"-\" + guid.slice(0, 8);",
+                  "pm.collectionVariables.set(\"run_id\", runId);",
+                  "pm.collectionVariables.set(\"utc_iso_time\", new Date().toISOString());",
+                  "[\"session_id\",\"study_id\",\"study_revision_id\",\"ready_study_revision_id\",\"series_id\",\"task_id\",\"report_id\",\"task_poll\"].forEach(key => pm.collectionVariables.unset(key));",
+                  "for (let i=1;i<=5;i++) { [\"image_id_\",\"image_generation_\",\"image_state_version_\",\"signed_url_\",\"upload_required_headers_\",\"image_poll_\"].forEach(prefix => pm.collectionVariables.unset(prefix+i)); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Runtime 健康接口成功\", function () { pm.expect(pm.response.code).to.eql(200); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "01. 检查 Runtime 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/readiness"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Runtime readiness 已就绪\", function () { pm.expect(pm.response.code).to.eql(200); const d=pm.response.json().data; pm.expect(d.ready).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 Runtime 服务版本",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/version"
+            },
+            "description": "查询 Runtime 构建和版本信息。医学 Prompt：0；LLM Provider Logical Call：0。"
+          }
+        },
+        {
+          "name": "02. 检查 Runtime Admin 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/readiness"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "03. 检查 AI Control 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/readiness"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Runtime X-Ray 2至5图诊断主链",
+      "description": "Runner/Newman 执行。每张图按 prepare → noauth OSS PUT → complete-upload → ready 轮询；全部图 ready 后才 finalize Study 并创建 diagnose Task。",
+      "item": [
+        {
+          "name": "01. 创建诊断会话",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_system\": \"ms-image-postman\",\n  \"source_session_id\": \"session-{{run_id}}\",\n  \"source_medical_record_id\": \"{{case_key}}\",\n  \"subject_id\": \"{{subject_id}}\",\n  \"request_id\": \"session-{{run_id}}\",\n  \"started_at\": \"{{utc_iso_time}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"session_id\", data.id);",
+                  "pm.collectionVariables.set(\"session_state_version\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 创建 X-Ray 检查（声明 2至5 图）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/studies"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"source_study_id\": \"{{case_key}}\",\n  \"modality_type\": \"xray\",\n  \"body_part\": \"{{body_part}}\",\n  \"metadata_schema_version\": \"xray-study.v1\",\n  \"expected_image_count\": {{image_count}},\n  \"completeness_attested_by\": \"postman-runner\",\n  \"identity_status\": \"confirmed\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"study_id\", data.id);",
+                  "pm.collectionVariables.set(\"study_state_version\", String(data.state_version));",
+                  "if (data.current_revision_id) pm.collectionVariables.set(\"study_revision_id\", data.current_revision_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 创建 X-Ray 影像序列",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/series"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"series_key\": \"series-{{run_id}}\",\n  \"series_no\": 1,\n  \"metadata_schema_version\": \"xray-series.v1\",\n  \"expected_image_count\": {{image_count}},\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"series_id\", data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.1.1 申请第 1 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"source_image_id\": \"source-{{run_id}}-1\",\n  \"logical_image_key\": \"{{case_key}}-image-1\",\n  \"sequence_no\": 1,\n  \"image_role\": \"original\",\n  \"image_kind\": \"xray\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_1}}\",\n  \"expected_sha256\": \"{{image_sha256_1}}\",\n  \"expected_size_bytes\": {{image_size_1}},\n  \"declared_content_type\": \"{{image_content_type_1}}\",\n  \"projection\": \"{{projection_1}}\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (1 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_id_1\", data.image.id);",
+                  "pm.collectionVariables.set(\"image_generation_1\", String(data.generation));",
+                  "pm.collectionVariables.set(\"image_state_version_1\", String(data.image.state_version));",
+                  "pm.collectionVariables.set(\"signed_url_1\", data.signed_url);",
+                  "pm.collectionVariables.set(\"upload_required_headers_1\", JSON.stringify(data.required_headers || {}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.1.2 上传第 1 张真实 X-Ray 到 OSS",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{signed_url_1}}"
+            },
+            "description": "将本地真实 X-Ray 二进制上传到 Runtime 返回的签名 URL。该请求必须 noauth，医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_file_1}}"
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (1 > imageCount) { pm.execution.skipRequest(); }",
+                  "const requiredHeaders = JSON.parse(pm.collectionVariables.get(\"upload_required_headers_1\") || \"{}\");",
+                  "Object.entries(requiredHeaders).forEach(([key, value]) => pm.request.headers.upsert({key, value: String(value)}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS PUT 成功\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.1.3 确认第 1 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/complete-upload"
+            },
+            "description": "完成上传并触发异步 Image Validation。医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_1}}\",\n  \"expected_state_version\": {{image_state_version_1}},\n  \"generation\": {{image_generation_1}},\n  \"trace_id\": \"image-complete-{{run_id}}-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (1 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_1\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.1.4 轮询第 1 张影像直到 ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images?id={{image_id_1}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (1 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_1\", String(data.state_version));",
+                  "const imageStatus = data.status;",
+                  "const terminalFailures = [\"rejected\", \"failed\", \"cancelled\"];",
+                  "if (imageStatus === \"ready\") {",
+                  "  pm.collectionVariables.unset(\"image_poll_1\");",
+                  "  pm.test(\"Image 已 ready\", function () { pm.expect(imageStatus).to.eql(\"ready\"); });",
+                  "} else if (terminalFailures.includes(imageStatus)) {",
+                  "  pm.test(\"Image 未进入失败终态\", function () { throw new Error(\"image_1_terminal_\" + imageStatus); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"image_poll_1\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"image_poll_1\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"image_1_poll_timeout:\" + imageStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2.1 申请第 2 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"source_image_id\": \"source-{{run_id}}-2\",\n  \"logical_image_key\": \"{{case_key}}-image-2\",\n  \"sequence_no\": 2,\n  \"image_role\": \"original\",\n  \"image_kind\": \"xray\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_2}}\",\n  \"expected_sha256\": \"{{image_sha256_2}}\",\n  \"expected_size_bytes\": {{image_size_2}},\n  \"declared_content_type\": \"{{image_content_type_2}}\",\n  \"projection\": \"{{projection_2}}\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (2 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_id_2\", data.image.id);",
+                  "pm.collectionVariables.set(\"image_generation_2\", String(data.generation));",
+                  "pm.collectionVariables.set(\"image_state_version_2\", String(data.image.state_version));",
+                  "pm.collectionVariables.set(\"signed_url_2\", data.signed_url);",
+                  "pm.collectionVariables.set(\"upload_required_headers_2\", JSON.stringify(data.required_headers || {}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2.2 上传第 2 张真实 X-Ray 到 OSS",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{signed_url_2}}"
+            },
+            "description": "将本地真实 X-Ray 二进制上传到 Runtime 返回的签名 URL。该请求必须 noauth，医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_file_2}}"
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (2 > imageCount) { pm.execution.skipRequest(); }",
+                  "const requiredHeaders = JSON.parse(pm.collectionVariables.get(\"upload_required_headers_2\") || \"{}\");",
+                  "Object.entries(requiredHeaders).forEach(([key, value]) => pm.request.headers.upsert({key, value: String(value)}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS PUT 成功\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2.3 确认第 2 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/complete-upload"
+            },
+            "description": "完成上传并触发异步 Image Validation。医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_2}}\",\n  \"expected_state_version\": {{image_state_version_2}},\n  \"generation\": {{image_generation_2}},\n  \"trace_id\": \"image-complete-{{run_id}}-2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (2 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_2\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2.4 轮询第 2 张影像直到 ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images?id={{image_id_2}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (2 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_2\", String(data.state_version));",
+                  "const imageStatus = data.status;",
+                  "const terminalFailures = [\"rejected\", \"failed\", \"cancelled\"];",
+                  "if (imageStatus === \"ready\") {",
+                  "  pm.collectionVariables.unset(\"image_poll_2\");",
+                  "  pm.test(\"Image 已 ready\", function () { pm.expect(imageStatus).to.eql(\"ready\"); });",
+                  "} else if (terminalFailures.includes(imageStatus)) {",
+                  "  pm.test(\"Image 未进入失败终态\", function () { throw new Error(\"image_2_terminal_\" + imageStatus); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"image_poll_2\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"image_poll_2\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"image_2_poll_timeout:\" + imageStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3.1 申请第 3 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"source_image_id\": \"source-{{run_id}}-3\",\n  \"logical_image_key\": \"{{case_key}}-image-3\",\n  \"sequence_no\": 3,\n  \"image_role\": \"original\",\n  \"image_kind\": \"xray\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_3}}\",\n  \"expected_sha256\": \"{{image_sha256_3}}\",\n  \"expected_size_bytes\": {{image_size_3}},\n  \"declared_content_type\": \"{{image_content_type_3}}\",\n  \"projection\": \"{{projection_3}}\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (3 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_id_3\", data.image.id);",
+                  "pm.collectionVariables.set(\"image_generation_3\", String(data.generation));",
+                  "pm.collectionVariables.set(\"image_state_version_3\", String(data.image.state_version));",
+                  "pm.collectionVariables.set(\"signed_url_3\", data.signed_url);",
+                  "pm.collectionVariables.set(\"upload_required_headers_3\", JSON.stringify(data.required_headers || {}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3.2 上传第 3 张真实 X-Ray 到 OSS",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{signed_url_3}}"
+            },
+            "description": "将本地真实 X-Ray 二进制上传到 Runtime 返回的签名 URL。该请求必须 noauth，医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_file_3}}"
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (3 > imageCount) { pm.execution.skipRequest(); }",
+                  "const requiredHeaders = JSON.parse(pm.collectionVariables.get(\"upload_required_headers_3\") || \"{}\");",
+                  "Object.entries(requiredHeaders).forEach(([key, value]) => pm.request.headers.upsert({key, value: String(value)}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS PUT 成功\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3.3 确认第 3 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/complete-upload"
+            },
+            "description": "完成上传并触发异步 Image Validation。医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_3}}\",\n  \"expected_state_version\": {{image_state_version_3}},\n  \"generation\": {{image_generation_3}},\n  \"trace_id\": \"image-complete-{{run_id}}-3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (3 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_3\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3.4 轮询第 3 张影像直到 ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images?id={{image_id_3}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (3 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_3\", String(data.state_version));",
+                  "const imageStatus = data.status;",
+                  "const terminalFailures = [\"rejected\", \"failed\", \"cancelled\"];",
+                  "if (imageStatus === \"ready\") {",
+                  "  pm.collectionVariables.unset(\"image_poll_3\");",
+                  "  pm.test(\"Image 已 ready\", function () { pm.expect(imageStatus).to.eql(\"ready\"); });",
+                  "} else if (terminalFailures.includes(imageStatus)) {",
+                  "  pm.test(\"Image 未进入失败终态\", function () { throw new Error(\"image_3_terminal_\" + imageStatus); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"image_poll_3\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"image_poll_3\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"image_3_poll_timeout:\" + imageStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.4.1 申请第 4 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"source_image_id\": \"source-{{run_id}}-4\",\n  \"logical_image_key\": \"{{case_key}}-image-4\",\n  \"sequence_no\": 4,\n  \"image_role\": \"original\",\n  \"image_kind\": \"xray\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_4}}\",\n  \"expected_sha256\": \"{{image_sha256_4}}\",\n  \"expected_size_bytes\": {{image_size_4}},\n  \"declared_content_type\": \"{{image_content_type_4}}\",\n  \"projection\": \"{{projection_4}}\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (4 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_id_4\", data.image.id);",
+                  "pm.collectionVariables.set(\"image_generation_4\", String(data.generation));",
+                  "pm.collectionVariables.set(\"image_state_version_4\", String(data.image.state_version));",
+                  "pm.collectionVariables.set(\"signed_url_4\", data.signed_url);",
+                  "pm.collectionVariables.set(\"upload_required_headers_4\", JSON.stringify(data.required_headers || {}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.4.2 上传第 4 张真实 X-Ray 到 OSS",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{signed_url_4}}"
+            },
+            "description": "将本地真实 X-Ray 二进制上传到 Runtime 返回的签名 URL。该请求必须 noauth，医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_file_4}}"
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (4 > imageCount) { pm.execution.skipRequest(); }",
+                  "const requiredHeaders = JSON.parse(pm.collectionVariables.get(\"upload_required_headers_4\") || \"{}\");",
+                  "Object.entries(requiredHeaders).forEach(([key, value]) => pm.request.headers.upsert({key, value: String(value)}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS PUT 成功\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.4.3 确认第 4 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/complete-upload"
+            },
+            "description": "完成上传并触发异步 Image Validation。医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_4}}\",\n  \"expected_state_version\": {{image_state_version_4}},\n  \"generation\": {{image_generation_4}},\n  \"trace_id\": \"image-complete-{{run_id}}-4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (4 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_4\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.4.4 轮询第 4 张影像直到 ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images?id={{image_id_4}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (4 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_4\", String(data.state_version));",
+                  "const imageStatus = data.status;",
+                  "const terminalFailures = [\"rejected\", \"failed\", \"cancelled\"];",
+                  "if (imageStatus === \"ready\") {",
+                  "  pm.collectionVariables.unset(\"image_poll_4\");",
+                  "  pm.test(\"Image 已 ready\", function () { pm.expect(imageStatus).to.eql(\"ready\"); });",
+                  "} else if (terminalFailures.includes(imageStatus)) {",
+                  "  pm.test(\"Image 未进入失败终态\", function () { throw new Error(\"image_4_terminal_\" + imageStatus); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"image_poll_4\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"image_poll_4\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"image_4_poll_timeout:\" + imageStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.5.1 申请第 5 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"source_image_id\": \"source-{{run_id}}-5\",\n  \"logical_image_key\": \"{{case_key}}-image-5\",\n  \"sequence_no\": 5,\n  \"image_role\": \"original\",\n  \"image_kind\": \"xray\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_5}}\",\n  \"expected_sha256\": \"{{image_sha256_5}}\",\n  \"expected_size_bytes\": {{image_size_5}},\n  \"declared_content_type\": \"{{image_content_type_5}}\",\n  \"projection\": \"{{projection_5}}\",\n  \"technical_metadata\": {\"case_key\": \"{{case_key}}\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (5 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_id_5\", data.image.id);",
+                  "pm.collectionVariables.set(\"image_generation_5\", String(data.generation));",
+                  "pm.collectionVariables.set(\"image_state_version_5\", String(data.image.state_version));",
+                  "pm.collectionVariables.set(\"signed_url_5\", data.signed_url);",
+                  "pm.collectionVariables.set(\"upload_required_headers_5\", JSON.stringify(data.required_headers || {}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.5.2 上传第 5 张真实 X-Ray 到 OSS",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{signed_url_5}}"
+            },
+            "description": "将本地真实 X-Ray 二进制上传到 Runtime 返回的签名 URL。该请求必须 noauth，医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_file_5}}"
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (5 > imageCount) { pm.execution.skipRequest(); }",
+                  "const requiredHeaders = JSON.parse(pm.collectionVariables.get(\"upload_required_headers_5\") || \"{}\");",
+                  "Object.entries(requiredHeaders).forEach(([key, value]) => pm.request.headers.upsert({key, value: String(value)}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OSS PUT 成功\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.5.3 确认第 5 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/complete-upload"
+            },
+            "description": "完成上传并触发异步 Image Validation。医学 Prompt：0；LLM Provider：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_5}}\",\n  \"expected_state_version\": {{image_state_version_5}},\n  \"generation\": {{image_generation_5}},\n  \"trace_id\": \"image-complete-{{run_id}}-5\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (5 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_5\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.5.4 轮询第 5 张影像直到 ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images?id={{image_id_5}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const imageCount = Number(pm.collectionVariables.get(\"image_count\"));",
+                  "if (5 > imageCount) { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"image_state_version_5\", String(data.state_version));",
+                  "const imageStatus = data.status;",
+                  "const terminalFailures = [\"rejected\", \"failed\", \"cancelled\"];",
+                  "if (imageStatus === \"ready\") {",
+                  "  pm.collectionVariables.unset(\"image_poll_5\");",
+                  "  pm.test(\"Image 已 ready\", function () { pm.expect(imageStatus).to.eql(\"ready\"); });",
+                  "} else if (terminalFailures.includes(imageStatus)) {",
+                  "  pm.test(\"Image 未进入失败终态\", function () { throw new Error(\"image_5_terminal_\" + imageStatus); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"image_poll_5\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"image_poll_5\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"image_5_poll_timeout:\" + imageStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05. 查询 Study 并核对影像计数",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/studies?id={{study_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "const study = data.study;",
+                  "pm.collectionVariables.set(\"study_state_version\", String(study.state_version));",
+                  "pm.collectionVariables.set(\"study_revision_id\", study.current_revision_id);",
+                  "pm.test(\"Study 声明图数正确\", function () { pm.expect(study.expected_image_count).to.eql(Number(pm.collectionVariables.get(\"image_count\"))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06. 确认 Study 影像齐全并冻结 Revision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/studies/finalize"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{study_id}}\",\n  \"expected_state_version\": {{study_state_version}},\n  \"current_revision_id\": \"{{study_revision_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"study_state_version\", String(data.state_version));",
+                  "pm.collectionVariables.set(\"ready_study_revision_id\", data.current_revision_id);",
+                  "pm.test(\"Study 已 ready\", function () { pm.expect(data.status).to.eql(\"ready\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07. 创建多图联合诊断任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/tasks"
+            },
+            "description": "HTTP 同步阶段只创建 Task、首 Stage 和 Outbox：0 Prompt / 0 Provider。Worker 后续执行 Primary：1 Prompt/1 Call；有合法 Targeted candidate 时再增加 1 Prompt/1 Call；每次都携带全部 N 张图。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"study_revision_id\": \"{{ready_study_revision_id}}\",\n  \"request_id\": \"task-{{run_id}}\",\n  \"task_type\": \"diagnose\",\n  \"species\": \"{{species}}\",\n  \"clinical_context\": {\n    \"contract_version\": \"xray-clinical-context.v1\",\n    \"source\": {\n      \"system\": \"ms-image-postman\",\n      \"recorded_at\": \"{{utc_iso_time}}\",\n      \"temporal_scope\": \"available_at_request\"\n    },\n    \"chief_complaint\": \"{{chief_complaint}}\",\n    \"study_reason\": \"{{study_reason}}\"\n  },\n  \"trace_id\": \"task-trace-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"task_id\", data.id);",
+                  "pm.collectionVariables.set(\"task_state_version\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08. 轮询诊断任务直到 completed",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/tasks?id={{task_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"task_state_version\", String(data.state_version));",
+                  "if (data.current_report_id) pm.collectionVariables.set(\"report_id\", data.current_report_id);",
+                  "const taskStatus = data.execution_status;",
+                  "const terminal = [\"completed\", \"failed\", \"cancelled\", \"dead_letter\"];",
+                  "if (taskStatus === \"completed\") {",
+                  "  pm.collectionVariables.unset(\"task_poll\");",
+                  "  pm.test(\"Task 已 completed\", function () { pm.expect(data.current_report_id).to.be.a(\"string\").and.not.empty; });",
+                  "} else if (terminal.includes(taskStatus)) {",
+                  "  pm.test(\"Task 未进入失败终态\", function () { throw new Error(\"task_terminal_\" + taskStatus + \":\" + (data.error_code || \"unknown\")); });",
+                  "} else {",
+                  "  const attempts = Number(pm.collectionVariables.get(\"task_poll\") || \"0\") + 1;",
+                  "  const maxAttempts = Number(pm.collectionVariables.get(\"poll_max\") || \"120\");",
+                  "  pm.collectionVariables.set(\"task_poll\", String(attempts));",
+                  "  if (attempts >= maxAttempts) throw new Error(\"task_poll_timeout:\" + taskStatus);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09. 查询任务最终诊断报告",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/reports/current?task_id={{task_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"report_id\", data.id);",
+                  "pm.test(\"报告属于当前 Task\", function () { pm.expect(data.task_id).to.eql(pm.collectionVariables.get(\"task_id\")); });",
+                  "pm.test(\"报告为 final\", function () { pm.expect(data.status).to.eql(\"final\"); });",
+                  "pm.test(\"报告 SHA 合法\", function () { pm.expect(data.content_sha256).to.match(/^[0-9a-f]{64}$/); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. 查询诊断报告历史",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/reports/history?task_id={{task_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.test(\"报告历史非空\", function () { pm.expect(data).to.be.an(\"array\").that.is.not.empty; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. 刷新诊断会话版本",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions?id={{session_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"session_state_version\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. 标记诊断会话已完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions/complete"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{session_id}}\",\"expected_state_version\":{{session_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 返回 2xx\", function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property(\"data\");",
+                  "const data = payload.data;",
+                  "pm.collectionVariables.set(\"session_state_version\", String(data.state_version));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Runtime 辅助与异常操作",
+      "description": "覆盖主链未单独展示的 Runtime 路由。替换、分片、取消等请求会改变状态，请确认变量指向专用测试资源后再发送。",
+      "item": [
+        {
+          "name": "查询诊断会话详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions?id={{session_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "关闭诊断会话",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions/close"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{session_id}}\",\"expected_state_version\":{{session_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "取消诊断会话",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/sessions/cancel"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{session_id}}\",\"expected_state_version\":{{session_state_version}},\"cancel_reason\":\"postman manual cancel\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "替换单张影像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/replace"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_image_id\":\"{{image_id_1}}\",\n  \"expected_state_version\":{{image_state_version_1}},\n  \"source_image_id\":\"replacement-{{run_id}}\",\n  \"metadata_schema_version\":\"xray-image.v1\",\n  \"file_format\":\"{{image_file_format_1}}\",\n  \"expected_sha256\":\"{{replacement_image_sha256}}\",\n  \"expected_size_bytes\":{{replacement_image_size}},\n  \"declared_content_type\":\"{{image_content_type_1}}\",\n  \"projection\":\"{{projection_1}}\",\n  \"technical_metadata\":{\"reason\":\"postman replacement\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "准备分片替换影像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/replace-multipart"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_image_id\":\"{{image_id_1}}\",\n  \"expected_state_version\":{{image_state_version_1}},\n  \"source_image_id\":\"replacement-multipart-{{run_id}}\",\n  \"metadata_schema_version\":\"xray-image.v1\",\n  \"file_format\":\"{{image_file_format_1}}\",\n  \"expected_sha256\":\"{{replacement_image_sha256}}\",\n  \"expected_size_bytes\":{{replacement_image_size}},\n  \"declared_content_type\":\"{{image_content_type_1}}\",\n  \"projection\":\"{{projection_1}}\",\n  \"technical_metadata\":{\"reason\":\"postman multipart replacement\"},\n  \"expected_part_count\":1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "准备新的分片影像上传",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-multipart-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\":\"{{series_id}}\",\n  \"source_image_id\":\"multipart-{{run_id}}\",\n  \"logical_image_key\":\"{{case_key}}-multipart\",\n  \"sequence_no\":99,\n  \"image_role\":\"original\",\n  \"image_kind\":\"xray\",\n  \"metadata_schema_version\":\"xray-image.v1\",\n  \"file_format\":\"jpeg\",\n  \"expected_sha256\":\"{{multipart_image_sha256}}\",\n  \"expected_size_bytes\":{{multipart_image_size}},\n  \"declared_content_type\":\"image/jpeg\",\n  \"projection\":\"other\",\n  \"technical_metadata\":{\"purpose\":\"multipart contract check\"},\n  \"expected_part_count\":1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "申请分片上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/prepare-upload-parts"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{multipart_image_id}}\",\"expected_state_version\":{{multipart_image_state_version}},\"generation\":{{multipart_image_generation}},\"part_numbers\":[1]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "查询已上传分片",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/list-upload-parts"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{multipart_image_id}}\",\"expected_state_version\":{{multipart_image_state_version}},\"generation\":{{multipart_image_generation}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "分页查询 Series 影像",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/page?series_id={{series_id}}&current_only=true&include_versions=false&page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "终止影像上传",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/images/abort-upload"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{multipart_image_id}}\",\"expected_state_version\":{{multipart_image_state_version}},\"generation\":{{multipart_image_generation}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "分页查询诊断任务",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/tasks/page?study_id={{study_id}}&page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "取消诊断任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/tasks/cancel"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{task_id}}\",\"expected_state_version\":{{task_state_version}},\"reason\":\"postman manual cancel\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "按报告 ID 查询诊断报告",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/reports?id={{report_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Runtime Admin 运维与报告治理",
+      "description": "Runtime Admin 是独立 8001 服务，真实路径均为 /api/v1/...，不是 /admin/...。publish/void 目前存在 Report state_version CAS 风险，默认跳过。",
+      "item": [
+        {
+          "name": "检查 Runtime Admin 服务状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/status"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "查询 Runtime Admin 服务信息",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/info"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "检查 Runtime Admin 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/readiness"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "查询诊断链路运维快照",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/operations/status"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "发布诊断报告（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/reports/publish"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。默认同时受 admin_write_enabled=false 和 broken_report_mutations_enabled=false 两层门禁保护。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{report_id}}\",\"expected_state_version\":{{report_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const adminWriteEnabled = (pm.collectionVariables.get(\"admin_write_enabled\") || \"false\").toLowerCase() === \"true\";",
+                  "const brokenReportEnabled = (pm.collectionVariables.get(\"broken_report_mutations_enabled\") || \"false\").toLowerCase() === \"true\";",
+                  "if (!(adminWriteEnabled && brokenReportEnabled)) {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "作废诊断报告（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_admin_base_url}}/api/v1/reports/void"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。默认同时受 admin_write_enabled=false 和 broken_report_mutations_enabled=false 两层门禁保护。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{admin_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{report_id}}\",\"expected_state_version\":{{report_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const adminWriteEnabled = (pm.collectionVariables.get(\"admin_write_enabled\") || \"false\").toLowerCase() === \"true\";",
+                  "const brokenReportEnabled = (pm.collectionVariables.get(\"broken_report_mutations_enabled\") || \"false\").toLowerCase() === \"true\";",
+                  "if (!(adminWriteEnabled && brokenReportEnabled)) {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 AI Control Prompt与模型配置",
+      "description": "覆盖 31 个 AI Control 接口。所有接口的运行时医学 Prompt 与 Provider Call 均为 0；它们只管理或冻结资产。写接口默认跳过。/ai-connections/validate 当前只校验 endpoint 与 SHA，不发送真实 Provider 请求。",
+      "item": [
+        {
+          "name": "检查 AI Control 服务健康",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/health"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。"
+          }
+        },
+        {
+          "name": "检查 AI Control 依赖是否就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/readiness"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "创建 Prompt 版本",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"prompt-create-{{run_id}}\",\n  \"prompt_key\":\"{{prompt_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman Prompt\",\n  \"description\":\"仅用于控制面合同验证\",\n  \"language\":\"zh-CN\",\n  \"content\":\"请读取 SAFE_STUDY_CONTEXT_JSON，并按冻结输出合同返回结果。\",\n  \"variables_json\":{\"contract_version\":\"prompt-variables.v1\",\"required\":[\"SAFE_STUDY_CONTEXT_JSON\"],\"optional\":[]},\n  \"message_contract_json\":{\"contract_version\":\"prompt-message-contract.v1\",\"user_context_keys\":[\"SAFE_STUDY_CONTEXT_JSON\"]}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "更新 Prompt 状态与说明",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"prompt-update-{{run_id}}\",\n  \"id\":\"{{prompt_id}}\",\n  \"expected_state_version\":{{prompt_state_version}},\n  \"name\":\"Postman Prompt Updated\",\n  \"description\":\"仅用于控制面合同验证\",\n  \"language\":\"zh-CN\",\n  \"content\":\"请读取 SAFE_STUDY_CONTEXT_JSON，并按冻结输出合同返回结果。\",\n  \"variables_json\":{\"contract_version\":\"prompt-variables.v1\",\"required\":[\"SAFE_STUDY_CONTEXT_JSON\"],\"optional\":[]},\n  \"message_contract_json\":{\"contract_version\":\"prompt-message-contract.v1\",\"user_context_keys\":[\"SAFE_STUDY_CONTEXT_JSON\"]}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 Prompt 详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts/detail?id={{prompt_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "分页查询 Prompt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts/page?page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "校验 Prompt 是否可用",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts/validate"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"prompt-validate-{{run_id}}\",\"id\":\"{{prompt_id}}\",\"expected_state_version\":{{prompt_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "退役 Prompt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts/retire"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"prompt-retire-{{run_id}}\",\"id\":\"{{prompt_id}}\",\"expected_state_version\":{{prompt_state_version}},\"reason\":\"postman retire\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "从外部来源导入 Prompt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-prompts/import"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"prompt-import-{{run_id}}\",\n  \"prompt_key\":\"{{prompt_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman Imported Prompt\",\n  \"description\":\"外部来源导入合同验证\",\n  \"service_code\":\"ms-image\",\n  \"module_code\":\"xray-primary\",\n  \"variant\":\"default\",\n  \"locale\":\"zh-CN\",\n  \"variables_json\":{\"contract_version\":\"prompt-variables.v1\",\"required\":[\"SAFE_STUDY_CONTEXT_JSON\"],\"optional\":[]},\n  \"message_contract_json\":{\"contract_version\":\"prompt-message-contract.v1\",\"user_context_keys\":[\"SAFE_STUDY_CONTEXT_JSON\"]}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "创建 AI 服务连接",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"connection-create-{{run_id}}\",\n  \"connection_key\":\"{{connection_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman Connection\",\n  \"provider_type\":\"openai-compatible\",\n  \"api_format\":\"chat-completions\",\n  \"base_url\":\"{{provider_base_url}}\",\n  \"region\":null,\n  \"capability_json\":{\n    \"contract_version\":\"connection-capability.v1\",\n    \"supports_images\":true,\n    \"supports_json_schema\":true,\n    \"supports_idempotency_key\":true,\n    \"supports_request_lookup\":false,\n    \"max_input_images\":5,\n    \"max_context_tokens\":128000,\n    \"declared_regions\":[],\n    \"gateway_profile\":{\n      \"contract_version\":\"ai-gateway-profile.v1\",\n      \"adapter_key\":\"openai-compatible\",\n      \"provider_enabled\":false,\n      \"qualification_status\":\"disabled\",\n      \"streaming_mode\":\"json\",\n      \"image_url_ttl_seconds\":300,\n      \"allowed_actual_models\":[]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "更新 AI 服务连接",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"connection-update-{{run_id}}\",\n  \"id\":\"{{connection_id}}\",\n  \"expected_state_version\":{{connection_state_version}},\n  \"name\":\"Postman Connection Updated\",\n  \"provider_type\":\"openai-compatible\",\n  \"api_format\":\"chat-completions\",\n  \"base_url\":\"{{provider_base_url}}\",\n  \"region\":null,\n  \"capability_json\":{\n    \"contract_version\":\"connection-capability.v1\",\n    \"supports_images\":true,\n    \"supports_json_schema\":true,\n    \"supports_idempotency_key\":true,\n    \"supports_request_lookup\":false,\n    \"max_input_images\":5,\n    \"max_context_tokens\":128000,\n    \"declared_regions\":[],\n    \"gateway_profile\":{\n      \"contract_version\":\"ai-gateway-profile.v1\",\n      \"adapter_key\":\"openai-compatible\",\n      \"provider_enabled\":false,\n      \"qualification_status\":\"disabled\",\n      \"streaming_mode\":\"json\",\n      \"image_url_ttl_seconds\":300,\n      \"allowed_actual_models\":[]\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 AI 服务连接详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections/detail?id={{connection_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "分页查询 AI 服务连接",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections/page?page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "校验 AI 服务连接合同",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections/validate"
+            },
+            "description": "只校验 endpoint/Connection SHA 并推进状态；医学 Prompt：0；Provider Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"connection-validate-{{run_id}}\",\"id\":\"{{connection_id}}\",\"expected_state_version\":{{connection_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "退役 AI 服务连接",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-connections/retire"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"connection-retire-{{run_id}}\",\"id\":\"{{connection_id}}\",\"expected_state_version\":{{connection_state_version}},\"reason\":\"postman retire\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "创建 AI 模型池",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"pool-create-{{run_id}}\",\n  \"pool_key\":\"{{model_pool_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman Model Pool\",\n  \"description\":\"single primary lane\",\n  \"execution_mode\":\"single\",\n  \"winner_policy\":\"single\",\n  \"lane_count\":1,\n  \"lane_plan_json\":{\n    \"contract_version\":\"ai-model-pool-lanes.v1\",\n    \"lanes\":[{\n      \"lane_key\":\"primary\",\n      \"priority\":1,\n      \"connection_id\":\"{{connection_id}}\",\n      \"connection_sha256\":\"{{connection_sha256}}\",\n      \"requested_model\":\"{{requested_model}}\",\n      \"timeout_ms\":120000,\n      \"max_attempts\":1,\n      \"generation_params\":{\"temperature\":0.1,\"top_p\":0.9,\"max_output_tokens\":4096}\n    }]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "更新 AI 模型池",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"pool-update-{{run_id}}\",\n  \"id\":\"{{model_pool_id}}\",\n  \"expected_state_version\":{{model_pool_state_version}},\n  \"name\":\"Postman Model Pool Updated\",\n  \"description\":\"single primary lane\",\n  \"execution_mode\":\"single\",\n  \"winner_policy\":\"single\",\n  \"lane_count\":1,\n  \"lane_plan_json\":{\n    \"contract_version\":\"ai-model-pool-lanes.v1\",\n    \"lanes\":[{\n      \"lane_key\":\"primary\",\n      \"priority\":1,\n      \"connection_id\":\"{{connection_id}}\",\n      \"connection_sha256\":\"{{connection_sha256}}\",\n      \"requested_model\":\"{{requested_model}}\",\n      \"timeout_ms\":120000,\n      \"max_attempts\":1,\n      \"generation_params\":{\"temperature\":0.1,\"top_p\":0.9,\"max_output_tokens\":4096}\n    }]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 AI 模型池详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools/detail?id={{model_pool_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "分页查询 AI 模型池",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools/page?page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "校验 AI 模型池可用性",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools/validate"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"pool-validate-{{run_id}}\",\"id\":\"{{model_pool_id}}\",\"expected_state_version\":{{model_pool_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "退役 AI 模型池",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-model-pools/retire"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"pool-retire-{{run_id}}\",\"id\":\"{{model_pool_id}}\",\"expected_state_version\":{{model_pool_state_version}},\"reason\":\"postman retire\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "预览并检查 AI 配置",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/compile-preview"
+            },
+            "description": "只执行配置编译预览，不持久化资源；虽使用 POST，但属于只读计算，因此不受 control_write_enabled 门禁。医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"config-{{run_id}}\",\n  \"config_key\":\"{{config_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman X-Ray Config\",\n  \"modality_type\":\"xray\",\n  \"task_type\":\"diagnose\",\n  \"profile_key\":\"xray_primary_v1\",\n  \"activation_scope\":\"global\",\n  \"scope_key\":\"global\",\n  \"prompt_template_id\":\"{{prompt_id}}\",\n  \"model_pool_id\":\"{{model_pool_id}}\",\n  \"budget_policy_json\":{\n    \"contract_version\":\"ai-budget-policy.v1\",\n    \"max_prompt_chars\":120000,\n    \"max_input_images\":5,\n    \"max_total_calls\":2,\n    \"max_total_attempts\":2,\n    \"task_deadline_ms\":600000,\n    \"reserve_before_send\":true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "创建冻结的 AI 配置",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\":\"config-{{run_id}}\",\n  \"config_key\":\"{{config_key}}\",\n  \"version\":\"{{control_version}}\",\n  \"name\":\"Postman X-Ray Config\",\n  \"modality_type\":\"xray\",\n  \"task_type\":\"diagnose\",\n  \"profile_key\":\"xray_primary_v1\",\n  \"activation_scope\":\"global\",\n  \"scope_key\":\"global\",\n  \"prompt_template_id\":\"{{prompt_id}}\",\n  \"model_pool_id\":\"{{model_pool_id}}\",\n  \"budget_policy_json\":{\n    \"contract_version\":\"ai-budget-policy.v1\",\n    \"max_prompt_chars\":120000,\n    \"max_input_images\":5,\n    \"max_total_calls\":2,\n    \"max_total_attempts\":2,\n    \"task_deadline_ms\":600000,\n    \"reserve_before_send\":true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 AI 配置详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/detail?id={{config_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "分页查询 AI 配置",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/page?page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "查询当前生效的 AI 配置",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/active?config_key={{config_key}}&modality_type=xray&task_type=diagnose&activation_scope=global&scope_key=global"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "验证 AI 配置完整性",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/validate"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"config-validate-{{run_id}}\",\"id\":\"{{config_id}}\",\"expected_state_version\":{{config_state_version}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "激活 AI 配置",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/activate"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"config-activate-{{run_id}}\",\"id\":\"{{config_id}}\",\"expected_state_version\":{{config_state_version}},\"reason\":\"postman activate\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "退役 AI 配置",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/retire"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"config-retire-{{run_id}}\",\"id\":\"{{config_id}}\",\"expected_state_version\":{{config_state_version}},\"reason\":\"postman retire\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "回滚到上一版 AI 配置",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-configs/rollback"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。 默认由 control_write_enabled=false 跳过，避免误改控制面。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"request_id\":\"config-rollback-{{run_id}}\",\"target_config_id\":\"{{rollback_target_config_id}}\",\"expected_target_state_version\":{{rollback_target_state_version}},\"expected_current_active_id\":\"{{config_id}}\",\"expected_current_active_state_version\":{{config_state_version}},\"reason\":\"postman rollback\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"control_write_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "查询 AI 控制面操作日志",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{ai_control_base_url}}/api/v1/ai-control-audits/page?page=1&page_size=20"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{control_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 器官分割展示（PROPOSED，默认跳过）",
+      "description": "这 5 个接口当前尚未实现。它们只用于 mask/overlay 展示，医学 Prompt 为 0，不进入诊断输入，不改 Report。segmentation_enabled 默认为 false。",
+      "item": [
+        {
+          "name": "PROPOSED 创建器官分割任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/segmentations"
+            },
+            "description": "PROPOSED/NOT_IMPLEMENTED。同步医学 Prompt：0；异步医学 Prompt：0；LLM Provider Logical Call：0；分割模型推理调用数待 S0 冻结。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\":\"{{study_id}}\",\n  \"study_revision_id\":\"{{ready_study_revision_id}}\",\n  \"request_id\":\"segmentation-{{run_id}}\",\n  \"artifact_types\":[\"mask\",\"overlay_preview\",\"manifest\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"segmentation_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PROPOSED 查询器官分割任务",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/segmentations?id={{segmentation_job_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"segmentation_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PROPOSED 查询分割展示产物列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/segmentations/artifacts?job_id={{segmentation_job_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"segmentation_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PROPOSED 查询单个分割产物详情",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/segmentations/artifacts/detail?id={{segmentation_artifact_id}}"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"segmentation_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PROPOSED 取消器官分割任务",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{runtime_base_url}}/api/v1/segmentations/cancel"
+            },
+            "description": "医学 Prompt：0；LLM Provider Logical Call：0。",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{runtime_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\":\"{{segmentation_job_id}}\",\"expected_state_version\":{{segmentation_state_version}},\"reason\":\"postman cancel\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if ((pm.collectionVariables.get(\"segmentation_enabled\") || \"false\").toLowerCase() !== \"true\") {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "runtime_base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "runtime_admin_base_url",
+      "value": "http://localhost:8001",
+      "type": "string"
+    },
+    {
+      "key": "ai_control_base_url",
+      "value": "http://localhost:8002",
+      "type": "string"
+    },
+    {
+      "key": "runtime_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "control_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_count",
+      "value": "4",
+      "type": "string"
+    },
+    {
+      "key": "species",
+      "value": "dog",
+      "type": "string"
+    },
+    {
+      "key": "case_key",
+      "value": "xray-e2e-case",
+      "type": "string"
+    },
+    {
+      "key": "body_part",
+      "value": "thorax",
+      "type": "string"
+    },
+    {
+      "key": "subject_id",
+      "value": "pet-subject-demo",
+      "type": "string"
+    },
+    {
+      "key": "chief_complaint",
+      "value": "咳嗽，需结合影像评估",
+      "type": "string"
+    },
+    {
+      "key": "study_reason",
+      "value": "X-Ray 多体位联合诊断",
+      "type": "string"
+    },
+    {
+      "key": "poll_max",
+      "value": "120",
+      "type": "string"
+    },
+    {
+      "key": "control_write_enabled",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "admin_write_enabled",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "broken_report_mutations_enabled",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "segmentation_enabled",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "projection_1",
+      "value": "vd",
+      "type": "string"
+    },
+    {
+      "key": "projection_2",
+      "value": "lateral_left",
+      "type": "string"
+    },
+    {
+      "key": "projection_3",
+      "value": "lateral_right",
+      "type": "string"
+    },
+    {
+      "key": "projection_4",
+      "value": "dv",
+      "type": "string"
+    },
+    {
+      "key": "projection_5",
+      "value": "other",
+      "type": "string"
+    },
+    {
+      "key": "replacement_image_sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "replacement_image_size",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "multipart_image_sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "multipart_image_size",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "multipart_image_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "multipart_image_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "multipart_image_generation",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "report_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "prompt_key",
+      "value": "xray_postman_demo",
+      "type": "string"
+    },
+    {
+      "key": "prompt_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "prompt_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "connection_key",
+      "value": "xray_provider_demo",
+      "type": "string"
+    },
+    {
+      "key": "connection_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "connection_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "connection_sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "provider_base_url",
+      "value": "https://provider.example.invalid/v1",
+      "type": "string"
+    },
+    {
+      "key": "requested_model",
+      "value": "vision-model",
+      "type": "string"
+    },
+    {
+      "key": "model_pool_key",
+      "value": "xray_pool_demo",
+      "type": "string"
+    },
+    {
+      "key": "model_pool_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "model_pool_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "config_key",
+      "value": "xray_diagnose_dog",
+      "type": "string"
+    },
+    {
+      "key": "config_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "config_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "rollback_target_config_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rollback_target_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "control_version",
+      "value": "0.0.1-postman",
+      "type": "string"
+    },
+    {
+      "key": "segmentation_job_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "segmentation_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "segmentation_artifact_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_1",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "image_size_1",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_1",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_1",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_file_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_2",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "image_size_2",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_2",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_2",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_file_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_3",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "image_size_3",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_3",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_3",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_file_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_4",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "image_size_4",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_4",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_4",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_file_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_5",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "image_size_5",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_5",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_5",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "utc_iso_time",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_state_version",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "study_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "study_state_version",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "study_revision_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ready_study_revision_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "series_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "task_state_version",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "report_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_id_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_required_headers_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_id_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_required_headers_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_id_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_required_headers_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_id_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_required_headers_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_id_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "upload_required_headers_5",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

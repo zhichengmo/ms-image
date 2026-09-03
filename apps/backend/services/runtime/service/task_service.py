@@ -12,10 +12,23 @@ from apps.backend.core.ai.config_contract import (
     is_v2_config,
     legacy_activation_slot,
 )
+from apps.backend.core.ai.anatomy_localization_contract import (
+    ANATOMY_LOCALIZATION_CONTRACT_V1,
+    AnatomyLocalizationContractError,
+    validate_anatomy_localization_receipt_against_snapshot,
+    validate_anatomy_localization_result_contract,
+)
+from apps.backend.core.ai.image_quality_contract import (
+    XRAY_IMAGE_QUALITY_CONTRACT_V1,
+    XRayImageQualityContractError,
+    validate_xray_image_quality_receipt_against_snapshot,
+    validate_xray_image_quality_result_contract,
+)
 from apps.backend.core.ai.clinical_context import freeze_clinical_context
 from apps.backend.core.ai.gateway.contracts import (
     GatewayContractError,
     normalize_gateway_profile,
+    schema_validate_result,
 )
 from apps.backend.core.ai.prompting.contracts import sha256_json
 from apps.backend.core.contexts import CallerContext
@@ -29,19 +42,34 @@ from apps.backend.core.imaging.manifest import (
     build_xray_diagnostic_series_manifest,
 )
 from apps.backend.core.imaging.xray_contract import (
+    XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
+    XRAY_IMAGE_QUALITY_TASK_TYPE,
+    XRAY_STUDY_SCREENING_TASK_TYPE,
+    XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
     require_xray_study_image_count,
     requires_xray_runtime_image_contract,
 )
 from apps.backend.core.pipeline import (
     ZERO_MODEL_PROFILE,
+    XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+    XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+    XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    XRAY_IMAGE_QUALITY_PROFILE_V1,
     XRAY_PRIMARY_PROFILE_V2,
+    XRAY_REPORT_GENERATION_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V2,
+    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
     XRAY_TARGETED_REVIEW_PROFILE_V2,
     build_default_registry,
     compile_profile_contract,
 )
 from apps.backend.crud.ai_config_record import AIConfigRecordDal
+from apps.backend.crud.ai_call import AICallDal
+from apps.backend.crud.ai_call_attempt import AICallAttemptDal
 from apps.backend.crud.image import ImageDal
 from apps.backend.crud.outbox import OutboxDal
+from apps.backend.crud.pet_profile import PetProfileDal
 from apps.backend.crud.series import SeriesDal
 from apps.backend.crud.session import SessionDal
 from apps.backend.crud.stage_checkpoint import StageCheckpointDal
@@ -56,6 +84,16 @@ from apps.backend.schemas.task import (
     TaskResponse,
     TaskStatusResponse,
 )
+from apps.backend.schemas.anatomy_localization import (
+    AnatomyLocalizationResponse,
+    AnatomyLocalizationResultResponse,
+)
+from apps.backend.schemas.xray_quality import (
+    XRayQualityReviewResponse,
+    XRayQualityResultResponse,
+)
+from apps.backend.services.ai_control.service.config_compiler import AIConfigCompiler
+from apps.backend.services.ai_control.service.errors import AIControlValidationError
 
 
 class TaskServiceError(ValueError):
@@ -88,6 +126,58 @@ class TaskService:
         "cat": "xray_cat_primary",
         "dog": "xray_dog_primary",
     }
+    FULL_CHAIN_PRIMARY_PROMPT_KEYS = {
+        "cat": "xray_cat_primary_adjudication",
+        "dog": "xray_dog_primary_adjudication",
+    }
+    ANATOMY_LOCALIZATION_CONFIG_KEYS = {
+        "cat": "xray_anatomy_localization_cat",
+        "dog": "xray_anatomy_localization_dog",
+    }
+    ANATOMY_LOCALIZATION_PROMPT_KEYS = {
+        "cat": "xray_cat_anatomy_localization",
+        "dog": "xray_dog_anatomy_localization",
+    }
+    IMAGE_QUALITY_CONFIG_KEYS = {
+        "cat": "xray_image_quality_cat",
+        "dog": "xray_image_quality_dog",
+    }
+    IMAGE_QUALITY_PROMPT_KEYS = {
+        "cat": "xray_cat_image_quality",
+        "dog": "xray_dog_image_quality",
+    }
+    STUDY_SCREENING_CONFIG_KEYS = {
+        "cat": "xray_study_screening_cat",
+        "dog": "xray_study_screening_dog",
+    }
+    STUDY_SCREENING_PROMPT_KEYS = {
+        "cat": "xray_cat_study_screening",
+        "dog": "xray_dog_study_screening",
+    }
+    SYSTEM_ANALYSIS_CONFIG_KEYS = {
+        "cat": "xray_system_analysis_cat",
+        "dog": "xray_system_analysis_dog",
+    }
+    SYSTEM_ANALYSIS_PROMPT_KEYS = {
+        "cat": "xray_cat_system_analysis",
+        "dog": "xray_dog_system_analysis",
+    }
+    TARGETED_REVIEW_CONFIG_KEYS = {
+        "cat": "xray_targeted_review_cat",
+        "dog": "xray_targeted_review_dog",
+    }
+    TARGETED_REVIEW_PROMPT_KEYS = {
+        "cat": "xray_cat_targeted_review",
+        "dog": "xray_dog_targeted_review",
+    }
+    REPORT_GENERATION_CONFIG_KEYS = {
+        "cat": "xray_report_generation_cat",
+        "dog": "xray_report_generation_dog",
+    }
+    REPORT_GENERATION_PROMPT_KEYS = {
+        "cat": "xray_cat_report_generation",
+        "dog": "xray_dog_report_generation",
+    }
     TERMINAL_EXECUTION_STATUSES = TaskDal.TERMINAL_EXECUTION_STATUSES
     TASK_CONFIG_KEYS = {
         "replay": ZERO_MODEL_CONFIG_KEY,
@@ -95,7 +185,24 @@ class TaskService:
     TASK_PROFILES = {
         "replay": frozenset({ZERO_MODEL_PROFILE}),
         "diagnose": frozenset(
-            {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+            {
+                XRAY_PRIMARY_PROFILE_V2,
+                XRAY_TARGETED_REVIEW_PROFILE_V2,
+                XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+                XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            }
+        ),
+        XRAY_ANATOMY_LOCALIZATION_TASK_TYPE: frozenset(
+            {XRAY_ANATOMY_LOCALIZATION_PROFILE_V1}
+        ),
+        XRAY_IMAGE_QUALITY_TASK_TYPE: frozenset(
+            {XRAY_IMAGE_QUALITY_PROFILE_V1}
+        ),
+        XRAY_STUDY_SCREENING_TASK_TYPE: frozenset(
+            {XRAY_STUDY_SCREENING_PROFILE_V2}
+        ),
+        XRAY_SYSTEM_ANALYSIS_TASK_TYPE: frozenset(
+            {XRAY_SYSTEM_ANALYSIS_PROFILE_V1}
         ),
     }
 
@@ -104,11 +211,15 @@ class TaskService:
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
         self.config_dal = AIConfigRecordDal(db)
+        self.call_dal = AICallDal(db)
+        self.attempt_dal = AICallAttemptDal(db)
         self.image_dal = ImageDal(db)
         self.task_dal = TaskDal(db)
         self.stage_dal = StageCheckpointDal(db)
         self.outbox_dal = OutboxDal(db)
+        self.pet_profile_dal = PetProfileDal(db)
         self.registry = build_default_registry()
+        self.config_compiler = AIConfigCompiler(self.registry)
 
     @staticmethod
     def _response(task) -> TaskResponse:
@@ -164,6 +275,148 @@ class TaskService:
             config=config,
             allowed_profiles=allowed_profiles,
         )
+        pet_profile_snapshot: dict[str, Any] | None = None
+        existing_snapshot = existing.request_snapshot_json if existing is not None else None
+        existing_pet_profile = (
+            existing_snapshot.get("pet_profile")
+            if isinstance(existing_snapshot, dict)
+            else None
+        )
+        if existing is not None:
+            if payload.pet_profile_id is not None:
+                if (
+                    not isinstance(existing_pet_profile, dict)
+                    or existing_pet_profile.get("profile_id")
+                    != payload.pet_profile_id
+                ):
+                    raise TaskIdempotencyConflictError("task_idempotency_conflict")
+                pet_profile_snapshot = json.loads(json.dumps(existing_pet_profile))
+            elif existing_pet_profile is not None:
+                raise TaskIdempotencyConflictError("task_idempotency_conflict")
+        elif payload.pet_profile_id is not None:
+            pet_profile_snapshot = await self._load_verified_pet_profile(
+                pet_profile_id=payload.pet_profile_id,
+                owner_id=caller.subject_id,
+                species=payload.species,
+            )
+        quality_review_snapshot: dict[str, Any] | None = None
+        stage_ai_config_bindings: dict[str, dict[str, Any]] | None = None
+        if profile_key in {
+            XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+            XRAY_STUDY_SCREENING_PROFILE_V2,
+            XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+            XRAY_TARGETED_REVIEW_PROFILE_V2,
+            XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        }:
+            if payload.quality_review_task_id is None:
+                raise TaskStateConflictError(
+                    "task_quality_review_reference_required"
+                )
+            try:
+                self.config_compiler.verify_frozen_integrity(config)
+            except AIControlValidationError as exc:
+                raise TaskStateConflictError("task_config_invalid") from exc
+            quality_review_snapshot = await self._load_verified_xray_quality_review(
+                task_id=payload.quality_review_task_id,
+                caller=caller,
+            )
+            if (
+                quality_review_snapshot["study_id"] != study.id
+                or quality_review_snapshot["study_revision_id"]
+                != study.revision_id
+                or quality_review_snapshot["resolved_manifest_sha256"]
+                != study.resolved_manifest_sha256
+                or quality_review_snapshot["species"] != payload.species
+            ):
+                raise TaskStateConflictError(
+                    "task_quality_review_reference_mismatch"
+                )
+            if profile_key == XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1:
+                stage_config = await self._get_active_study_screening_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                )
+                stage_ai_config_bindings = {
+                    "study_screening": self._freeze_stage_ai_config_binding(
+                        config=stage_config
+                    )
+                }
+            elif profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1:
+                screening_config = await self._get_active_diagnose_stage_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                    config_keys=self.STUDY_SCREENING_CONFIG_KEYS,
+                    prompt_keys=self.STUDY_SCREENING_PROMPT_KEYS,
+                    profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+                    binding_error="task_study_screening_config_binding_invalid",
+                    not_active_error="task_study_screening_config_not_active",
+                )
+                system_config = await self._get_active_diagnose_stage_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                    config_keys=self.SYSTEM_ANALYSIS_CONFIG_KEYS,
+                    prompt_keys=self.SYSTEM_ANALYSIS_PROMPT_KEYS,
+                    profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+                    binding_error="task_system_analysis_config_binding_invalid",
+                    not_active_error="task_system_analysis_config_not_active",
+                )
+                targeted_config = await self._get_active_diagnose_stage_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                    config_keys=self.TARGETED_REVIEW_CONFIG_KEYS,
+                    prompt_keys=self.TARGETED_REVIEW_PROMPT_KEYS,
+                    profile_key=XRAY_TARGETED_REVIEW_PROFILE_V2,
+                    binding_error="task_targeted_review_config_binding_invalid",
+                    not_active_error="task_targeted_review_config_not_active",
+                )
+                report_config = await self._get_active_diagnose_stage_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                    config_keys=self.REPORT_GENERATION_CONFIG_KEYS,
+                    prompt_keys=self.REPORT_GENERATION_PROMPT_KEYS,
+                    profile_key=XRAY_REPORT_GENERATION_PROFILE_V1,
+                    binding_error="task_report_generation_config_binding_invalid",
+                    not_active_error="task_report_generation_config_not_active",
+                )
+                stage_ai_config_bindings = {
+                    "study_screening": self._freeze_stage_ai_config_binding(
+                        config=screening_config
+                    ),
+                    "system_analysis": self._freeze_stage_ai_config_binding(
+                        config=system_config
+                    ),
+                    "targeted_review": self._freeze_stage_ai_config_binding(
+                        config=targeted_config
+                    ),
+                    "report_generation": self._freeze_stage_ai_config_binding(
+                        config=report_config
+                    ),
+                }
+            elif profile_key == XRAY_TARGETED_REVIEW_PROFILE_V2:
+                stage_config = await self._get_active_diagnose_stage_config(
+                    root_config=config,
+                    modality_type=study.modality_type,
+                    species=payload.species,
+                    config_keys=self.TARGETED_REVIEW_CONFIG_KEYS,
+                    prompt_keys=self.TARGETED_REVIEW_PROMPT_KEYS,
+                    profile_key=XRAY_TARGETED_REVIEW_PROFILE_V2,
+                    binding_error="task_targeted_review_config_binding_invalid",
+                    not_active_error="task_targeted_review_config_not_active",
+                )
+                stage_ai_config_bindings = {
+                    "targeted_review": self._freeze_stage_ai_config_binding(
+                        config=stage_config
+                    )
+                }
+        elif payload.quality_review_task_id is not None:
+            raise TaskStateConflictError(
+                "task_quality_review_reference_profile_invalid"
+            )
         first_definition = contract["stages"][0]
 
         series = await self.series_dal.list_for_study(study.id)
@@ -199,6 +452,9 @@ class TaskService:
             species=payload.species,
             clinical_context=payload.clinical_context,
             series_images=ready_images,
+            quality_review=quality_review_snapshot,
+            stage_ai_config_bindings=stage_ai_config_bindings,
+            pet_profile=pet_profile_snapshot,
         )
         request_sha = self._sha(snapshot)
         if existing is not None:
@@ -356,6 +612,26 @@ class TaskService:
             if config_key is None:
                 raise TaskStateConflictError("task_species_snapshot_invalid")
             return config_key
+        if task_type == XRAY_ANATOMY_LOCALIZATION_TASK_TYPE:
+            config_key = cls.ANATOMY_LOCALIZATION_CONFIG_KEYS.get(species or "")
+            if config_key is None:
+                raise TaskStateConflictError("task_species_snapshot_invalid")
+            return config_key
+        if task_type == XRAY_IMAGE_QUALITY_TASK_TYPE:
+            config_key = cls.IMAGE_QUALITY_CONFIG_KEYS.get(species or "")
+            if config_key is None:
+                raise TaskStateConflictError("task_species_snapshot_invalid")
+            return config_key
+        if task_type == XRAY_STUDY_SCREENING_TASK_TYPE:
+            config_key = cls.STUDY_SCREENING_CONFIG_KEYS.get(species or "")
+            if config_key is None:
+                raise TaskStateConflictError("task_species_snapshot_invalid")
+            return config_key
+        if task_type == XRAY_SYSTEM_ANALYSIS_TASK_TYPE:
+            config_key = cls.SYSTEM_ANALYSIS_CONFIG_KEYS.get(species or "")
+            if config_key is None:
+                raise TaskStateConflictError("task_species_snapshot_invalid")
+            return config_key
         return cls.TASK_CONFIG_KEYS.get(task_type)
 
     @classmethod
@@ -366,17 +642,48 @@ class TaskService:
         task_type: str,
         species: str | None,
     ) -> None:
-        if task_type != "diagnose":
+        if task_type == "diagnose":
+            expected_config_key = cls.DIAGNOSE_CONFIG_KEYS.get(species or "")
+            prompt_keys = (
+                cls.FULL_CHAIN_PRIMARY_PROMPT_KEYS
+                if config.profile_key == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+                else cls.DIAGNOSE_PROMPT_KEYS
+            )
+            expected_prompt_key = prompt_keys.get(species or "")
+            allowed_profiles = {
+                XRAY_PRIMARY_PROFILE_V2,
+                XRAY_TARGETED_REVIEW_PROFILE_V2,
+                XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+                XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            }
+        elif task_type == XRAY_ANATOMY_LOCALIZATION_TASK_TYPE:
+            expected_config_key = cls.ANATOMY_LOCALIZATION_CONFIG_KEYS.get(
+                species or ""
+            )
+            expected_prompt_key = cls.ANATOMY_LOCALIZATION_PROMPT_KEYS.get(
+                species or ""
+            )
+            allowed_profiles = {XRAY_ANATOMY_LOCALIZATION_PROFILE_V1}
+        elif task_type == XRAY_IMAGE_QUALITY_TASK_TYPE:
+            expected_config_key = cls.IMAGE_QUALITY_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.IMAGE_QUALITY_PROMPT_KEYS.get(species or "")
+            allowed_profiles = {XRAY_IMAGE_QUALITY_PROFILE_V1}
+        elif task_type == XRAY_STUDY_SCREENING_TASK_TYPE:
+            expected_config_key = cls.STUDY_SCREENING_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.STUDY_SCREENING_PROMPT_KEYS.get(species or "")
+            allowed_profiles = {XRAY_STUDY_SCREENING_PROFILE_V2}
+        elif task_type == XRAY_SYSTEM_ANALYSIS_TASK_TYPE:
+            expected_config_key = cls.SYSTEM_ANALYSIS_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.SYSTEM_ANALYSIS_PROMPT_KEYS.get(species or "")
+            allowed_profiles = {XRAY_SYSTEM_ANALYSIS_PROFILE_V1}
+        else:
             return
-        expected_config_key = cls.DIAGNOSE_CONFIG_KEYS.get(species or "")
-        expected_prompt_key = cls.DIAGNOSE_PROMPT_KEYS.get(species or "")
         if (
             expected_config_key is None
             or expected_prompt_key is None
             or config.config_key != expected_config_key
             or config.prompt_key != expected_prompt_key
-            or config.profile_key
-            not in {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+            or config.profile_key not in allowed_profiles
         ):
             raise TaskStateConflictError("task_config_invalid")
 
@@ -418,6 +725,101 @@ class TaskService:
                 scope_key="global",
             )
         )
+
+    async def _get_active_study_screening_config(
+        self,
+        *,
+        root_config,
+        modality_type: str,
+        species: str | None,
+    ):
+        return await self._get_active_diagnose_stage_config(
+            root_config=root_config,
+            modality_type=modality_type,
+            species=species,
+            config_keys=self.STUDY_SCREENING_CONFIG_KEYS,
+            prompt_keys=self.STUDY_SCREENING_PROMPT_KEYS,
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V1,
+            binding_error="task_study_screening_config_binding_invalid",
+            not_active_error="task_study_screening_config_not_active",
+        )
+
+    async def _get_active_diagnose_stage_config(
+        self,
+        *,
+        root_config,
+        modality_type: str,
+        species: str | None,
+        config_keys: dict[str, str],
+        prompt_keys: dict[str, str],
+        profile_key: str,
+        binding_error: str,
+        not_active_error: str,
+    ):
+        config_key = config_keys.get(species or "")
+        expected_prompt_key = prompt_keys.get(species or "")
+        activation_scope = getattr(root_config, "activation_scope", None)
+        scope_key = getattr(root_config, "scope_key", None)
+        if (
+            config_key is None
+            or expected_prompt_key is None
+            or activation_scope not in {"global", "experiment"}
+            or not isinstance(scope_key, str)
+            or not scope_key
+        ):
+            raise TaskStateConflictError(binding_error)
+        stage_config = await self.config_dal.get_active(
+            activation_slot_sha256(
+                config_key=config_key,
+                modality_type=modality_type,
+                task_type="diagnose",
+                activation_scope=activation_scope,
+                scope_key=scope_key,
+            )
+        )
+        if stage_config is None:
+            raise TaskStateConflictError(not_active_error)
+        try:
+            self.config_compiler.verify_frozen_integrity(stage_config)
+        except AIControlValidationError as exc:
+            raise TaskStateConflictError(binding_error) from exc
+        stage_profile, _, _ = self._validate_assignable_config(
+            config=stage_config,
+            allowed_profiles=frozenset({profile_key}),
+        )
+        if (
+            stage_profile != profile_key
+            or stage_config.config_key != config_key
+            or stage_config.prompt_key != expected_prompt_key
+            or stage_config.modality_type != modality_type
+            or stage_config.task_type != "diagnose"
+            or stage_config.activation_scope != activation_scope
+            or stage_config.scope_key != scope_key
+        ):
+            raise TaskStateConflictError(binding_error)
+        return stage_config
+
+    @staticmethod
+    def _freeze_stage_ai_config_binding(*, config) -> dict[str, Any]:
+        return {
+            "ai_config_id": config.id,
+            "config_key": config.config_key,
+            "config_version": config.version,
+            "profile_key": config.profile_key,
+            "prompt_key": config.prompt_key,
+            "activation_scope": config.activation_scope,
+            "scope_key": config.scope_key,
+            "config_sha256": config.config_sha256,
+            "release_fingerprint": config.release_fingerprint,
+            "prompt_content_sha256": config.prompt_content_sha256,
+            "model_snapshot_sha256": config.model_snapshot_sha256,
+            "output_schema_sha256": config.output_schema_sha256,
+            "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+            "stage_registry_contract_version": (
+                config.stage_registry_contract_version
+            ),
+            "budget_policy_sha256": sha256_json(config.budget_policy_json),
+        }
 
     def _validate_assignable_config(
         self,
@@ -492,6 +894,42 @@ class TaskService:
             raise TaskStateConflictError("compiled_profile_entry_invalid")
         return profile_key, contract, profile_sha
 
+    async def _load_verified_pet_profile(
+        self, *, pet_profile_id: str, owner_id: str, species: str | None
+    ) -> dict[str, Any]:
+        profile = await self.pet_profile_dal.get_by_id(pet_profile_id)
+        if profile is None:
+            raise TaskNotFoundError("pet_profile_not_found")
+        if profile.owner_id != owner_id:
+            raise TaskAccessDeniedError("pet_profile_access_denied")
+        if profile.status != "active":
+            raise TaskStateConflictError("task_pet_profile_not_active")
+        if profile.species != species:
+            raise TaskStateConflictError("task_pet_profile_species_mismatch")
+        return {
+            "contract_version": "pet-profile-context.v1",
+            "profile_id": profile.id,
+            "state_version": profile.state_version,
+            "name": profile.name,
+            "species": profile.species,
+            "breed_name": profile.breed_name,
+            "sex": profile.sex,
+            "neuter_status": profile.neuter_status,
+            "vaccination_status": profile.vaccination_status,
+            "birthday": profile.birthday.isoformat() if profile.birthday else None,
+            "weight_kg": str(profile.weight_kg) if profile.weight_kg is not None else None,
+            "weight_measured_at": (
+                profile.weight_measured_at.isoformat()
+                if profile.weight_measured_at
+                else None
+            ),
+            "last_examined_at": (
+                profile.last_examined_at.isoformat()
+                if profile.last_examined_at
+                else None
+            ),
+        }
+
     @staticmethod
     def _build_request_snapshot(
         *,
@@ -504,10 +942,19 @@ class TaskService:
         species: str | None,
         clinical_context: TaskClinicalContext | None = None,
         series_images: list | None = None,
+        quality_review: dict[str, Any] | None = None,
+        stage_ai_config_bindings: dict[str, dict[str, Any]] | None = None,
+        pet_profile: dict[str, Any] | None = None,
     ) -> dict:
         """Freeze the active Config identity once, without dereferencing sources later."""
         is_config_v2 = is_v2_config(config)
-        if task_type == "diagnose" and species not in {"cat", "dog"}:
+        if task_type in {
+            "diagnose",
+            XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
+            XRAY_IMAGE_QUALITY_TASK_TYPE,
+            XRAY_STUDY_SCREENING_TASK_TYPE,
+            XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        } and species not in {"cat", "dog"}:
             # Species is a caller-bounded fact for every new diagnostic Task.
             # Reject it before durable Task/Stage/Outbox creation instead of
             # persisting a v2 snapshot the XRay Prompt command would reject.
@@ -534,7 +981,18 @@ class TaskService:
             "resolved_manifest_sha256": study.resolved_manifest_sha256,
             # Replay preserves its legacy compatibility value. Diagnose has
             # already been fail-closed above, regardless of Config generation.
-            "species": species if task_type == "diagnose" else species or "unknown",
+            "species": (
+                species
+                if task_type
+                in {
+                    "diagnose",
+                    XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
+                    XRAY_IMAGE_QUALITY_TASK_TYPE,
+                    XRAY_STUDY_SCREENING_TASK_TYPE,
+                    XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+                }
+                else species or "unknown"
+            ),
             "series": legacy_series_snapshot,
             "ai_config_id": config.id,
             "config_key": config.config_key,
@@ -545,6 +1003,14 @@ class TaskService:
             "compiled_profile": compiled_profile,
             **frozen_clinical_context.snapshot_fields(),
         }
+        if quality_review is not None:
+            snapshot["quality_review"] = json.loads(json.dumps(quality_review))
+        if pet_profile is not None:
+            snapshot["pet_profile"] = json.loads(json.dumps(pet_profile))
+        if stage_ai_config_bindings is not None:
+            snapshot["stage_ai_config_bindings"] = json.loads(
+                json.dumps(stage_ai_config_bindings)
+            )
         if is_config_v2:
             snapshot_contract_version = TASK_REQUEST_SNAPSHOT_V3
             if series_images is not None:
@@ -617,7 +1083,16 @@ class TaskService:
                     raise TaskStateConflictError(str(exc)) from exc
             if (
                 profile_key
-                in {XRAY_PRIMARY_PROFILE_V2, XRAY_TARGETED_REVIEW_PROFILE_V2}
+                in {
+                    XRAY_PRIMARY_PROFILE_V2,
+                    XRAY_TARGETED_REVIEW_PROFILE_V2,
+                    XRAY_ANATOMY_LOCALIZATION_PROFILE_V1,
+                    XRAY_IMAGE_QUALITY_PROFILE_V1,
+                    XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+                    XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+                    XRAY_STUDY_SCREENING_PROFILE_V2,
+                    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+                }
                 and snapshot_contract_version != TASK_REQUEST_SNAPSHOT_V3
             ):
                 raise TaskStateConflictError(
@@ -675,6 +1150,338 @@ class TaskService:
         if task.requester_id != caller.subject_id:
             raise TaskAccessDeniedError("task_access_denied")
         return self._response(task)
+
+    async def get_anatomy_localization(
+        self, *, task_id: str, caller: CallerContext
+    ) -> AnatomyLocalizationResponse:
+        task = await self.task_dal.get_by_id(task_id)
+        if task is None:
+            raise TaskNotFoundError("task_not_found")
+        if task.requester_id != caller.subject_id:
+            raise TaskAccessDeniedError("task_access_denied")
+        if task.task_type != XRAY_ANATOMY_LOCALIZATION_TASK_TYPE:
+            raise TaskStateConflictError("task_not_anatomy_localization")
+        if (
+            task.execution_status != "completed"
+            or task.ai_medical_status != "not_produced"
+            or task.report_required is not False
+            or task.current_report_id is not None
+        ):
+            raise TaskStateConflictError("anatomy_localization_not_ready")
+
+        stages = await self.stage_dal.list_for_task(task.id)
+        localization_stages = [
+            stage
+            for stage in stages
+            if stage.stage_key == "anatomy_localization"
+        ]
+        if (
+            len(stages) != 2
+            or len(localization_stages) != 1
+            or stages[0].stage_key != "study_preparation"
+            or stages[0].handler_key != "study_preparation"
+            or stages[0].handler_version != "v1"
+            or stages[0].status != "completed"
+        ):
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        stage = localization_stages[0]
+        output = stage.output_json
+        if (
+            stage.stage_no != 2
+            or stage.handler_key != "anatomy_localization"
+            or stage.handler_version != "v1"
+            or stage.status != "completed"
+            or not isinstance(output, dict)
+            or stage.output_sha256 != sha256_json(output)
+        ):
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        source_call_id = output.get("source_call_id")
+        stage_result = output.get("anatomy_localization_result")
+        if not isinstance(source_call_id, str) or not isinstance(stage_result, dict):
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+
+        call = await self.call_dal.get_by_id(source_call_id)
+        config = await self.config_dal.get_by_id(task.ai_config_id)
+        snapshot = task.request_snapshot_json or {}
+        if call is None or config is None:
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        try:
+            self.config_compiler.verify_frozen_integrity(config)
+        except AIControlValidationError as exc:
+            raise TaskStateConflictError(
+                "anatomy_localization_lineage_invalid"
+            ) from exc
+        if (
+            call.id != source_call_id
+            or call.task_id != task.id
+            or call.stage_checkpoint_id != stage.id
+            or call.ai_config_id != task.ai_config_id
+            or call.config_sha256 != config.config_sha256
+            or call.schema_sha256 != config.output_schema_sha256
+            or call.status != "succeeded"
+            or call.result_disposition != "accepted"
+            or call.attempt_count != 1
+            or not isinstance(call.winner_attempt_id, str)
+            or not call.winner_attempt_id
+            or not isinstance(call.parsed_result_json, dict)
+            or not isinstance(call.image_receipt_json, dict)
+            or call.image_count_requested != call.image_count_sent
+            or config.profile_key != XRAY_ANATOMY_LOCALIZATION_PROFILE_V1
+            or config.task_type != XRAY_ANATOMY_LOCALIZATION_TASK_TYPE
+            or config.output_schema_json.get("x-ms-image-contract-version")
+            != ANATOMY_LOCALIZATION_CONTRACT_V1
+            or snapshot.get("ai_config_id") != config.id
+            or snapshot.get("config_sha256") != config.config_sha256
+            or snapshot.get("output_schema_sha256")
+            != config.output_schema_sha256
+            or snapshot.get("compiled_pipeline_sha256")
+            != config.compiled_pipeline_sha256
+            or call.requested_image_manifest_sha256
+            != snapshot.get("resolved_manifest_sha256")
+            or call.sent_image_manifest_sha256
+            != snapshot.get("resolved_manifest_sha256")
+            or call.image_count_requested != call.image_receipt_json.get("image_count")
+        ):
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        attempt_count = await self.attempt_dal.get_count(ai_call_id=call.id)
+        attempt = await self.attempt_dal.get_by_call_attempt_no(
+            ai_call_id=call.id,
+            attempt_no=1,
+        )
+        if (
+            attempt_count != 1
+            or attempt is None
+            or attempt.ai_call_id != call.id
+            or attempt.attempt_no != 1
+            or attempt.id != call.winner_attempt_id
+            or attempt.status != "succeeded"
+        ):
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        try:
+            validate_anatomy_localization_receipt_against_snapshot(
+                snapshot=snapshot,
+                image_receipt=call.image_receipt_json,
+            )
+            parsed = schema_validate_result(
+                value=call.parsed_result_json,
+                schema=config.output_schema_json,
+            )
+            validated = validate_anatomy_localization_result_contract(
+                result=parsed,
+                schema_contract_version=config.output_schema_json.get(
+                    "x-ms-image-contract-version"
+                ),
+                image_receipt=call.image_receipt_json,
+                expected_species=snapshot.get("species"),
+            )
+        except (GatewayContractError, AnatomyLocalizationContractError) as exc:
+            raise TaskStateConflictError(
+                "anatomy_localization_lineage_invalid"
+            ) from exc
+        if validated != stage_result:
+            raise TaskStateConflictError("anatomy_localization_lineage_invalid")
+        return AnatomyLocalizationResponse(
+            task_id=task.id,
+            study_id=task.study_id,
+            study_revision_id=task.study_revision_id,
+            stage_checkpoint_id=stage.id,
+            source_call_id=call.id,
+            output_sha256=stage.output_sha256,
+            result=AnatomyLocalizationResultResponse.model_validate(validated),
+        )
+
+    async def get_xray_quality_review(
+        self, *, task_id: str, caller: CallerContext
+    ) -> XRayQualityReviewResponse:
+        frozen = await self._load_verified_xray_quality_review(
+            task_id=task_id,
+            caller=caller,
+        )
+        return XRayQualityReviewResponse(
+            task_id=frozen["task_id"],
+            study_id=frozen["study_id"],
+            study_revision_id=frozen["study_revision_id"],
+            stage_checkpoint_id=frozen["stage_checkpoint_id"],
+            source_call_id=frozen["source_call_id"],
+            output_sha256=frozen["output_sha256"],
+            result=XRayQualityResultResponse.model_validate(frozen["result"]),
+        )
+
+    async def _load_verified_xray_quality_review(
+        self, *, task_id: str, caller: CallerContext
+    ) -> dict[str, Any]:
+        task = await self.task_dal.get_by_id(task_id)
+        if task is None:
+            raise TaskNotFoundError("task_not_found")
+        if task.requester_id != caller.subject_id:
+            raise TaskAccessDeniedError("task_access_denied")
+        if task.task_type != XRAY_IMAGE_QUALITY_TASK_TYPE:
+            raise TaskStateConflictError("task_not_xray_quality_control")
+        if (
+            task.execution_status != "completed"
+            or task.ai_medical_status != "not_produced"
+            or task.report_required is not False
+            or task.current_report_id is not None
+        ):
+            raise TaskStateConflictError("xray_quality_review_not_ready")
+
+        stages = await self.stage_dal.list_for_task(task.id)
+        quality_stages = [
+            stage
+            for stage in stages
+            if stage.stage_key == "batch_image_quality_review"
+        ]
+        if (
+            len(stages) != 2
+            or len(quality_stages) != 1
+            or stages[0].stage_no != 1
+            or stages[0].handler_key != "study_preparation"
+            or stages[0].handler_version != "v1"
+            or stages[0].status != "completed"
+        ):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        stage = quality_stages[0]
+        output = stage.output_json
+        if (
+            stage.stage_no != 2
+            or stage.handler_key != "batch_image_quality_review"
+            or stage.handler_version != "v1"
+            or stage.status != "completed"
+            or not isinstance(output, dict)
+            or stage.output_sha256 != sha256_json(output)
+        ):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        source_call_id = output.get("source_call_id")
+        stage_result = output.get("xray_image_quality_result")
+        if not isinstance(source_call_id, str) or not isinstance(stage_result, dict):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+
+        call = await self.call_dal.get_by_id(source_call_id)
+        config = await self.config_dal.get_by_id(task.ai_config_id)
+        snapshot = task.request_snapshot_json or {}
+        species = snapshot.get("species")
+        expected_config_key = self.IMAGE_QUALITY_CONFIG_KEYS.get(species or "")
+        expected_prompt_key = self.IMAGE_QUALITY_PROMPT_KEYS.get(species or "")
+        if call is None or config is None:
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        try:
+            self.config_compiler.verify_frozen_integrity(config)
+        except AIControlValidationError as exc:
+            raise TaskStateConflictError(
+                "xray_quality_review_lineage_invalid"
+            ) from exc
+        if (
+            expected_config_key is None
+            or expected_prompt_key is None
+            or call.id != source_call_id
+            or call.task_id != task.id
+            or call.stage_checkpoint_id != stage.id
+            or call.ai_config_id != task.ai_config_id
+            or call.config_sha256 != config.config_sha256
+            or call.schema_sha256 != config.output_schema_sha256
+            or call.status != "succeeded"
+            or call.result_disposition != "accepted"
+            or call.attempt_count != 1
+            or not isinstance(call.winner_attempt_id, str)
+            or not call.winner_attempt_id
+            or not isinstance(call.parsed_result_json, dict)
+            or not isinstance(call.image_receipt_json, dict)
+            or call.image_count_requested != call.image_count_sent
+            or config.config_key != expected_config_key
+            or config.prompt_key != expected_prompt_key
+            or config.profile_key != XRAY_IMAGE_QUALITY_PROFILE_V1
+            or config.task_type != XRAY_IMAGE_QUALITY_TASK_TYPE
+            or config.output_schema_json.get("x-ms-image-contract-version")
+            != XRAY_IMAGE_QUALITY_CONTRACT_V1
+            or snapshot.get("snapshot_contract_version")
+            != TASK_REQUEST_SNAPSHOT_V3
+            or snapshot.get("study_id") != task.study_id
+            or snapshot.get("study_revision_id") != task.study_revision_id
+            or snapshot.get("ai_config_id") != config.id
+            or snapshot.get("config_sha256") != config.config_sha256
+            or snapshot.get("output_schema_sha256")
+            != config.output_schema_sha256
+            or snapshot.get("compiled_pipeline_sha256")
+            != config.compiled_pipeline_sha256
+            or call.requested_image_manifest_sha256
+            != snapshot.get("resolved_manifest_sha256")
+            or call.sent_image_manifest_sha256
+            != snapshot.get("resolved_manifest_sha256")
+            or call.image_count_requested != call.image_receipt_json.get("image_count")
+        ):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        attempt_count = await self.attempt_dal.get_count(ai_call_id=call.id)
+        attempt = await self.attempt_dal.get_by_call_attempt_no(
+            ai_call_id=call.id,
+            attempt_no=1,
+        )
+        if (
+            attempt_count != 1
+            or attempt is None
+            or attempt.ai_call_id != call.id
+            or attempt.attempt_no != 1
+            or attempt.id != call.winner_attempt_id
+            or attempt.status != "succeeded"
+        ):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        try:
+            validate_xray_image_quality_receipt_against_snapshot(
+                snapshot=snapshot,
+                image_receipt=call.image_receipt_json,
+            )
+            parsed = schema_validate_result(
+                value=call.parsed_result_json,
+                schema=config.output_schema_json,
+            )
+            validated = validate_xray_image_quality_result_contract(
+                result=parsed,
+                schema_contract_version=config.output_schema_json.get(
+                    "x-ms-image-contract-version"
+                ),
+                image_receipt=call.image_receipt_json,
+                expected_species=species,
+            )
+        except (GatewayContractError, XRayImageQualityContractError) as exc:
+            raise TaskStateConflictError(
+                "xray_quality_review_lineage_invalid"
+            ) from exc
+        if validated != stage_result:
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+
+        receipt_images = call.image_receipt_json.get("images")
+        if not isinstance(receipt_images, list):
+            raise TaskStateConflictError("xray_quality_review_lineage_invalid")
+        merged_images = [
+            {
+                **dict(image_result),
+                "series_id": receipt["series_id"],
+                "declared_projection": receipt["projection"],
+                "projection_provenance": receipt["projection_provenance"],
+                "series_manifest_sha256": receipt["series_manifest_sha256"],
+            }
+            for receipt, image_result in zip(
+                receipt_images,
+                validated["images"],
+                strict=True,
+            )
+        ]
+        safe_result = {
+            "contract_version": validated["contract_version"],
+            "species": validated["species"],
+            "result_status": validated["result_status"],
+            "images": merged_images,
+        }
+        return {
+            "task_id": task.id,
+            "study_id": task.study_id,
+            "study_revision_id": task.study_revision_id,
+            "resolved_manifest_sha256": snapshot["resolved_manifest_sha256"],
+            "species": species,
+            "stage_checkpoint_id": stage.id,
+            "source_call_id": call.id,
+            "output_sha256": stage.output_sha256,
+            "result": safe_result,
+        }
 
     async def page_tasks(
         self, *, query: TaskPageQuery, caller: CallerContext

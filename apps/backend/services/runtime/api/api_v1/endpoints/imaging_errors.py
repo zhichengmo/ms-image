@@ -27,6 +27,12 @@ from apps.backend.services.runtime.service.task_service import (
     TaskNotFoundError,
     TaskStateConflictError,
 )
+from apps.backend.services.runtime.service.pet_profile_service import (
+    PetProfileAccessDeniedError,
+    PetProfileIdempotencyConflictError,
+    PetProfileNotFoundError,
+    PetProfileStateConflictError,
+)
 from apps.backend.services.runtime.service.report_service import ReportNotFoundError, ReportStateConflictError
 
 
@@ -48,7 +54,18 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
     if isinstance(exc, SessionAccessDeniedError):
         return _response(404, 4041, "资源不存在")
     if isinstance(
-        exc, (SessionNotFoundError, StudyNotFoundError, SeriesNotFoundError, ImageNotFoundError, TaskNotFoundError, TaskAccessDeniedError, ReportNotFoundError)
+        exc,
+        (
+            SessionNotFoundError,
+            StudyNotFoundError,
+            SeriesNotFoundError,
+            ImageNotFoundError,
+            TaskNotFoundError,
+            TaskAccessDeniedError,
+            ReportNotFoundError,
+            PetProfileNotFoundError,
+            PetProfileAccessDeniedError,
+        ),
     ):
         return _response(404, 4041, "资源不存在")
     if isinstance(
@@ -58,11 +75,20 @@ async def rollback_and_map(db: AsyncSession, exc: Exception) -> JSONResponse:
             StudyIdempotencyConflictError,
             ImageIdempotencyConflictError,
             TaskIdempotencyConflictError,
+            PetProfileIdempotencyConflictError,
         ),
     ):
         return _response(409, 4091, "幂等请求内容冲突")
     if isinstance(
-        exc, (SessionStateConflictError, StudyStateConflictError, ImageStateConflictError, TaskStateConflictError, ReportStateConflictError)
+        exc,
+        (
+            SessionStateConflictError,
+            StudyStateConflictError,
+            ImageStateConflictError,
+            TaskStateConflictError,
+            ReportStateConflictError,
+            PetProfileStateConflictError,
+        )
     ):
         return _response(409, 4092, "资源状态冲突")
     raise exc

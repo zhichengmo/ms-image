@@ -1,4 +1,4 @@
-"""Deterministic XRay Family routing Stage."""
+"""XRay 确定性 FamilyRouting 条件路由 Stage。"""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ _TARGETED_FOCUS_BY_FAMILY = {
         {
             "cardiac_silhouette",
             "pulmonary_pattern",
+            "lung_pattern",
+            "cardiovascular_contour",
             "pleural_mediastinal",
             "thoracic_wall",
         }
@@ -22,13 +24,20 @@ _TARGETED_FOCUS_BY_FAMILY = {
     "abdominal": frozenset(
         {
             "gastrointestinal_obstruction",
+            "gi_obstruction",
             "urinary_mineralization",
             "abdominal_mineralization",
             "soft_tissue_mass",
         }
     ),
     "appendicular_orthopedic": frozenset(
-        {"fracture_luxation", "long_bone_joint", "alignment", "stifle_patella"}
+        {
+            "fracture_luxation",
+            "fracture_dislocation",
+            "long_bone_joint",
+            "alignment",
+            "stifle_patella",
+        }
     ),
     "axial_orthopedic": frozenset(
         {"fracture_luxation", "alignment", "pelvis_hip"}
@@ -37,12 +46,17 @@ _TARGETED_FOCUS_BY_FAMILY = {
 
 
 class XRayFamilyRoutingStageHandler:
-    """Route deterministically while carrying the accepted Primary result forward."""
+    """在不调用 Provider 的前提下携带 Primary 结果并选择后续路径。
+
+    v1 始终输出 ``primary_final``，将已有的 Primary 状态、医学结果（若存在）和来源 Call 原样向后传递。
+    路由 Stage 不读取像素、不生成新医学事实，也不持久化 Report。
+    """
 
     handler_key = "family_routing"
     handler_version = "v1"
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
+        """生成默认直达 DecisionFinalization 的 provider-free 路由结果。"""
         stage = context.stage
         if stage.stage_key != self.handler_key:
             raise StageHandlerContractError("family_routing_stage_invalid")
@@ -66,16 +80,18 @@ class XRayFamilyRoutingStageHandler:
 
 
 class XRayFamilyRoutingV2StageHandler(XRayFamilyRoutingStageHandler):
-    """Route one schema-valid Primary candidate in the experiment profile.
+    """在实验 Profile 中校验并路由一个 Primary 提出的 Targeted 候选。
 
-    The model owns the candidate.  This handler only checks its frozen,
-    versioned vocabulary and referential integrity; it does not inspect pixels,
-    infer a Family or change the Primary medical result.
+    候选内容由模型负责；本 Handler 只检查冻结的 family/focus 词表、finding 引用唯一性
+    与引用完整性，不看像素、不推断 Family，也不修改 Primary 医学结果。候选缺失或技术
+    合同不满足时安全回退为 ``primary_final``；只有合法候选才输出
+    ``route_signal=targeted_review``。执行器据此最多动态物化一个 TargetedReview Stage。
     """
 
     handler_version = "v2"
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
+        """验证 Targeted 候选的技术引用；合法时切换条件路由，否则保留 Primary。"""
         primary_final = await super().execute(context)
         completed = primary_final.completed_result
         if completed is None:

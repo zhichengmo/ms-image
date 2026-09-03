@@ -8,6 +8,9 @@ from .ai_config_record import AIConfigRecord
 from .image import Image
 from .object_reconcile_cursor import ObjectReconcileCursor
 from .outbox import Outbox
+from .pet_info import PetInfo
+from .pet_profile import PetProfile
+from .pet_profile_history import PetProfileHistory
 from .report import Report
 from .series import Series
 from .session import Session
@@ -32,6 +35,9 @@ __all__ = [
     "Image",
     "ObjectReconcileCursor",
     "Outbox",
+    "PetInfo",
+    "PetProfile",
+    "PetProfileHistory",
     "Report",
     "Series",
     "Session",

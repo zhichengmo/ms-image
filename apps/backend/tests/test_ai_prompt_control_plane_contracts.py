@@ -32,6 +32,7 @@ from apps.backend.core.ai.gateway.contracts import (
 from apps.backend.core.ai.prompting.message_contract import (
     PROMPT_MESSAGE_CONTRACT_V1,
     PromptMessageAssembler,
+    PromptMessageContractError,
     validate_prompt_message_template,
 )
 from apps.backend.core.ai.prompting import PromptContractError
@@ -53,9 +54,7 @@ from apps.backend.schemas.ai_control import (
 from apps.backend.services.ai_control.service.ai_config_service import AIConfigService
 from apps.backend.services.ai_control.service.config_compiler import AIConfigCompiler
 from apps.backend.services.ai_control.service.errors import AIControlValidationError
-from apps.backend.services.ai_control.service.prompt_import_service import (
-    PromptImportService,
-)
+from apps.backend.services.ai_control.service.prompt_import_service import PromptImportService
 from apps.backend.services.ai_control.service.prompt_template_service import (
     PromptTemplateService,
 )
@@ -857,6 +856,53 @@ def test_prompt_message_assembler_legacy_and_v1_contracts() -> None:
     assert without_context.messages_json == [{"role": "user", "content": "角色与边界"}]
 
 
+def test_prompt_message_contract_supports_study_screening_quality_context() -> None:
+    contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+        ],
+    }
+    assert (
+        validate_prompt_message_template(
+            content="StudyScreening Prompt",
+            message_contract_json=contract,
+        )
+        == contract
+    )
+    assembled = PromptMessageAssembler.assemble(
+        rendered_text="StudyScreening rendered Prompt",
+        message_contract_json=contract,
+        safe_variables={
+            "SAFE_STUDY_CONTEXT_JSON": {"study_id": "study_1"},
+            "QUALITY_RESULTS_JSON": {"images": []},
+        },
+    )
+    assert assembled.contract_version == PROMPT_MESSAGE_CONTRACT_V1
+    assert assembled.messages_json == [
+        {"role": "user", "content": "StudyScreening rendered Prompt"}
+    ]
+
+    invalid_context_lists = (
+        ["QUALITY_RESULTS_JSON"],
+        ["SAFE_STUDY_CONTEXT_JSON", "QUALITY_RESULTS_JSON", "QUALITY_RESULTS_JSON"],
+        ["SAFE_STUDY_CONTEXT_JSON", "UNKNOWN_CONTEXT_JSON"],
+    )
+    for user_context_keys in invalid_context_lists:
+        with pytest.raises(
+            PromptMessageContractError,
+            match="prompt_message_contract_invalid",
+        ):
+            validate_prompt_message_template(
+                content="StudyScreening Prompt",
+                message_contract_json={
+                    "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+                    "user_context_keys": user_context_keys,
+                },
+            )
+
+
 def test_prompt_source_data_id_and_variant_fallback_order() -> None:
     assert (
         nacos_data_id(
@@ -879,13 +925,16 @@ def test_prompt_source_xray_uses_exact_primary_coordinates() -> None:
         ("xray_dog_primary", "dog"),
     )
     for prompt_key, variant in coordinates:
-        assert nacos_data_id(
-            service_code="ms-image",
-            module_code="xray",
-            prompt_key=prompt_key,
-            variant=variant,
-            locale="zh-CN",
-        ) == f"ms-image.x-ray.primary.{variant}.zh-CN"
+        assert (
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=variant,
+                locale="zh-CN",
+            )
+            == f"ms-image.x-ray.primary.{variant}.zh-CN"
+        )
         assert variant_candidates(variant, module_code="xray") == [variant]
 
     for invalid_variant in ("default", "rabbit"):
@@ -924,8 +973,7 @@ def test_prompt_source_xray_uses_exact_primary_coordinates() -> None:
 def test_species_primary_prompt_assets_preserve_v2_rendering_contract() -> None:
     prompt_root = Path(__file__).resolve().parents[3] / "prompts/xray/nacos/primary"
     common = (
-        prompt_root
-        / "common/zh-CN/ms-image.x-ray.primary.common.zh-CN.v2.0.0.txt"
+        prompt_root / "common/zh-CN/ms-image.x-ray.primary.common.zh-CN.v2.0.0.txt"
     ).read_text()
     common_normalized, common_variables = normalize_imported_prompt(common)
     message_contract = {
@@ -1068,10 +1116,13 @@ def test_prompt_import_explicit_variables_only_change_required_optional_split() 
         "optional": ["PRIMARY_RESULT_JSON"],
     }
 
-    assert PromptImportService._resolve_variables(
-        inferred_variables=inferred,
-        declared_variables=declared,
-    ) == declared
+    assert (
+        PromptImportService._resolve_variables(
+            inferred_variables=inferred,
+            declared_variables=declared,
+        )
+        == declared
+    )
     with pytest.raises(
         AIControlValidationError, match="prompt_import_variables_mismatch"
     ):
@@ -1318,6 +1369,27 @@ def _targeted_v2_facts(*, include_selection: bool = True) -> tuple[Any, Any]:
     return task, SimpleNamespace(input_json=stage_input)
 
 
+def _dedicated_targeted_v2_facts() -> tuple[Any, Any]:
+    task, stage = _targeted_v2_facts()
+    task.request_snapshot_json.update(
+        {
+            "quality_review": {"result": {"contract_version": "quality.v1"}},
+            "stage_ai_config_bindings": {
+                "targeted_review": {
+                    "prompt_key": "xray_dog_targeted_review",
+                }
+            },
+        }
+    )
+    stage.input_json.update(
+        {
+            "study_screening_result": {"contract_version": "screening.v2"},
+            "system_analysis_result": {"contract_version": "analysis.v1"},
+        }
+    )
+    return task, stage
+
+
 def test_targeted_v2_command_preserves_unique_route_evidence() -> None:
     task, stage = _targeted_v2_facts()
 
@@ -1356,6 +1428,52 @@ def test_targeted_v2_command_rejects_missing_route_selection() -> None:
     with pytest.raises(
         PromptContractError,
         match="targeted_prompt_selection_missing",
+    ):
+        build_targeted_ai_request_command(task=task, stage=stage)
+
+
+def test_dedicated_targeted_v2_command_exposes_all_frozen_inputs() -> None:
+    task, stage = _dedicated_targeted_v2_facts()
+
+    command = build_targeted_ai_request_command(task=task, stage=stage)
+    variables = AIRequestService._v2_safe_variables(
+        config=SimpleNamespace(
+            prompt_variables_json={
+                "contract_version": "prompt-variables.v1",
+                "required": [
+                    "SAFE_STUDY_CONTEXT_JSON",
+                    "PRIMARY_RESULT_JSON",
+                    "ROUTE_CONTEXT_JSON",
+                    "QUALITY_RESULTS_JSON",
+                    "STUDY_SCREENING_RESULT_JSON",
+                    "SYSTEM_ANALYSIS_RESULT_JSON",
+                    "OUTPUT_SCHEMA_JSON",
+                ],
+                "optional": [],
+            },
+            output_schema_json={"type": "object"},
+        ),
+        prompt_command=command,
+    )
+
+    assert variables["PRIMARY_RESULT_JSON"] is command.primary_complete_result
+    assert variables["ROUTE_CONTEXT_JSON"]["selected_family_key"] == "thoracic"
+    assert variables["QUALITY_RESULTS_JSON"] == {"contract_version": "quality.v1"}
+    assert variables["STUDY_SCREENING_RESULT_JSON"] == {
+        "contract_version": "screening.v2"
+    }
+    assert variables["SYSTEM_ANALYSIS_RESULT_JSON"] == {
+        "contract_version": "analysis.v1"
+    }
+
+
+def test_dedicated_targeted_v2_command_rejects_missing_upstream_result() -> None:
+    task, stage = _dedicated_targeted_v2_facts()
+    stage.input_json.pop("system_analysis_result")
+
+    with pytest.raises(
+        PromptContractError,
+        match="targeted_system_analysis_result_missing",
     ):
         build_targeted_ai_request_command(task=task, stage=stage)
 
@@ -1759,4 +1877,1032 @@ def test_xray_runtime_config_requires_exact_five_image_budget() -> None:
             capability=capability,
             required_logical_calls=1,
             xray_image_contract_required=True,
+        )
+
+
+def test_anatomy_localization_prompt_source_is_exact_by_species() -> None:
+    coordinates = (
+        (
+            "xray_cat_anatomy_localization",
+            "cat",
+            "ms-image.x-ray.anatomy-localization.cat.zh-CN",
+        ),
+        (
+            "xray_dog_anatomy_localization",
+            "dog",
+            "ms-image.x-ray.anatomy-localization.dog.zh-CN",
+        ),
+    )
+    for prompt_key, variant, expected_data_id in coordinates:
+        assert (
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=variant,
+                locale="zh-CN",
+            )
+            == expected_data_id
+        )
+        assert variant_candidates(variant, module_code="xray") == [variant]
+
+    for prompt_key, wrong_variant in (
+        ("xray_cat_anatomy_localization", "dog"),
+        ("xray_dog_anatomy_localization", "cat"),
+    ):
+        with pytest.raises(
+            PromptSourceError,
+            match="prompt_source_xray_variant_mismatch",
+        ):
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=wrong_variant,
+                locale="zh-CN",
+            )
+
+
+def test_anatomy_localization_assets_share_one_six_system_label_contract() -> None:
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    from apps.backend.core.ai.anatomy_localization_contract import (
+        ANATOMY_LABEL_CONTRACT_V1,
+        ANATOMY_LOCALIZATION_CONTRACT_V1,
+        anatomy_label_contract_sha256,
+        load_anatomy_label_contract,
+    )
+
+    root = Path(__file__).resolve().parents[3]
+    schema = json.loads(
+        (root / "prompts/xray/anatomy_localization.v1.schema.json").read_text()
+    )
+    Draft202012Validator.check_schema(schema)
+    labels = load_anatomy_label_contract()
+    assert len(labels) == 6
+    assert sum(len(items) for items in labels.values()) == 38
+    assert schema["x-ms-image-contract-version"] == ANATOMY_LOCALIZATION_CONTRACT_V1
+    assert schema["x-ms-image-label-contract-version"] == ANATOMY_LABEL_CONTRACT_V1
+    assert schema["x-ms-image-label-contract-sha256"] == (
+        anatomy_label_contract_sha256()
+    )
+
+    required_variables = {
+        "SAFE_STUDY_CONTEXT_JSON",
+        "OUTPUT_SCHEMA_JSON",
+    }
+    prompt_shas: set[str] = set()
+    for species in ("cat", "dog"):
+        prompt_path = (
+            root
+            / "prompts/xray/nacos/anatomy-localization"
+            / species
+            / "zh-CN"
+            / ("ms-image.x-ray.anatomy-localization." f"{species}.zh-CN.v1.0.0.md")
+        )
+        content, variables = normalize_imported_prompt(prompt_path.read_text())
+        assert set(variables["required"]) == required_variables
+        assert variables["optional"] == []
+        assert "PRIMARY_RESULT_JSON" not in content
+        rendered = PromptRenderer.render(
+            content=content,
+            variables_json=variables,
+            safe_variables={
+                "SAFE_STUDY_CONTEXT_JSON": {
+                    "task_id": "task_1",
+                    "study_revision_id": "revision_1",
+                    "species": species,
+                    "resolved_manifest_sha256": "a" * 64,
+                    "ordered_image_refs": [],
+                },
+                "OUTPUT_SCHEMA_JSON": schema,
+            },
+            max_prompt_chars=120_000,
+        )
+        assert "PRIMARY_RESULT_JSON" not in rendered.rendered_text
+        prompt_shas.add(sha256_text(content))
+    assert len(prompt_shas) == 2
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_import_requires_exact_namespace_and_release() -> (
+    None
+):
+    class FakeAudit:
+        async def find_command(self, **_kwargs):
+            return None
+
+    class FakeDal:
+        async def get_by_key_version(self, *_args):
+            return None
+
+    service = object.__new__(PromptImportService)
+    service.audit = FakeAudit()
+    service.dal = FakeDal()
+
+    base = {
+        "request_id": "request_1",
+        "prompt_key": "xray_cat_anatomy_localization",
+        "version": "1.0.0",
+        "name": "Cat Anatomy Localization",
+        "service_code": "ms-image",
+        "module_code": "xray",
+        "variant": "cat",
+        "locale": "zh-CN",
+    }
+    for missing in ("namespace_id", "nacos_release_or_version"):
+        payload = PromptImportRequest(
+            **base,
+            **{
+                "namespace_id": "namespace_1",
+                "nacos_release_or_version": "1.0.0",
+                missing: None,
+            },
+        )
+        with pytest.raises(
+            AIControlValidationError,
+            match="anatomy_localization_prompt_exact_source_required",
+        ):
+            await service.import_prompt(
+                payload=payload,
+                actor=SimpleNamespace(subject_id="actor_1"),
+            )
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_import_rejects_release_drift_before_write() -> None:
+    from apps.backend.services.ai_control.service.prompt_source import (
+        ImportedPromptRecord,
+    )
+
+    class FakeAudit:
+        async def find_command(self, **_kwargs):
+            return None
+
+    class FakeDal:
+        async def get_by_key_version(self, *_args):
+            return None
+
+    calls: list[dict[str, Any]] = []
+
+    async def fetcher(**kwargs):
+        calls.append(kwargs)
+        return ImportedPromptRecord(template="prompt", version="1.0.1")
+
+    service = object.__new__(PromptImportService)
+    service.audit = FakeAudit()
+    service.dal = FakeDal()
+    service._fetcher = fetcher
+    payload = PromptImportRequest(
+        request_id="request_1",
+        prompt_key="xray_cat_anatomy_localization",
+        version="1.0.0",
+        name="Cat Anatomy Localization",
+        service_code="ms-image",
+        module_code="xray",
+        variant="cat",
+        locale="zh-CN",
+        namespace_id="namespace_1",
+        nacos_release_or_version="1.0.0",
+    )
+
+    with pytest.raises(
+        AIControlValidationError,
+        match="anatomy_localization_prompt_release_mismatch",
+    ):
+        await service.import_prompt(
+            payload=payload,
+            actor=SimpleNamespace(subject_id="actor_1"),
+        )
+    assert calls == [
+        {
+            "data_id": "ms-image.x-ray.anatomy-localization.cat.zh-CN",
+            "version": "1.0.0",
+            "label": None,
+        }
+    ]
+
+
+def _compile_anatomy_localization_config() -> tuple[AIConfigCompiler, Any]:
+    from apps.backend.core.ai.prompting.message_contract import (
+        PROMPT_MESSAGE_CONTRACT_V1,
+    )
+
+    root = Path(__file__).resolve().parents[3]
+    content = (
+        root / "prompts/xray/nacos/anatomy-localization/cat/zh-CN/"
+        "ms-image.x-ray.anatomy-localization.cat.zh-CN.v1.0.0.md"
+    ).read_text()
+    variables = normalize_imported_prompt(content)[1]
+    gateway_profile = normalize_gateway_profile(
+        {
+            "contract_version": "ai-gateway-profile.v1",
+            "adapter_key": "openai-compatible",
+            "provider_enabled": True,
+            "qualification_status": "qualified",
+            "streaming_mode": "json",
+            "image_url_ttl_seconds": 300,
+            "allowed_actual_models": ["provider-model"],
+        }
+    )
+    capability = {
+        "contract_version": "connection-capability.v1",
+        "supports_images": True,
+        "supports_json_schema": True,
+        "supports_idempotency_key": True,
+        "supports_request_lookup": True,
+        "max_input_images": 5,
+        "max_context_tokens": 32_768,
+        "declared_regions": [],
+        "gateway_profile": gateway_profile,
+    }
+    connection_metadata = {
+        "connection_key": "xray_primary_platform",
+        "version": "1.0.0",
+        "provider_type": "openai_compatible",
+        "api_format": "chat-completions",
+        "base_url": "https://platform.example/v1",
+        "region": None,
+        "capability_json": capability,
+    }
+    connection_sha = canonical_connection_metadata_sha256(connection_metadata)
+    connection = SimpleNamespace(
+        id="connection_1",
+        status="validated",
+        connection_sha256=connection_sha,
+        **connection_metadata,
+    )
+    lane = {
+        "lane_key": "primary",
+        "priority": 1,
+        "connection_id": connection.id,
+        "connection_sha256": connection_sha,
+        "requested_model": "provider-model",
+        "timeout_ms": 120_000,
+        "max_attempts": 1,
+        "generation_params": {
+            "temperature": 0.1,
+            "top_p": 1.0,
+            "max_output_tokens": 8_192,
+        },
+    }
+    lane_plan = {
+        "contract_version": "ai-model-pool-lanes.v1",
+        "lanes": [lane],
+    }
+    pool = SimpleNamespace(
+        id="pool_1",
+        status="validated",
+        pool_key="xray_primary_single",
+        version="1.0.0",
+        execution_mode="single",
+        winner_policy="single",
+        lane_count=1,
+        lane_plan_json=lane_plan,
+        pool_sha256=sha256_json(
+            {
+                "pool_key": "xray_primary_single",
+                "version": "1.0.0",
+                "execution_mode": "single",
+                "winner_policy": "single",
+                "lane_count": 1,
+                "lane_plan_json": lane_plan,
+            }
+        ),
+    )
+    source_receipt = build_source_receipt(
+        source_type="nacos",
+        namespace="namespace_1",
+        source_key="ms-image.x-ray.anatomy-localization.cat.zh-CN",
+        release_or_version="1.0.0",
+        requested_variant="cat",
+        resolved_variant="cat",
+        fallback_used=False,
+        content_sha256=sha256_text(content),
+    )
+    prompt = SimpleNamespace(
+        id="prompt_1",
+        prompt_key="xray_cat_anatomy_localization",
+        version="1.0.0",
+        language="zh-CN",
+        status="validated",
+        content=content,
+        variables_json=variables,
+        message_contract_json={
+            "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+            "user_context_keys": ["SAFE_STUDY_CONTEXT_JSON"],
+        },
+        content_sha256=sha256_text(content),
+        source_receipt_json=source_receipt,
+        source_receipt_sha256=receipt_sha256(source_receipt),
+    )
+    compiler = AIConfigCompiler(build_default_registry())
+    compiled = compiler.compile(
+        source={
+            "config_key": "xray_anatomy_localization_cat",
+            "version": "1.0.0",
+            "name": "Cat Anatomy Localization",
+            "modality_type": "xray",
+            "task_type": "anatomy_localization",
+            "profile_key": "xray_anatomy_localization_v1",
+            "activation_scope": "global",
+            "scope_key": "global",
+            "prompt_template_id": prompt.id,
+            "model_pool_id": pool.id,
+            "budget_policy_json": {
+                "contract_version": "ai-budget-policy.v1",
+                "max_prompt_chars": 120_000,
+                "max_input_images": 5,
+                "max_total_calls": 1,
+                "max_total_attempts": 1,
+                "task_deadline_ms": 120_000,
+                "reserve_before_send": True,
+            },
+        },
+        prompt=prompt,
+        pool=pool,
+        connections=[connection],
+        require_validated_sources=True,
+    )
+    return compiler, compiled
+
+
+def test_anatomy_localization_config_compile_and_frozen_verify_are_exact() -> None:
+    compiler, compiled = _compile_anatomy_localization_config()
+    values = compiled.values
+    assert values["output_schema_json"]["x-ms-image-contract-version"] == (
+        "xray-anatomy-localization.v1"
+    )
+    assert values["prompt_source_receipt_sha256"]
+    assert values["budget_policy_json"]["max_input_images"] == 5
+    assert values["budget_policy_json"]["max_total_calls"] == 1
+    assert values["budget_policy_json"]["max_total_attempts"] == 1
+    assert len(values["model_snapshot_json"]["lanes"]) == 1
+    assert values["model_snapshot_json"]["lanes"][0]["max_attempts"] == 1
+    assert (
+        sum(
+            bool(stage["provider_required"])
+            for stage in values["compiled_pipeline_json"]["stages"]
+        )
+        == 1
+    )
+    compiler.verify_frozen_integrity(SimpleNamespace(**values))
+
+    invalid = SimpleNamespace(**values)
+    invalid.budget_policy_json = {
+        **values["budget_policy_json"],
+        "max_total_attempts": 2,
+    }
+    with pytest.raises(
+        AIControlValidationError,
+        match="anatomy_localization_single_call_budget_required",
+    ):
+        compiler.verify_frozen_integrity(invalid)
+
+
+def test_config_compiler_rejects_unknown_profile_schema_fallback() -> None:
+    with pytest.raises(
+        AIControlValidationError,
+        match="output_schema_profile_unsupported",
+    ):
+        AIConfigCompiler._output_schema(profile_key="xray_unknown_profile")
+
+
+def test_study_screening_prompt_source_is_exact_by_species() -> None:
+    coordinates = (
+        (
+            "xray_cat_study_screening",
+            "cat",
+            "ms-image.x-ray.study-screening.cat.zh-CN",
+        ),
+        (
+            "xray_dog_study_screening",
+            "dog",
+            "ms-image.x-ray.study-screening.dog.zh-CN",
+        ),
+    )
+    for prompt_key, variant, expected_data_id in coordinates:
+        assert (
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=variant,
+                locale="zh-CN",
+            )
+            == expected_data_id
+        )
+        assert variant_candidates(variant, module_code="xray") == [variant]
+
+    for prompt_key, wrong_variant in (
+        ("xray_cat_study_screening", "dog"),
+        ("xray_dog_study_screening", "cat"),
+    ):
+        with pytest.raises(
+            PromptSourceError,
+            match="prompt_source_xray_variant_mismatch",
+        ):
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=wrong_variant,
+                locale="zh-CN",
+            )
+
+
+def test_study_screening_profiles_schema_and_prompt_contract_are_exact() -> None:
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    from apps.backend.core.ai.study_screening_contract import (
+        XRAY_STUDY_SCREENING_CONTRACT_V1,
+    )
+    from apps.backend.core.pipeline import (
+        XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+        XRAY_STUDY_SCREENING_PROFILE_V1,
+        compile_profile_contract,
+    )
+
+    root = Path(__file__).resolve().parents[3]
+    schema = json.loads(
+        (root / "prompts/xray/study_screening.v1.schema.json").read_text()
+    )
+    Draft202012Validator.check_schema(schema)
+    assert schema["x-ms-image-contract-version"] == (XRAY_STUDY_SCREENING_CONTRACT_V1)
+
+    registry = build_default_registry()
+    stage_contract, _ = compile_profile_contract(
+        XRAY_STUDY_SCREENING_PROFILE_V1,
+        registry,
+    )
+    diagnose_contract, _ = compile_profile_contract(
+        XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+        registry,
+    )
+    assert [item["stage_key"] for item in stage_contract["stages"]] == [
+        "study_preparation",
+        "study_screening",
+    ]
+    assert [item["stage_key"] for item in diagnose_contract["stages"]] == [
+        "study_preparation",
+        "study_screening",
+        "joint_primary_reader",
+        "decision_finalization",
+    ]
+    assert (
+        sum(item["provider_required"] is True for item in diagnose_contract["stages"])
+        == 2
+    )
+
+    variables = {
+        "contract_version": "prompt-variables.v1",
+        "required": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+            "OUTPUT_SCHEMA_JSON",
+        ],
+        "optional": [],
+    }
+    message_contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+        ],
+    }
+    AIConfigCompiler._validate_profile_prompt_contract(
+        profile_key=XRAY_STUDY_SCREENING_PROFILE_V1,
+        variables_json=variables,
+        message_contract=message_contract,
+    )
+    import_payload = PromptImportRequest(
+        request_id="study-screening-import-contract",
+        prompt_key="xray_cat_study_screening",
+        version="1.0.0",
+        name="Cat XRay StudyScreening Prompt",
+        service_code="ms-image",
+        module_code="xray",
+        variant="cat",
+        locale="zh-CN",
+        nacos_release_or_version="1.0.0",
+        variables_json=variables,
+        message_contract_json=message_contract,
+    )
+    assert import_payload.message_contract_json is not None
+    assert import_payload.message_contract_json.user_context_keys == [
+        "SAFE_STUDY_CONTEXT_JSON",
+        "QUALITY_RESULTS_JSON",
+    ]
+    for config_key, prompt_key in (
+        ("xray_study_screening_cat", "xray_cat_study_screening"),
+        ("xray_study_screening_dog", "xray_dog_study_screening"),
+    ):
+        AIConfigCompiler._validate_study_screening_source_binding(
+            config_key=config_key,
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key=prompt_key,
+        )
+
+    with pytest.raises(
+        AIControlValidationError,
+        match="xray_study_screening_prompt_message_contract_invalid",
+    ):
+        AIConfigCompiler._validate_profile_prompt_contract(
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V1,
+            variables_json=variables,
+            message_contract={
+                **message_contract,
+                "user_context_keys": ["QUALITY_RESULTS_JSON"],
+            },
+        )
+    with pytest.raises(
+        AIControlValidationError,
+        match="xray_study_screening_config_binding_invalid",
+    ):
+        AIConfigCompiler._validate_study_screening_source_binding(
+            config_key="xray_study_screening_cat",
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key="xray_dog_study_screening",
+        )
+
+
+def test_study_screening_v2_profile_schema_prompt_and_config_contract() -> None:
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    from apps.backend.core.ai.study_screening_contract import (
+        XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+    )
+    from apps.backend.core.imaging.xray_contract import (
+        XRAY_STUDY_SCREENING_TASK_TYPE,
+        requires_exact_xray_five_image_config_contract,
+    )
+    from apps.backend.core.pipeline import (
+        XRAY_STUDY_SCREENING_PROFILE_V1,
+        XRAY_STUDY_SCREENING_PROFILE_V2,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.stages.registry import resolve_stage_handler
+
+    root = Path(__file__).resolve().parents[3]
+    schema_path = root / "prompts/xray/study_screening.v2.schema.json"
+    schema = json.loads(schema_path.read_text())
+    Draft202012Validator.check_schema(schema)
+    assert schema["x-ms-image-contract-version"] == (
+        XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2
+    )
+    assert schema["properties"]["contract_version"]["const"] == (
+        XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2
+    )
+    source_ref_schema = schema["properties"]["source_refs"]["items"]
+    assert source_ref_schema["additionalProperties"] is False
+    assert source_ref_schema["required"] == ["source_ref_id", "image_id"]
+    assert set(source_ref_schema["properties"]) == {"source_ref_id", "image_id"}
+    assert (
+        AIConfigCompiler._output_schema(profile_key=XRAY_STUDY_SCREENING_PROFILE_V2)
+        == schema
+    )
+
+    registry = build_default_registry()
+    v1_contract, v1_sha = compile_profile_contract(
+        XRAY_STUDY_SCREENING_PROFILE_V1,
+        registry,
+    )
+    v2_contract, v2_sha = compile_profile_contract(
+        XRAY_STUDY_SCREENING_PROFILE_V2,
+        registry,
+    )
+    assert [item["handler_version"] for item in v1_contract["stages"]] == [
+        "v1",
+        "v1",
+    ]
+    assert [item["handler_version"] for item in v2_contract["stages"]] == [
+        "v1",
+        "v2",
+    ]
+    assert v1_sha != v2_sha
+    assert (
+        resolve_stage_handler(
+            handler_key="study_screening",
+            handler_version="v1",
+        ).handler_version
+        == "v1"
+    )
+    assert (
+        resolve_stage_handler(
+            handler_key="study_screening",
+            handler_version="v2",
+        ).handler_version
+        == "v2"
+    )
+    assert requires_exact_xray_five_image_config_contract(
+        modality_type="xray",
+        task_type=XRAY_STUDY_SCREENING_TASK_TYPE,
+        profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+    )
+
+    variables = {
+        "contract_version": "prompt-variables.v1",
+        "required": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+            "OUTPUT_SCHEMA_JSON",
+        ],
+        "optional": [],
+    }
+    message_contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+        ],
+    }
+    AIConfigCompiler._validate_profile_prompt_contract(
+        profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+        variables_json=variables,
+        message_contract=message_contract,
+    )
+    for config_key, prompt_key in (
+        ("xray_study_screening_cat", "xray_cat_study_screening"),
+        ("xray_study_screening_dog", "xray_dog_study_screening"),
+    ):
+        AIConfigCompiler._validate_study_screening_source_binding(
+            config_key=config_key,
+            modality_type="xray",
+            task_type=XRAY_STUDY_SCREENING_TASK_TYPE,
+            profile_key=XRAY_STUDY_SCREENING_PROFILE_V2,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key=prompt_key,
+        )
+
+    for species in ("cat", "dog"):
+        prompt_path = (
+            root
+            / "prompts/xray/nacos/study-screening"
+            / species
+            / "zh-CN"
+            / ("ms-image.x-ray.study-screening." f"{species}.zh-CN.v2.0.0.md")
+        )
+        prompt = prompt_path.read_text()
+        assert "{{ SAFE_STUDY_CONTEXT_JSON | tojson }}" in prompt
+        assert "{{ QUALITY_RESULTS_JSON | tojson }}" in prompt
+        assert "{{ OUTPUT_SCHEMA_JSON | tojson }}" in prompt
+        assert "只允许输出 `source_ref_id` 和 `image_id`" in prompt
+        assert "`projection_provenance`" in prompt
+        assert "不下最终诊断" in prompt
+
+
+@pytest.mark.anyio
+async def test_system_analysis_import_requires_exact_namespace_and_release() -> None:
+    class FakeAudit:
+        async def find_command(self, **_kwargs):
+            return None
+
+    class FakeDal:
+        async def get_by_key_version(self, *_args):
+            return None
+
+    service = object.__new__(PromptImportService)
+    service.audit = FakeAudit()
+    service.dal = FakeDal()
+
+    base = {
+        "request_id": "request_system_analysis_exact_source",
+        "prompt_key": "xray_cat_system_analysis",
+        "version": "1.0.0",
+        "name": "Cat System Analysis",
+        "service_code": "ms-image",
+        "module_code": "xray",
+        "variant": "cat",
+        "locale": "zh-CN",
+    }
+    for missing in ("namespace_id", "nacos_release_or_version"):
+        payload = PromptImportRequest(
+            **base,
+            **{
+                "namespace_id": "namespace_1",
+                "nacos_release_or_version": "1.0.0",
+                missing: None,
+            },
+        )
+        with pytest.raises(
+            AIControlValidationError,
+            match="xray_system_analysis_prompt_exact_source_required",
+        ):
+            await service.import_prompt(
+                payload=payload,
+                actor=SimpleNamespace(subject_id="actor_1"),
+            )
+
+
+@pytest.mark.anyio
+async def test_system_analysis_import_rejects_release_drift_before_write() -> None:
+    from apps.backend.services.ai_control.service.prompt_source import (
+        ImportedPromptRecord,
+    )
+
+    class FakeAudit:
+        async def find_command(self, **_kwargs):
+            return None
+
+    class FakeDal:
+        async def get_by_key_version(self, *_args):
+            return None
+
+    calls: list[dict[str, Any]] = []
+
+    async def fetcher(**kwargs):
+        calls.append(kwargs)
+        return ImportedPromptRecord(template="prompt", version="1.0.1")
+
+    service = object.__new__(PromptImportService)
+    service.audit = FakeAudit()
+    service.dal = FakeDal()
+    service._fetcher = fetcher
+    payload = PromptImportRequest(
+        request_id="request_system_analysis_release_drift",
+        prompt_key="xray_cat_system_analysis",
+        version="1.0.0",
+        name="Cat System Analysis",
+        service_code="ms-image",
+        module_code="xray",
+        variant="cat",
+        locale="zh-CN",
+        namespace_id="namespace_1",
+        nacos_release_or_version="1.0.0",
+    )
+
+    with pytest.raises(
+        AIControlValidationError,
+        match="xray_system_analysis_prompt_release_mismatch",
+    ):
+        await service.import_prompt(
+            payload=payload,
+            actor=SimpleNamespace(subject_id="actor_1"),
+        )
+    assert calls == [
+        {
+            "data_id": "ms-image.x-ray.system-analysis.cat.zh-CN",
+            "version": "1.0.0",
+            "label": None,
+        }
+    ]
+
+
+def test_system_analysis_profile_schema_prompt_and_config_contract_are_exact() -> None:
+    import json
+
+    from jsonschema import Draft202012Validator
+
+    from apps.backend.core.ai.system_analysis_contract import (
+        XRAY_SYSTEM_ANALYSIS_CONTRACT_V1,
+        XRAY_SYSTEM_ANALYSIS_FAMILIES,
+    )
+    from apps.backend.core.imaging.xray_contract import (
+        XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        requires_exact_xray_five_image_config_contract,
+    )
+    from apps.backend.core.pipeline import (
+        XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.stages.registry import resolve_stage_handler
+
+    root = Path(__file__).resolve().parents[3]
+    schema_path = root / "prompts/xray/system_analysis.v1.schema.json"
+    schema = json.loads(schema_path.read_text())
+    Draft202012Validator.check_schema(schema)
+    assert schema["x-ms-image-contract-version"] == XRAY_SYSTEM_ANALYSIS_CONTRACT_V1
+    assert (
+        schema["properties"]["contract_version"]["const"]
+        == XRAY_SYSTEM_ANALYSIS_CONTRACT_V1
+    )
+    assert set(schema["$defs"]["family_key"]["enum"]) == set(
+        XRAY_SYSTEM_ANALYSIS_FAMILIES
+    )
+    source_ref_schema = schema["properties"]["source_refs"]["items"]
+    assert source_ref_schema["additionalProperties"] is False
+    assert source_ref_schema["required"] == ["source_ref_id", "image_id"]
+    assert set(source_ref_schema["properties"]) == {"source_ref_id", "image_id"}
+    assert (
+        AIConfigCompiler._output_schema(profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1)
+        == schema
+    )
+
+    profile, _profile_sha = compile_profile_contract(
+        XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+        build_default_registry(),
+    )
+    assert [
+        (item["stage_key"], item["handler_version"], item["provider_required"])
+        for item in profile["stages"]
+    ] == [
+        ("study_preparation", "v1", False),
+        ("system_analysis", "v1", True),
+    ]
+    assert (
+        resolve_stage_handler(
+            handler_key="system_analysis",
+            handler_version="v1",
+        ).handler_version
+        == "v1"
+    )
+    assert requires_exact_xray_five_image_config_contract(
+        modality_type="xray",
+        task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+        profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+    )
+
+    variables = {
+        "contract_version": "prompt-variables.v1",
+        "required": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+            "OUTPUT_SCHEMA_JSON",
+        ],
+        "optional": [],
+    }
+    message_contract = {
+        "contract_version": PROMPT_MESSAGE_CONTRACT_V1,
+        "user_context_keys": [
+            "SAFE_STUDY_CONTEXT_JSON",
+            "QUALITY_RESULTS_JSON",
+        ],
+    }
+    AIConfigCompiler._validate_profile_prompt_contract(
+        profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+        variables_json=variables,
+        message_contract=message_contract,
+    )
+
+    coordinates = (
+        (
+            "xray_system_analysis_cat",
+            "xray_cat_system_analysis",
+            "cat",
+            "ms-image.x-ray.system-analysis.cat.zh-CN",
+        ),
+        (
+            "xray_system_analysis_dog",
+            "xray_dog_system_analysis",
+            "dog",
+            "ms-image.x-ray.system-analysis.dog.zh-CN",
+        ),
+    )
+    for config_key, prompt_key, species, expected_data_id in coordinates:
+        AIConfigCompiler._validate_system_analysis_source_binding(
+            config_key=config_key,
+            modality_type="xray",
+            task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+            profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key=prompt_key,
+        )
+        assert (
+            nacos_data_id(
+                service_code="ms-image",
+                module_code="xray",
+                prompt_key=prompt_key,
+                variant=species,
+                locale="zh-CN",
+            )
+            == expected_data_id
+        )
+        assert variant_candidates(species, module_code="xray") == [species]
+        prompt_path = (
+            root
+            / "prompts/xray/nacos/system-analysis"
+            / species
+            / "zh-CN"
+            / f"{expected_data_id}.v1.0.0.md"
+        )
+        prompt = prompt_path.read_text()
+        assert "{{ SAFE_STUDY_CONTEXT_JSON | tojson }}" in prompt
+        assert "{{ QUALITY_RESULTS_JSON | tojson }}" in prompt
+        assert "{{ OUTPUT_SCHEMA_JSON | tojson }}" in prompt
+        assert "不生成 Report" in prompt
+
+    with pytest.raises(
+        PromptSourceError,
+        match="prompt_source_xray_variant_mismatch",
+    ):
+        nacos_data_id(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_cat_system_analysis",
+            variant="dog",
+            locale="zh-CN",
+        )
+    with pytest.raises(
+        AIControlValidationError,
+        match="xray_system_analysis_config_binding_invalid",
+    ):
+        AIConfigCompiler._validate_system_analysis_source_binding(
+            config_key="xray_system_analysis_cat",
+            modality_type="xray",
+            task_type=XRAY_SYSTEM_ANALYSIS_TASK_TYPE,
+            profile_key=XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key="xray_dog_system_analysis",
+        )
+
+
+def test_diagnose_full_chain_profile_and_primary_binding_are_exact() -> None:
+    from apps.backend.core.pipeline import (
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        compile_profile_contract,
+    )
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    contract, _digest = compile_profile_contract(
+        XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+        build_default_registry(),
+    )
+
+    assert [
+        (
+            item["stage_key"],
+            item["handler_version"],
+            item["provider_required"],
+        )
+        for item in contract["stages"]
+    ] == [
+        ("study_preparation", "v1", False),
+        ("study_screening", "v2", True),
+        ("system_analysis", "v1", True),
+        ("joint_primary_reader", "v2", True),
+        ("family_routing", "v2", False),
+        ("decision_finalization", "v2", False),
+        ("report_generation", "v1", True),
+    ]
+    assert contract["dynamic_stage_definitions"] == [
+        {
+            "stage_key": "targeted_review",
+            "handler_key": "targeted_review",
+            "handler_version": "v2",
+            "provider_required": True,
+            "max_instances": 1,
+        }
+    ]
+    assert contract["conditional_edges"] == [
+        {
+            "from": "family_routing",
+            "signal": "primary_final",
+            "to": "decision_finalization",
+        },
+        {
+            "from": "family_routing",
+            "signal": "targeted_review",
+            "to": "targeted_review",
+        },
+        {
+            "from": "targeted_review",
+            "signal": "completed",
+            "to": "decision_finalization",
+        },
+    ]
+    assert TaskService.FULL_CHAIN_PRIMARY_PROMPT_KEYS == {
+        "cat": "xray_cat_primary_adjudication",
+        "dog": "xray_dog_primary_adjudication",
+    }
+
+    for species, prompt_key in TaskService.FULL_CHAIN_PRIMARY_PROMPT_KEYS.items():
+        AIConfigCompiler._validate_full_chain_primary_source_binding(
+            config_key=f"xray_diagnose_{species}",
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key=XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key=prompt_key,
+        )
+
+    with pytest.raises(
+        AIControlValidationError,
+        match="xray_primary_adjudication_config_binding_invalid",
+    ):
+        AIConfigCompiler._validate_full_chain_primary_source_binding(
+            config_key="xray_diagnose_cat",
+            modality_type="xray",
+            task_type="diagnose",
+            profile_key=XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            activation_scope="global",
+            scope_key="global",
+            prompt_key="xray_cat_primary",
         )

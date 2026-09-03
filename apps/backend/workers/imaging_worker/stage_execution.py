@@ -123,6 +123,10 @@ class StageExecutionWorker:
                             image_receipt=exc.image_receipt,
                             image_manifest_sha256=exc.image_manifest_sha256,
                             image_count_sent=exc.image_count_sent,
+                            provider_request_id=exc.provider_request_id,
+                            actual_model=exc.actual_model,
+                            usage_json=exc.usage_json,
+                            response_sha256=exc.response_sha256,
                         )
                         output = await ImagingExecutionService(
                             session

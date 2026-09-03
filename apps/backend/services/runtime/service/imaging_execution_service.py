@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.backend.crud.outbox import OutboxDal
 from apps.backend.crud.stage_checkpoint import StageCheckpointDal
 from apps.backend.crud.task import TaskDal
-from apps.backend.core.pipeline import StageResult
+from apps.backend.core.ai.prompting.contracts import sha256_json
+from apps.backend.core.pipeline import (
+    XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    StageResult,
+)
 from apps.backend.models.imaging_base import new_opaque_id
 from apps.backend.schemas.outbox import ExecuteStageMessage
 from apps.backend.services.runtime.medical_status_contract import (
@@ -49,6 +53,11 @@ class ImagingExecutionService:
             task.cancel_requested_at is not None
             or task.execution_status == "cancelled"
         )
+
+    @staticmethod
+    def _is_full_chain_task(task: Any) -> bool:
+        snapshot = getattr(task, "request_snapshot_json", None) or {}
+        return snapshot.get("profile_key") == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
 
     async def _cancel_running_stage(
         self,
@@ -318,7 +327,7 @@ class ImagingExecutionService:
         self, *, task: Any, stage: Any, owner_id: str, result: Any
     ) -> dict[str, Any]:
         if result.status == "completed":
-            if stage.stage_key == "decision_finalization":
+            if stage.stage_key in {"decision_finalization", "report_generation"}:
                 try:
                     medical_status = self._project_medical_status(result.output)
                 except MedicalStatusContractError as exc:
@@ -347,6 +356,25 @@ class ImagingExecutionService:
                         error_code=str(exc),
                     )
                 else:
+                    if stage.stage_key == "report_generation":
+                        if not self._is_full_chain_task(task):
+                            raise StageExecutionStateConflict(
+                                "report_generation_profile_invalid"
+                            )
+                        return await self._complete_report_generation(
+                            task=task,
+                            stage=stage,
+                            owner_id=owner_id,
+                            output=result.output,
+                            medical_status=medical_status,
+                        )
+                    if self._is_full_chain_task(task):
+                        return await self._complete_stage(
+                            task=task,
+                            stage=stage,
+                            owner_id=owner_id,
+                            output=result.output,
+                        )
                     return await self._complete_decision_finalization(
                         task=task,
                         stage=stage,
@@ -365,9 +393,7 @@ class ImagingExecutionService:
             raise StageExecutionStateConflict(
                 result.error_code or "stage_handler_execution_failed"
             )
-        output_sha = hashlib.sha256(
-            json.dumps(result.output, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        output_sha = sha256_json(result.output)
         now = datetime.utcnow()
         failed = await self.stage_dal.finish_with_lease(
             checkpoint_id=stage.id,
@@ -423,9 +449,7 @@ class ImagingExecutionService:
         if current_task.execution_status in {"completed", "failed", "dead_letter"}:
             raise StageExecutionStateConflict("task_not_executable")
         task = current_task
-        output_sha = hashlib.sha256(
-            json.dumps(output, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        output_sha = sha256_json(output)
         now = datetime.utcnow()
         completed = await self.stage_dal.finish_with_lease(
             checkpoint_id=stage.id,
@@ -471,12 +495,83 @@ class ImagingExecutionService:
                 raise StageExecutionStateConflict("task_complete_conflict")
         return output
 
+    async def _complete_report_generation(
+        self,
+        *,
+        task,
+        stage,
+        owner_id: str,
+        output: dict[str, Any],
+        medical_status: str,
+    ) -> dict[str, Any]:
+        current_task = await self.task_dal.get_by_id_for_update(task.id)
+        if current_task is None:
+            raise StageExecutionStateConflict("task_not_found")
+        if self._task_cancel_requested(current_task):
+            return await self._cancel_running_stage(
+                task=current_task,
+                stage=stage,
+                owner_id=owner_id,
+                provider_called=True,
+            )
+        if current_task.execution_status in {"completed", "failed", "dead_letter"}:
+            raise StageExecutionStateConflict("task_not_executable")
+        output_sha = sha256_json(output)
+        now = datetime.utcnow()
+        completed = await self.stage_dal.finish_with_lease(
+            checkpoint_id=stage.id,
+            expected_version=stage.state_version,
+            owner_id=owner_id,
+            lease_generation=stage.lease_generation,
+            now=now,
+            values={
+                "status": "completed",
+                "output_json": output,
+                "output_sha256": output_sha,
+                "finished_at": now,
+            },
+        )
+        if completed is None:
+            raise StageExecutionStateConflict("stage_complete_conflict")
+        report_result = output.get("report_generation_result")
+        complete_result = output.get("complete_medical_result")
+        source_call_id = output.get("source_call_id")
+        if (
+            not isinstance(report_result, dict)
+            or not isinstance(complete_result, dict)
+            or not isinstance(source_call_id, str)
+            or not source_call_id
+        ):
+            raise StageExecutionStateConflict("report_generation_result_invalid")
+        report = await ReportService(self.outbox_dal.db).finalize(
+            task_id=current_task.id,
+            finalization_stage_id=completed.id,
+            source_call_id=source_call_id,
+            medical_status=medical_status,
+            content={
+                "medical_status": medical_status,
+                "complete_medical_result": complete_result,
+                "report_generation_result": report_result,
+            },
+        )
+        if report is None:
+            updated = await self.task_dal.cas_update(
+                task_id=current_task.id,
+                expected_version=current_task.state_version,
+                values={
+                    "execution_status": "completed",
+                    "ai_medical_status": medical_status,
+                    "finished_at": now,
+                },
+            )
+            if updated is None:
+                raise StageExecutionStateConflict("task_complete_conflict")
+        return output
+
     async def _complete_stage(
         self, *, task, stage, owner_id: str, output: dict[str, Any]
     ) -> dict[str, Any]:
-        output_sha = hashlib.sha256(
-            json.dumps(output, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
+        output_sha = sha256_json(output)
         now = datetime.utcnow()
         if self._task_cancel_requested(task):
             return await self._cancel_running_stage(
@@ -583,6 +678,33 @@ class ImagingExecutionService:
             "previous_output": output,
             "compiled_pipeline_sha256": task.compiled_pipeline_sha256,
         }
+        if self._is_full_chain_task(task):
+            current_upstream = (stage.input_json or {}).get("upstream_results") or {}
+            if not isinstance(current_upstream, Mapping):
+                raise StageExecutionStateConflict("upstream_results_invalid")
+            upstream_results = json.loads(json.dumps(current_upstream))
+            if stage.stage_key in upstream_results:
+                raise StageExecutionStateConflict("upstream_stage_duplicate")
+            upstream_results[stage.stage_key] = {
+                "source_stage_id": stage.id,
+                "source_output_sha256": output_sha,
+                "result": output,
+            }
+            next_input["upstream_results"] = upstream_results
+            if definition["stage_key"] == "targeted_review":
+                try:
+                    screening_output = upstream_results["study_screening"]["result"]
+                    system_output = upstream_results["system_analysis"]["result"]
+                    next_input["study_screening_result"] = screening_output[
+                        "study_screening_result"
+                    ]
+                    next_input["system_analysis_result"] = system_output[
+                        "system_analysis_result"
+                    ]
+                except (KeyError, TypeError) as exc:
+                    raise StageExecutionStateConflict(
+                        "targeted_review_upstream_results_missing"
+                    ) from exc
         if (
             stage.stage_key == "family_routing"
             and output.get("route_signal") == "targeted_review"

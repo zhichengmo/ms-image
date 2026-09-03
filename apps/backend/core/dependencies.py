@@ -321,6 +321,18 @@ async def get_image_service(db=Depends(get_async_session)):
     return ImageService(db)
 
 
+async def get_pet_profile_service(db=Depends(get_async_session)):
+    from apps.backend.services.runtime.service.pet_profile_service import PetProfileService
+
+    return PetProfileService(db)
+
+
+async def get_pet_info_service(db=Depends(get_async_session)):
+    from apps.backend.services.runtime.service.pet_info_service import PetInfoService
+
+    return PetInfoService(db)
+
+
 @dataclass(frozen=True)
 class ImageStorageDependencies:
     db: AsyncSession

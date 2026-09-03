@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XRayAnatomyLocalizationV1",
+  "x-ms-image-contract-version": "xray-anatomy-localization.v1",
+  "x-ms-image-label-contract-version": "xray-anatomy-labels.v1",
+  "x-ms-image-label-contract-sha256": "a6c68d583bb94fcc6270bbbcd977d09f3973cab29799a8790b0be534ee65d74a",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "label_contract_version", "species", "result_status", "images"],
+  "properties": {
+    "contract_version": {"type": "string", "const": "xray-anatomy-localization.v1"},
+    "label_contract_version": {"type": "string", "const": "xray-anatomy-labels.v1"},
+    "species": {"type": "string", "enum": ["cat", "dog"]},
+    "result_status": {"type": "string", "enum": ["complete", "partial", "unavailable"]},
+    "images": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["image_id", "series_id", "sequence_no", "projection", "series_manifest_sha256", "status", "reason_code", "organs"],
+        "properties": {
+          "image_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "series_id": {"type": "string", "minLength": 1, "maxLength": 64},
+          "sequence_no": {"type": "integer", "minimum": 1, "maximum": 5},
+          "projection": {"type": "string", "minLength": 1, "maxLength": 64},
+          "series_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "status": {"type": "string", "enum": ["localized", "not_localized"]},
+          "reason_code": {
+            "type": ["string", "null"],
+            "enum": [null, "no_supported_anatomy_visible", "insufficient_localization_evidence"]
+          },
+          "organs": {
+            "type": "array",
+            "maxItems": 38,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "cardiovascular"},
+                    "label": {"type": "string", "enum": ["heart", "aorta", "pulmonary_artery", "caudal_vena_cava"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "respiratory"},
+                    "label": {"type": "string", "enum": ["lung_left", "lung_right", "trachea", "carina", "diaphragm", "mediastinum"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "digestive"},
+                    "label": {"type": "string", "enum": ["liver", "stomach", "small_intestine", "large_intestine", "spleen"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "urogenital"},
+                    "label": {"type": "string", "enum": ["kidney_left", "kidney_right", "bladder"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "axial_skeletal"},
+                    "label": {"type": "string", "enum": ["thoracic_spine", "lumbar_spine", "cervical_spine", "caudal_vertebrae", "ribs", "sternum", "pelvis", "skull"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["system", "label", "bbox"],
+                  "properties": {
+                    "system": {"type": "string", "const": "appendicular"},
+                    "label": {"type": "string", "enum": ["scapula", "humerus", "radius", "ulna", "femur", "tibia", "fibula", "patella", "carpal_bones", "tarsal_bones", "metacarpal_bones", "metatarsal_bones"]},
+                    "bbox": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number", "minimum": 0, "maximum": 1}}
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

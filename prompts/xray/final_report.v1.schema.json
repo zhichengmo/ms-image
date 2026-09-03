@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XRayFinalReportV1",
+  "x-ms-image-contract-version": "xray-final-report.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "source_result_sha256",
+    "medical_status",
+    "study_summary",
+    "technical_quality_summary",
+    "final_medical_result"
+  ],
+  "properties": {
+    "result_schema_version": {
+      "type": "string",
+      "const": "xray-final-report.v1"
+    },
+    "source_result_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "medical_status": {
+      "type": "string",
+      "enum": ["normal", "abnormal", "review_required", "non_diagnostic"]
+    },
+    "study_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "technical_quality_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "final_medical_result": {
+      "type": "object",
+      "minProperties": 1
+    }
+  }
+}

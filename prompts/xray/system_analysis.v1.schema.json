@@ -1,0 +1,275 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "XRaySystemAnalysisV1",
+  "x-ms-image-contract-version": "xray-system-analysis.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "species",
+    "systems",
+    "cross_system_patterns",
+    "unresolved_conflicts",
+    "source_refs"
+  ],
+  "$defs": {
+    "family_key": {
+      "type": "string",
+      "enum": [
+        "thoracic",
+        "abdominal",
+        "axial_orthopedic",
+        "appendicular_orthopedic",
+        "head_neck"
+      ]
+    },
+    "source_ref_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "label",
+        "description",
+        "certainty",
+        "alternative_explanations",
+        "source_ref_ids"
+      ],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1200
+        },
+        "certainty": {
+          "type": "string",
+          "enum": ["high", "moderate", "low", "indeterminate"]
+        },
+        "alternative_explanations": {
+          "type": "array",
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+      }
+    },
+    "counterevidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "description", "source_ref_ids"],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+      }
+    },
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limitation_id", "description", "source_ref_ids"],
+      "properties": {
+        "limitation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+      }
+    }
+  },
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "const": "xray-system-analysis.v1"
+    },
+    "species": {
+      "type": "string",
+      "enum": ["cat", "dog"]
+    },
+    "systems": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "family_key",
+          "assessment_status",
+          "visible_structures",
+          "findings",
+          "normal_counterevidence",
+          "limitations",
+          "source_ref_ids"
+        ],
+        "properties": {
+          "family_key": {"$ref": "#/$defs/family_key"},
+          "assessment_status": {
+            "type": "string",
+            "enum": ["assessed", "limited", "not_assessed"]
+          },
+          "visible_structures": {
+            "type": "array",
+            "maxItems": 40,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            }
+          },
+          "findings": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {"$ref": "#/$defs/finding"}
+          },
+          "normal_counterevidence": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {"$ref": "#/$defs/counterevidence"}
+          },
+          "limitations": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {"$ref": "#/$defs/limitation"}
+          },
+          "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+        }
+      }
+    },
+    "cross_system_patterns": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pattern_id",
+          "description",
+          "interpretation",
+          "family_keys",
+          "source_ref_ids"
+        ],
+        "properties": {
+          "pattern_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200
+          },
+          "interpretation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200
+          },
+          "family_keys": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {"$ref": "#/$defs/family_key"}
+          },
+          "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+        }
+      }
+    },
+    "unresolved_conflicts": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conflict_id",
+          "description",
+          "affected_family_keys",
+          "source_ref_ids"
+        ],
+        "properties": {
+          "conflict_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1200
+          },
+          "affected_family_keys": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "uniqueItems": true,
+            "items": {"$ref": "#/$defs/family_key"}
+          },
+          "source_ref_ids": {"$ref": "#/$defs/source_ref_ids"}
+        }
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_ref_id", "image_id"],
+        "properties": {
+          "source_ref_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "image_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        }
+      }
+    }
+  }
+}

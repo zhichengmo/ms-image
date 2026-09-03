@@ -101,16 +101,33 @@ class PromptMessageContract(_StrictModel):
     """Optional multi-message runtime contract for a complete Prompt body."""
 
     contract_version: str = "prompt-message-contract.v1"
-    user_context_keys: list[str] = Field(min_length=1, max_length=2)
+    user_context_keys: list[str] = Field(min_length=1, max_length=8)
 
     @model_validator(mode="after")
     def verify_contract(self) -> "PromptMessageContract":
-        allowed = {"SAFE_STUDY_CONTEXT_JSON", "PRIMARY_RESULT_JSON"}
+        allowed = {
+            "SAFE_STUDY_CONTEXT_JSON",
+            "PRIMARY_RESULT_JSON",
+            "QUALITY_RESULTS_JSON",
+            "ROUTE_CONTEXT_JSON",
+            "STUDY_SCREENING_RESULT_JSON",
+            "SYSTEM_ANALYSIS_RESULT_JSON",
+            "FINAL_MEDICAL_RESULT_JSON",
+            "REPORT_SCHEMA_JSON",
+        }
         if (
             self.contract_version != "prompt-message-contract.v1"
             or len(self.user_context_keys) != len(set(self.user_context_keys))
             or any(key not in allowed for key in self.user_context_keys)
-            or "SAFE_STUDY_CONTEXT_JSON" not in self.user_context_keys
+            or (
+                "SAFE_STUDY_CONTEXT_JSON" not in self.user_context_keys
+                and set(self.user_context_keys)
+                != {
+                    "FINAL_MEDICAL_RESULT_JSON",
+                    "QUALITY_RESULTS_JSON",
+                    "REPORT_SCHEMA_JSON",
+                }
+            )
         ):
             raise ValueError("prompt_message_contract_invalid")
         return self

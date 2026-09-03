@@ -15,13 +15,29 @@ from apps.backend.services.runtime.stages.xray.family_routing import (
     XRayFamilyRoutingStageHandler,
     XRayFamilyRoutingV2StageHandler,
 )
+from apps.backend.services.runtime.stages.xray.anatomy_localization import (
+    AnatomyLocalizationStageHandler,
+)
 from apps.backend.services.runtime.stages.xray.joint_primary_reader import (
     XRayJointPrimaryReaderStageHandler,
     XRayJointPrimaryReaderV2StageHandler,
 )
+from apps.backend.services.runtime.stages.xray.image_quality import (
+    BatchImageQualityReviewStageHandler,
+)
+from apps.backend.services.runtime.stages.xray.study_screening import (
+    StudyScreeningStageHandler,
+    StudyScreeningV2StageHandler,
+)
+from apps.backend.services.runtime.stages.xray.system_analysis import (
+    SystemAnalysisStageHandler,
+)
 from apps.backend.services.runtime.stages.xray.targeted_review import (
     XRayTargetedReviewStageHandler,
     XRayTargetedReviewV2StageHandler,
+)
+from apps.backend.services.runtime.stages.xray.report_generation import (
+    ReportGenerationStageHandler,
 )
 
 
@@ -42,6 +58,15 @@ def resolve_stage_handler(
         ("family_routing", "v2"): XRayFamilyRoutingV2StageHandler(),
         ("targeted_review", "v2"): XRayTargetedReviewV2StageHandler(),
         ("decision_finalization", "v2"): DecisionFinalizationV2StageHandler(),
+        ("anatomy_localization", "v1"): AnatomyLocalizationStageHandler(),
+        (
+            "batch_image_quality_review",
+            "v1",
+        ): BatchImageQualityReviewStageHandler(),
+        ("study_screening", "v1"): StudyScreeningStageHandler(),
+        ("study_screening", "v2"): StudyScreeningV2StageHandler(),
+        ("system_analysis", "v1"): SystemAnalysisStageHandler(),
+        ("report_generation", "v1"): ReportGenerationStageHandler(),
     }
     handler = handlers.get((handler_key, handler_version))
     if handler is None:

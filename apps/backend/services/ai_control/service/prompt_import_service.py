@@ -44,6 +44,43 @@ from apps.backend.services.ai_control.service.prompt_template_service import (
 )
 
 NacosFetcher = Callable[..., Awaitable[ImportedPromptRecord | None]]
+XRAY_ANATOMY_LOCALIZATION_PROMPT_KEYS = frozenset(
+    {
+        "xray_cat_anatomy_localization",
+        "xray_dog_anatomy_localization",
+    }
+)
+XRAY_IMAGE_QUALITY_PROMPT_KEYS = frozenset(
+    {
+        "xray_cat_image_quality",
+        "xray_dog_image_quality",
+    }
+)
+XRAY_STUDY_SCREENING_PROMPT_KEYS = frozenset(
+    {
+        "xray_cat_study_screening",
+        "xray_dog_study_screening",
+    }
+)
+XRAY_SYSTEM_ANALYSIS_PROMPT_KEYS = frozenset(
+    {
+        "xray_cat_system_analysis",
+        "xray_dog_system_analysis",
+    }
+)
+XRAY_TARGETED_REVIEW_PROMPT_KEYS = frozenset(
+    {
+        "xray_cat_targeted_review",
+        "xray_dog_targeted_review",
+    }
+)
+XRAY_EXACT_SOURCE_PROMPT_KEYS = (
+    XRAY_ANATOMY_LOCALIZATION_PROMPT_KEYS
+    | XRAY_IMAGE_QUALITY_PROMPT_KEYS
+    | XRAY_STUDY_SCREENING_PROMPT_KEYS
+    | XRAY_SYSTEM_ANALYSIS_PROMPT_KEYS
+    | XRAY_TARGETED_REVIEW_PROMPT_KEYS
+)
 
 
 class PromptImportService:
@@ -202,6 +239,70 @@ class PromptImportService:
             raise AIControlStateConflictError("ai_prompt_template_key_version_exists")
 
         requested_variant = payload.variant
+        exact_localization_source = (
+            payload.module_code == "xray"
+            and payload.prompt_key in XRAY_ANATOMY_LOCALIZATION_PROMPT_KEYS
+        )
+        exact_quality_source = (
+            payload.module_code == "xray"
+            and payload.prompt_key in XRAY_IMAGE_QUALITY_PROMPT_KEYS
+        )
+        exact_screening_source = (
+            payload.module_code == "xray"
+            and payload.prompt_key in XRAY_STUDY_SCREENING_PROMPT_KEYS
+        )
+        exact_system_analysis_source = (
+            payload.module_code == "xray"
+            and payload.prompt_key in XRAY_SYSTEM_ANALYSIS_PROMPT_KEYS
+        )
+        exact_targeted_review_source = (
+            payload.module_code == "xray"
+            and payload.prompt_key in XRAY_TARGETED_REVIEW_PROMPT_KEYS
+        )
+        exact_xray_source = (
+            exact_localization_source
+            or exact_quality_source
+            or exact_screening_source
+            or exact_system_analysis_source
+            or exact_targeted_review_source
+        )
+        if exact_xray_source and (
+            payload.namespace_id is None or payload.nacos_release_or_version is None
+        ):
+            raise AIControlValidationError(
+                "anatomy_localization_prompt_exact_source_required"
+                if exact_localization_source
+                else (
+                    "xray_image_quality_prompt_exact_source_required"
+                    if exact_quality_source
+                    else (
+                        "xray_study_screening_prompt_exact_source_required"
+                        if exact_screening_source
+                        else (
+                            "xray_system_analysis_prompt_exact_source_required"
+                            if exact_system_analysis_source
+                            else "xray_targeted_review_prompt_exact_source_required"
+                        )
+                    )
+                )
+            )
+        namespace_id = (
+            payload.namespace_id
+            or settings.NACOS_PROMPT_NAMESPACE_ID
+            or settings.NACOS_NAMESPACE_ID
+        )
+        release_or_version = (
+            payload.nacos_release_or_version
+            if exact_xray_source
+            else payload.nacos_release_or_version
+            or settings.NACOS_PROMPT_VERSION
+            or None
+        )
+        nacos_label = (
+            payload.nacos_label
+            if exact_xray_source
+            else payload.nacos_label or settings.NACOS_PROMPT_LABEL or None
+        )
         try:
             candidates = variant_candidates(
                 requested_variant,
@@ -223,20 +324,34 @@ class PromptImportService:
                 raise AIControlValidationError(str(exc)) from exc
             record = await self._fetch_nacos(
                 data_id=data_id,
-                release_or_version=(
-                    payload.nacos_release_or_version
-                    or settings.NACOS_PROMPT_VERSION
-                    or None
-                ),
-                label=payload.nacos_label or settings.NACOS_PROMPT_LABEL or None,
-                namespace_id=(
-                    payload.namespace_id
-                    or settings.NACOS_PROMPT_NAMESPACE_ID
-                    or settings.NACOS_NAMESPACE_ID
-                ),
+                release_or_version=release_or_version,
+                label=nacos_label,
+                namespace_id=namespace_id,
             )
             if record is None:
                 continue
+            if (
+                exact_xray_source
+                and record.version
+                and record.version != release_or_version
+            ):
+                raise AIControlValidationError(
+                    "anatomy_localization_prompt_release_mismatch"
+                    if exact_localization_source
+                    else (
+                        "xray_image_quality_prompt_release_mismatch"
+                        if exact_quality_source
+                        else (
+                            "xray_study_screening_prompt_release_mismatch"
+                            if exact_screening_source
+                            else (
+                                "xray_system_analysis_prompt_release_mismatch"
+                                if exact_system_analysis_source
+                                else "xray_targeted_review_prompt_release_mismatch"
+                            )
+                        )
+                    )
+                )
             resolved = (candidate, data_id, record)
             break
         if resolved is None:
@@ -267,17 +382,14 @@ class PromptImportService:
         except PromptMessageContractError as exc:
             raise AIControlValidationError(str(exc)) from exc
         content_sha256 = PromptTemplateService.content_sha(content)
-        namespace_id = (
-            payload.namespace_id
-            or settings.NACOS_PROMPT_NAMESPACE_ID
-            or settings.NACOS_NAMESPACE_ID
-        )
         receipt = build_source_receipt(
             source_type="nacos",
             namespace=namespace_id,
             source_key=data_id,
             release_or_version=(
-                record.version
+                release_or_version
+                if exact_xray_source
+                else record.version
                 or record.label
                 or record.md5
                 or payload.nacos_release_or_version

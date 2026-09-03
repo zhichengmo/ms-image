@@ -19,6 +19,33 @@ from apps.backend.core.ai.config_contract import (
     TASK_REQUEST_SNAPSHOT_V3,
     is_v2_config,
 )
+from apps.backend.core.ai.anatomy_localization_contract import (
+    ANATOMY_LOCALIZATION_CONTRACT_V1,
+    AnatomyLocalizationContractError,
+    validate_anatomy_localization_result_contract,
+)
+from apps.backend.core.ai.image_quality_contract import (
+    XRAY_IMAGE_QUALITY_CONTRACT_V1,
+    XRayImageQualityContractError,
+    validate_xray_image_quality_result_contract,
+)
+from apps.backend.core.ai.study_screening_contract import (
+    XRAY_STUDY_SCREENING_CONTRACT_V1,
+    XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2,
+    XRayStudyScreeningContractError,
+    validate_xray_study_screening_provider_result_contract,
+    validate_xray_study_screening_result_contract,
+)
+from apps.backend.core.ai.system_analysis_contract import (
+    XRAY_SYSTEM_ANALYSIS_CONTRACT_V1,
+    XRaySystemAnalysisContractError,
+    validate_xray_system_analysis_result_contract,
+)
+from apps.backend.core.ai.report_generation_contract import (
+    XRAY_FINAL_REPORT_CONTRACT_V1,
+    XRayReportGenerationContractError,
+    validate_xray_report_generation_result_contract,
+)
 from apps.backend.core.ai.prompting import (
     PromptCatalog,
     PromptCompiler,
@@ -53,7 +80,16 @@ from apps.backend.core.ai.gateway.image_signer import (
     build_oss_attempt_image_signer,
 )
 from apps.backend.core.ai.gateway_client import GatewayClient, GatewayResponseParseError
-from apps.backend.core.pipeline import build_default_registry
+from apps.backend.core.pipeline import (
+    XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1,
+    XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+    XRAY_REPORT_GENERATION_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V1,
+    XRAY_STUDY_SCREENING_PROFILE_V2,
+    XRAY_SYSTEM_ANALYSIS_PROFILE_V1,
+    XRAY_TARGETED_REVIEW_PROFILE_V2,
+    build_default_registry,
+)
 from apps.backend.crud.ai_call import AICallDal
 from apps.backend.crud.ai_call_attempt import AICallAttemptDal
 from apps.backend.crud.ai_config_record import AIConfigRecordDal
@@ -86,6 +122,39 @@ class AIRequestStateConflict(AIRequestServiceError):
 class AIRequestService:
     """Create durable Logical Call facts without contacting a Provider in Phase C."""
 
+    STUDY_SCREENING_CONFIG_KEYS = {
+        "cat": "xray_study_screening_cat",
+        "dog": "xray_study_screening_dog",
+    }
+    STUDY_SCREENING_PROMPT_KEYS = {
+        "cat": "xray_cat_study_screening",
+        "dog": "xray_dog_study_screening",
+    }
+    TARGETED_REVIEW_CONFIG_KEYS = {
+        "cat": "xray_targeted_review_cat",
+        "dog": "xray_targeted_review_dog",
+    }
+    TARGETED_REVIEW_PROMPT_KEYS = {
+        "cat": "xray_cat_targeted_review",
+        "dog": "xray_dog_targeted_review",
+    }
+    SYSTEM_ANALYSIS_CONFIG_KEYS = {
+        "cat": "xray_system_analysis_cat",
+        "dog": "xray_system_analysis_dog",
+    }
+    SYSTEM_ANALYSIS_PROMPT_KEYS = {
+        "cat": "xray_cat_system_analysis",
+        "dog": "xray_dog_system_analysis",
+    }
+    REPORT_GENERATION_CONFIG_KEYS = {
+        "cat": "xray_report_generation_cat",
+        "dog": "xray_report_generation_dog",
+    }
+    REPORT_GENERATION_PROMPT_KEYS = {
+        "cat": "xray_cat_report_generation",
+        "dog": "xray_dog_report_generation",
+    }
+
     def __init__(self, db: AsyncSession):
         self.call_dal = AICallDal(db)
         self.attempt_dal = AICallAttemptDal(db)
@@ -111,9 +180,7 @@ class AIRequestService:
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
         if task is None or stage is None or stage.task_id != task.id:
             raise AIRequestStateConflict("ai_call_stage_task_mismatch")
-        config = await self.config_dal.get_by_id(task.ai_config_id)
-        if config is None:
-            raise AIRequestStateConflict("ai_call_config_not_found")
+        config = await self._resolve_task_stage_config(task=task, stage=stage)
         if not is_v2_config(config):
             result = await self._prepare_v1_provider_disabled_call(
                 task=task,
@@ -168,9 +235,7 @@ class AIRequestService:
             raise AIRequestStateConflict("ai_call_stage_task_mismatch")
         # Runtime is intentionally bound to the Task's immutable Config reference,
         # never to the currently active Config or mutable Prompt/Pool/Connection rows.
-        config = await self.config_dal.get_by_id(task.ai_config_id)
-        if config is None:
-            raise AIRequestStateConflict("ai_call_config_not_found")
+        config = await self._resolve_task_stage_config(task=task, stage=stage)
         if is_v2_config(config):
             return await self._prepare_v2_provider_disabled_call(
                 task=task,
@@ -321,7 +386,11 @@ class AIRequestService:
             self.config_compiler.verify_frozen_integrity(config)
         except AIControlValidationError as exc:
             raise AIRequestStateConflict(str(exc)) from exc
-        self._validate_v2_task_config_snapshot(task=task, config=config)
+        self._validate_v2_task_config_snapshot(
+            task=task,
+            stage=stage,
+            config=config,
+        )
 
         model_snapshot = config.model_snapshot_json
         if not isinstance(model_snapshot, Mapping):
@@ -340,16 +409,26 @@ class AIRequestService:
         (
             max_prompt_chars,
             max_input_images,
+            _,
+            _,
+            _,
+        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
+        (
+            _,
+            _,
             max_total_calls,
             max_total_attempts,
             task_deadline_ms,
-        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
+        ) = self._validate_v2_budget_policy(
+            budget_policy=task.budget_snapshot_json
+        )
 
         manifest_sha = self._stage_manifest_sha256(stage=stage)
-        image_count = self._v2_image_count(task=task)
+        image_count = self._v2_image_count(task=task, stage=stage)
         self._require_xray_image_count(
             config=config,
             task=task,
+            stage=stage,
             image_count=image_count,
         )
         if image_count > max_input_images:
@@ -375,7 +454,7 @@ class AIRequestService:
             generation_params=generation_params,
             budget_policy=budget_policy,
         )
-        budget_policy_sha256 = sha256_json(budget_policy)
+        budget_policy_sha256 = sha256_json(task.budget_snapshot_json)
         now = datetime.utcnow()
         task_created_at = task.created_at
         if not isinstance(task_created_at, datetime):
@@ -924,9 +1003,7 @@ class AIRequestService:
         stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
         if task is None or stage is None or stage.task_id != task.id:
             raise AIRequestStateConflict("ai_call_stage_task_mismatch")
-        config = await self.config_dal.get_by_id(task.ai_config_id)
-        if config is None:
-            raise AIRequestStateConflict("ai_call_config_not_found")
+        config = await self._resolve_task_stage_config(task=task, stage=stage)
         if not is_v2_config(config) or config.status not in {"active", "retired"}:
             raise AIRequestStateConflict("ai_call_config_state_invalid")
         try:
@@ -942,7 +1019,11 @@ class AIRequestService:
             self.config_compiler.verify_frozen_integrity(config)
         except AIControlValidationError as exc:
             raise AIRequestStateConflict(str(exc)) from exc
-        self._validate_v2_task_config_snapshot(task=task, config=config)
+        self._validate_v2_task_config_snapshot(
+            task=task,
+            stage=stage,
+            config=config,
+        )
 
         lane = self._frozen_lane(config=config)
         requested_model = lane.get("requested_model")
@@ -967,16 +1048,26 @@ class AIRequestService:
         (
             max_prompt_chars,
             max_input_images,
+            _,
+            _,
+            _,
+        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
+        (
+            _,
+            _,
             max_total_calls,
             max_total_attempts,
             task_deadline_ms,
-        ) = self._validate_v2_budget_policy(budget_policy=budget_policy)
+        ) = self._validate_v2_budget_policy(
+            budget_policy=task.budget_snapshot_json
+        )
 
         manifest_sha = self._stage_manifest_sha256(stage=stage)
-        image_count = self._v2_image_count(task=task)
+        image_count = self._v2_image_count(task=task, stage=stage)
         self._require_xray_image_count(
             config=config,
             task=task,
+            stage=stage,
             image_count=image_count,
         )
         if image_count > max_input_images:
@@ -998,7 +1089,7 @@ class AIRequestService:
             generation_params=generation_params,
             budget_policy=budget_policy,
         )
-        budget_policy_sha256 = sha256_json(budget_policy)
+        budget_policy_sha256 = sha256_json(task.budget_snapshot_json)
         now = datetime.utcnow()
         task_created_at = task.created_at
         if not isinstance(task_created_at, datetime):
@@ -1210,11 +1301,15 @@ class AIRequestService:
             raise AIRequestStateConflict("ai_call_rendered_messages_missing")
         task = await self.task_dal.get_by_id_for_update(call.task_id)
         self._ensure_task_accepts_new_attempt(task)
+        stage = await self.stage_dal.get_by_id(call.stage_checkpoint_id)
+        if stage is None or stage.task_id != task.id:
+            raise AIRequestStateConflict("ai_call_stage_task_mismatch")
         if call.winner_attempt_id is not None:
             raise AIRequestStateConflict("ai_call_winner_already_selected")
         self._require_xray_image_count(
             config=config,
             task=task,
+            stage=stage,
             image_count=call.image_count_requested,
         )
         image_inputs = await self._load_attempt_image_inputs(
@@ -1246,11 +1341,16 @@ class AIRequestService:
             "xray_image_contract_required": self._xray_image_contract_required(
                 config=config,
                 task=task,
+                stage=stage,
             ),
             "snapshot_contract_version": (task.request_snapshot_json or {}).get(
                 "snapshot_contract_version"
             ),
+            "expected_species": (task.request_snapshot_json or {}).get("species"),
             "image_url_ttl_seconds": gateway_profile["image_url_ttl_seconds"],
+            "report_generation_expected": self._report_generation_expected(
+                stage=stage
+            ),
         }
 
     @staticmethod
@@ -1345,6 +1445,10 @@ class AIRequestService:
         except RuntimeError as exc:
             raise GatewayContractError("provider_response_payload_invalid") from exc
 
+        provider_request_id_audit: str | None = None
+        actual_model_audit: str | None = None
+        usage_json_audit: dict[str, Any] | None = None
+        response_sha256_audit: str | None = None
         try:
             if not isinstance(gateway_result, Mapping):
                 raise GatewayContractError("provider_response_payload_invalid")
@@ -1357,11 +1461,14 @@ class AIRequestService:
                 or not provider_request_id.strip()
             ):
                 raise GatewayContractError("provider_request_id_missing")
+            provider_request_id_audit = provider_request_id.strip()
             content = AIRequestService._provider_message_content(body)
             actual_model = body.get("model") or gateway_request.requested_model
             if not isinstance(actual_model, str) or not actual_model.strip():
                 raise GatewayContractError("provider_actual_model_missing")
             actual_model = actual_model.strip()
+            actual_model_audit = actual_model
+            response_sha256_audit = response_sha256(body)
             allowed_models = set(gateway_request.allowed_actual_models) or {
                 gateway_request.requested_model
             }
@@ -1370,35 +1477,128 @@ class AIRequestService:
             usage = body.get("usage")
             if usage is not None and not isinstance(usage, Mapping):
                 raise GatewayContractError("provider_usage_invalid")
+            usage_json_audit = dict(usage) if isinstance(usage, Mapping) else None
             parsed_result = schema_validate_result(
                 value=content,
                 schema=gateway_request.response_schema,
             )
+            schema_contract_version = gateway_request.response_schema.get(
+                "x-ms-image-contract-version"
+            )
             try:
-                parsed_result = validate_xray_result_contract(
-                    result=parsed_result,
-                    schema_contract_version=gateway_request.response_schema.get(
-                        "x-ms-image-contract-version"
-                    ),
-                    image_receipt=image_receipt,
-                )
-            except XRayResultContractError as exc:
+                if schema_contract_version in {
+                    "complete-medical-result.v1",
+                    "complete-medical-result.v2",
+                }:
+                    parsed_result = validate_xray_result_contract(
+                        result=parsed_result,
+                        schema_contract_version=schema_contract_version,
+                        image_receipt=image_receipt,
+                    )
+                elif schema_contract_version == ANATOMY_LOCALIZATION_CONTRACT_V1:
+                    parsed_result = validate_anatomy_localization_result_contract(
+                        result=parsed_result,
+                        schema_contract_version=schema_contract_version,
+                        image_receipt=image_receipt,
+                        expected_species=network_plan.get("expected_species"),
+                    )
+                elif schema_contract_version == XRAY_IMAGE_QUALITY_CONTRACT_V1:
+                    parsed_result = validate_xray_image_quality_result_contract(
+                        result=parsed_result,
+                        schema_contract_version=schema_contract_version,
+                        image_receipt=image_receipt,
+                        expected_species=network_plan.get("expected_species"),
+                    )
+                elif schema_contract_version == XRAY_STUDY_SCREENING_CONTRACT_V1:
+                    parsed_result = validate_xray_study_screening_result_contract(
+                        result=parsed_result,
+                        schema_contract_version=schema_contract_version,
+                        image_receipt=image_receipt,
+                        expected_species=network_plan.get("expected_species"),
+                    )
+                elif (
+                    schema_contract_version
+                    == XRAY_STUDY_SCREENING_PROVIDER_CONTRACT_V2
+                ):
+                    parsed_result = (
+                        validate_xray_study_screening_provider_result_contract(
+                            result=parsed_result,
+                            schema_contract_version=schema_contract_version,
+                            image_receipt=image_receipt,
+                            expected_species=network_plan.get("expected_species"),
+                        )
+                    )
+                elif schema_contract_version == XRAY_SYSTEM_ANALYSIS_CONTRACT_V1:
+                    parsed_result = validate_xray_system_analysis_result_contract(
+                        result=parsed_result,
+                        schema_contract_version=schema_contract_version,
+                        image_receipt=image_receipt,
+                        expected_species=network_plan.get("expected_species"),
+                    )
+                elif schema_contract_version == XRAY_FINAL_REPORT_CONTRACT_V1:
+                    expected_report = network_plan.get(
+                        "report_generation_expected"
+                    )
+                    if not isinstance(expected_report, Mapping):
+                        raise XRayReportGenerationContractError(
+                            "report_generation_expected_result_missing"
+                        )
+                    parsed_result = (
+                        validate_xray_report_generation_result_contract(
+                            result=parsed_result,
+                            schema_contract_version=schema_contract_version,
+                            expected_source_result_sha256=expected_report.get(
+                                "source_result_sha256"
+                            ),
+                            expected_final_medical_result=expected_report.get(
+                                "final_medical_result"
+                            ),
+                        )
+                    )
+                else:
+                    raise GatewayContractError(
+                        "provider_result_contract_version_unsupported"
+                    )
+            except (
+                XRayResultContractError,
+                AnatomyLocalizationContractError,
+                XRayImageQualityContractError,
+                XRayStudyScreeningContractError,
+                XRaySystemAnalysisContractError,
+                XRayReportGenerationContractError,
+            ) as exc:
                 raise GatewayContractError(str(exc)) from exc
             execution = GatewayExecutionResult(
-                provider_request_id=provider_request_id.strip(),
+                provider_request_id=provider_request_id_audit,
                 actual_model=actual_model,
-                usage_json=dict(usage) if isinstance(usage, Mapping) else None,
+                usage_json=usage_json_audit,
                 parsed_result_json=parsed_result,
-                response_sha256=response_sha256(body),
+                response_sha256=response_sha256_audit,
                 duration_ms=max(0, round((monotonic() - started) * 1000)),
                 transport_mode="json",
             )
         except GatewayContractError as exc:
+            provider_response_observed = all(
+                value is not None
+                for value in (
+                    provider_request_id_audit,
+                    actual_model_audit,
+                    response_sha256_audit,
+                )
+            )
             raise GatewayDefiniteResponseError(
                 str(exc),
                 image_receipt=image_receipt,
                 image_manifest_sha256=image_manifest_sha256,
                 image_count_sent=image_count_sent,
+                provider_request_id=(
+                    provider_request_id_audit if provider_response_observed else None
+                ),
+                actual_model=actual_model_audit if provider_response_observed else None,
+                usage_json=usage_json_audit if provider_response_observed else None,
+                response_sha256=(
+                    response_sha256_audit if provider_response_observed else None
+                ),
             ) from exc
         return {
             "execution": execution,
@@ -1519,6 +1719,10 @@ class AIRequestService:
         image_receipt: Mapping[str, Any] | None = None,
         image_manifest_sha256: str | None = None,
         image_count_sent: int | None = None,
+        provider_request_id: str | None = None,
+        actual_model: str | None = None,
+        usage_json: Mapping[str, Any] | None = None,
+        response_sha256: str | None = None,
     ) -> dict[str, Any]:
         """Boundary C: persist a definite failure or an uncertain delivery."""
         delivery_values: dict[str, Any] = {}
@@ -1544,6 +1748,54 @@ class AIRequestService:
                 "image_count_sent": image_count_sent,
                 "image_receipt_json": dict(image_receipt),
             }
+        provider_response_values: dict[str, Any] = {}
+        provider_call_values: dict[str, Any] = {}
+        provider_response_facts = (
+            provider_request_id,
+            actual_model,
+            usage_json,
+            response_sha256,
+        )
+        if any(value is not None for value in provider_response_facts):
+            normalized_provider_request_id = (
+                provider_request_id.strip()
+                if isinstance(provider_request_id, str)
+                else ""
+            )
+            normalized_actual_model = (
+                actual_model.strip() if isinstance(actual_model, str) else ""
+            )
+            if (
+                unknown
+                or not normalized_provider_request_id
+                or len(normalized_provider_request_id) > 160
+                or not normalized_actual_model
+                or len(normalized_actual_model) > 128
+                or not isinstance(response_sha256, str)
+                or len(response_sha256) != 64
+                or response_sha256 != response_sha256.lower()
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in response_sha256
+                )
+                or (usage_json is not None and not isinstance(usage_json, Mapping))
+            ):
+                raise AIRequestStateConflict(
+                    "ai_call_attempt_provider_response_audit_invalid"
+                )
+            provider_response_values = {
+                "provider_request_id": normalized_provider_request_id,
+                "actual_model": normalized_actual_model,
+                "usage_json": (
+                    dict(usage_json) if isinstance(usage_json, Mapping) else None
+                ),
+                "response_sha256": response_sha256,
+            }
+            provider_call_values = {
+                "provider_request_id": normalized_provider_request_id,
+                "actual_model": normalized_actual_model,
+                "response_sha256": response_sha256,
+            }
         attempt = await self.attempt_dal.get_by_id_for_update(attempt_id)
         if attempt is None:
             raise AIRequestStateConflict("ai_call_attempt_not_found")
@@ -1566,6 +1818,7 @@ class AIRequestService:
             "error_code": (error_code or "provider_unknown")[:80],
             "finished_at": now,
             **delivery_values,
+            **provider_response_values,
         }
         if unknown:
             values["status"] = "unknown"
@@ -1597,6 +1850,8 @@ class AIRequestService:
         call_values: dict[str, Any] = {}
         if delivery_values and call.winner_attempt_id is None:
             call_values.update(delivery_values)
+        if provider_call_values and call.winner_attempt_id is None:
+            call_values.update(provider_call_values)
         if (
             not unknown
             and call.winner_attempt_id is None
@@ -1665,6 +1920,7 @@ class AIRequestService:
             "error_code": call.error_code
             or (attempt.error_code if attempt is not None else None),
             "parsed_result_json": call.parsed_result_json,
+            "image_receipt_json": getattr(call, "image_receipt_json", None),
             "rendered_prompt_sha256": call.rendered_prompt_sha256,
             "schema_sha256": call.schema_sha256,
             "network_required": bool(
@@ -1742,6 +1998,8 @@ class AIRequestService:
         snapshot = task.request_snapshot_json or {}
         if snapshot.get("resolved_manifest_sha256") != expected_manifest_sha256:
             raise AIRequestStateConflict("ai_call_image_manifest_mismatch")
+        if expected_image_count == 0:
+            return ()
         if snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V3:
             try:
                 frozen_series = validate_frozen_study_series(
@@ -1834,24 +2092,29 @@ class AIRequestService:
         return manifest_sha
 
     @staticmethod
-    def _xray_image_contract_required(*, config: Any, task: Any) -> bool:
+    def _xray_image_contract_required(
+        *, config: Any, task: Any, stage: Any | None = None
+    ) -> bool:
+        if getattr(stage, "stage_key", None) == "report_generation":
+            return False
         snapshot = task.request_snapshot_json or {}
         return (
             snapshot.get("snapshot_contract_version") == TASK_REQUEST_SNAPSHOT_V3
             and requires_xray_runtime_image_contract(
                 modality_type=config.modality_type,
                 task_type=config.task_type,
-                profile_key=config.profile_key,
+                profile_key=snapshot.get("profile_key", config.profile_key),
             )
         )
 
     @staticmethod
     def _require_xray_image_count(
-        *, config: Any, task: Any, image_count: int
+        *, config: Any, task: Any, image_count: int, stage: Any | None = None
     ) -> None:
         if not AIRequestService._xray_image_contract_required(
             config=config,
             task=task,
+            stage=stage,
         ):
             return
         try:
@@ -1862,7 +2125,9 @@ class AIRequestService:
             ) from exc
 
     @staticmethod
-    def _v2_image_count(*, task: Any) -> int:
+    def _v2_image_count(*, task: Any, stage: Any) -> int:
+        if getattr(stage, "stage_key", None) == "report_generation":
+            return 0
         snapshot = task.request_snapshot_json or {}
         series = snapshot.get("series")
         if not isinstance(series, list):
@@ -1903,8 +2168,50 @@ class AIRequestService:
                     "primary_result": prompt_command.primary_complete_result,
                 }
             )
+        if prompt_command.quality_results is not None:
+            candidates["QUALITY_RESULTS_JSON"] = prompt_command.quality_results
+        if prompt_command.route_context is not None:
+            candidates["ROUTE_CONTEXT_JSON"] = prompt_command.route_context
+        if prompt_command.study_screening_result is not None:
+            candidates["STUDY_SCREENING_RESULT_JSON"] = (
+                prompt_command.study_screening_result
+            )
+        if prompt_command.system_analysis_result is not None:
+            candidates["SYSTEM_ANALYSIS_RESULT_JSON"] = (
+                prompt_command.system_analysis_result
+            )
+        if prompt_command.final_medical_result is not None:
+            candidates["FINAL_MEDICAL_RESULT_JSON"] = (
+                prompt_command.final_medical_result
+            )
+        candidates["REPORT_SCHEMA_JSON"] = config.output_schema_json
         allowed = required | optional
         return {name: candidates[name] for name in allowed if name in candidates}
+
+    @staticmethod
+    def _report_generation_expected(*, stage: Any) -> dict[str, Any] | None:
+        if stage.stage_key != "report_generation":
+            return None
+        stage_input = stage.input_json or {}
+        previous_output = stage_input.get("previous_output")
+        source_result_sha256 = stage_input.get("previous_output_sha256")
+        final_medical_result = (
+            previous_output.get("complete_medical_result")
+            if isinstance(previous_output, Mapping)
+            else None
+        )
+        if (
+            not isinstance(source_result_sha256, str)
+            or len(source_result_sha256) != 64
+            or not isinstance(final_medical_result, Mapping)
+        ):
+            raise AIRequestStateConflict(
+                "report_generation_expected_result_missing"
+            )
+        return {
+            "source_result_sha256": source_result_sha256,
+            "final_medical_result": dict(final_medical_result),
+        }
 
     @staticmethod
     def _validate_v1_task_config_snapshot(*, task: Any, config: Any) -> None:
@@ -1919,33 +2226,141 @@ class AIRequestService:
         if any(snapshot.get(key) != value for key, value in expected.items()):
             raise AIRequestStateConflict("task_config_snapshot_mismatch")
 
-    @staticmethod
-    def _validate_v2_task_config_snapshot(*, task: Any, config: Any) -> None:
+    async def _resolve_task_stage_config(self, *, task: Any, stage: Any) -> Any:
+        snapshot = task.request_snapshot_json or {}
+        bindings = snapshot.get("stage_ai_config_bindings")
+        config_id = task.ai_config_id
+        if bindings is not None:
+            if not isinstance(bindings, Mapping):
+                raise AIRequestStateConflict("task_config_snapshot_mismatch")
+            binding = bindings.get(stage.stage_key)
+            if binding is not None:
+                if not isinstance(binding, Mapping):
+                    raise AIRequestStateConflict("task_config_snapshot_mismatch")
+                config_id = binding.get("ai_config_id")
+                if not isinstance(config_id, str) or not config_id:
+                    raise AIRequestStateConflict("task_config_snapshot_mismatch")
+        config = await self.config_dal.get_by_id(config_id)
+        if config is None:
+            raise AIRequestStateConflict("ai_call_config_not_found")
+        return config
+
+    @classmethod
+    def _validate_v2_task_config_snapshot(
+        cls, *, task: Any, stage: Any, config: Any
+    ) -> None:
         snapshot = task.request_snapshot_json or {}
         if snapshot.get("snapshot_contract_version") not in {
             TASK_REQUEST_SNAPSHOT_V2,
             TASK_REQUEST_SNAPSHOT_V3,
         }:
             raise AIRequestStateConflict("task_config_snapshot_mismatch")
-        expected = {
+
+        bindings = snapshot.get("stage_ai_config_bindings")
+        if bindings is not None and not isinstance(bindings, Mapping):
+            raise AIRequestStateConflict("task_config_snapshot_mismatch")
+        binding = bindings.get(stage.stage_key) if isinstance(bindings, Mapping) else None
+        if binding is None:
+            expected = {
+                "ai_config_id": config.id,
+                "config_key": config.config_key,
+                "config_version": config.version,
+                "config_contract_version": config.config_contract_version,
+                "config_sha256": config.config_sha256,
+                "release_fingerprint": config.release_fingerprint,
+                "prompt_content_sha256": config.prompt_content_sha256,
+                "model_snapshot_sha256": config.model_snapshot_sha256,
+                "output_schema_sha256": config.output_schema_sha256,
+                "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
+                "stage_registry_contract_version": (
+                    config.stage_registry_contract_version
+                ),
+            }
+            if (
+                any(snapshot.get(key) != value for key, value in expected.items())
+                or task.ai_config_id != config.id
+                or task.compiled_pipeline_sha256
+                != config.compiled_pipeline_sha256
+                or task.stage_registry_contract_version
+                != config.stage_registry_contract_version
+            ):
+                raise AIRequestStateConflict("task_config_snapshot_mismatch")
+            return
+
+        if not isinstance(binding, Mapping):
+            raise AIRequestStateConflict("task_config_snapshot_mismatch")
+        species = snapshot.get("species")
+        if stage.stage_key == "study_screening":
+            expected_root_profile = snapshot.get("profile_key")
+            if expected_root_profile == XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1:
+                expected_stage_profile = XRAY_STUDY_SCREENING_PROFILE_V2
+            else:
+                expected_root_profile = XRAY_DIAGNOSE_STUDY_SCREENING_PROFILE_V1
+                expected_stage_profile = XRAY_STUDY_SCREENING_PROFILE_V1
+            expected_config_key = cls.STUDY_SCREENING_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.STUDY_SCREENING_PROMPT_KEYS.get(species or "")
+        elif stage.stage_key == "system_analysis":
+            expected_root_profile = XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+            expected_stage_profile = XRAY_SYSTEM_ANALYSIS_PROFILE_V1
+            expected_config_key = cls.SYSTEM_ANALYSIS_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.SYSTEM_ANALYSIS_PROMPT_KEYS.get(species or "")
+        elif stage.stage_key == "targeted_review":
+            expected_root_profile = snapshot.get("profile_key")
+            if expected_root_profile not in {
+                XRAY_TARGETED_REVIEW_PROFILE_V2,
+                XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1,
+            }:
+                raise AIRequestStateConflict("task_config_snapshot_mismatch")
+            expected_stage_profile = XRAY_TARGETED_REVIEW_PROFILE_V2
+            expected_config_key = cls.TARGETED_REVIEW_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.TARGETED_REVIEW_PROMPT_KEYS.get(species or "")
+        elif stage.stage_key == "report_generation":
+            expected_root_profile = XRAY_DIAGNOSE_FULL_CHAIN_PROFILE_V1
+            expected_stage_profile = XRAY_REPORT_GENERATION_PROFILE_V1
+            expected_config_key = cls.REPORT_GENERATION_CONFIG_KEYS.get(species or "")
+            expected_prompt_key = cls.REPORT_GENERATION_PROMPT_KEYS.get(species or "")
+        else:
+            raise AIRequestStateConflict("task_config_snapshot_mismatch")
+        expected_binding = {
             "ai_config_id": config.id,
             "config_key": config.config_key,
             "config_version": config.version,
-            "config_contract_version": config.config_contract_version,
+            "profile_key": config.profile_key,
+            "prompt_key": config.prompt_key,
+            "activation_scope": config.activation_scope,
+            "scope_key": config.scope_key,
             "config_sha256": config.config_sha256,
             "release_fingerprint": config.release_fingerprint,
             "prompt_content_sha256": config.prompt_content_sha256,
             "model_snapshot_sha256": config.model_snapshot_sha256,
             "output_schema_sha256": config.output_schema_sha256,
             "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
-            "stage_registry_contract_version": config.stage_registry_contract_version,
+            "stage_registry_contract_version": (
+                config.stage_registry_contract_version
+            ),
+            "budget_policy_sha256": sha256_json(config.budget_policy_json),
         }
+        reserved_budget = task.budget_reserved_json
         if (
-            any(snapshot.get(key) != value for key, value in expected.items())
-            or task.ai_config_id != config.id
-            or task.compiled_pipeline_sha256 != config.compiled_pipeline_sha256
+            snapshot.get("profile_key") != expected_root_profile
+            or snapshot.get("snapshot_contract_version")
+            != TASK_REQUEST_SNAPSHOT_V3
+            or task.task_type != "diagnose"
+            or species not in {"cat", "dog"}
+            or config.profile_key != expected_stage_profile
+            or config.task_type != "diagnose"
+            or expected_config_key is None
+            or config.config_key != expected_config_key
+            or expected_prompt_key is None
+            or config.prompt_key != expected_prompt_key
+            or any(binding.get(key) != value for key, value in expected_binding.items())
+            or not isinstance(reserved_budget, Mapping)
+            or reserved_budget.get("budget_policy_sha256")
+            != sha256_json(task.budget_snapshot_json)
+            or task.compiled_pipeline_sha256
+            != snapshot.get("compiled_pipeline_sha256")
             or task.stage_registry_contract_version
-            != config.stage_registry_contract_version
+            != snapshot.get("stage_registry_contract_version")
         ):
             raise AIRequestStateConflict("task_config_snapshot_mismatch")
 
@@ -1960,6 +2375,7 @@ class AIRequestService:
             "winner": False,
             "error_code": call.error_code,
             "parsed_result_json": call.parsed_result_json,
+            "image_receipt_json": getattr(call, "image_receipt_json", None),
             "rendered_prompt_sha256": call.rendered_prompt_sha256,
             "schema_sha256": call.schema_sha256,
             "network_required": False,
