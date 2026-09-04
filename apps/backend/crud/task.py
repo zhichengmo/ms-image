@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -44,6 +44,88 @@ class TaskDal(DalBase):
 
     async def get_by_business_key(self, business_key: str) -> Task | None:
         return await self.get_data(business_key=business_key, v_return_none=True)
+
+    async def get_non_terminal_anatomy_localization_for_source(
+        self,
+        *,
+        requester_id: str,
+        source_task_id: str,
+    ) -> Task | None:
+        statement = (
+            select(self.model)
+            .where(
+                self.model.requester_id == requester_id,
+                self.model.source_task_id == source_task_id,
+                self.model.task_type == "anatomy_localization",
+                self.model.execution_status.notin_(
+                    tuple(self.TERMINAL_EXECUTION_STATUSES)
+                ),
+            )
+            .order_by(self.model.created_at.desc(), self.model.id.desc())
+        )
+        return await self.get_data(
+            v_start_sql=statement,
+            v_return_none=True,
+        )
+
+    async def get_current_anatomy_localization_for_source(
+        self,
+        *,
+        requester_id: str,
+        source_task_id: str,
+    ) -> Task | None:
+        statement = (
+            select(self.model)
+            .where(
+                self.model.requester_id == requester_id,
+                self.model.source_task_id == source_task_id,
+                self.model.task_type == "anatomy_localization",
+            )
+            .order_by(
+                case(
+                    (
+                        self.model.execution_status.notin_(
+                            tuple(self.TERMINAL_EXECUTION_STATUSES)
+                        ),
+                        0,
+                    ),
+                    else_=1,
+                ),
+                self.model.created_at.desc(),
+                self.model.id.desc(),
+            )
+        )
+        return await self.get_data(
+            v_start_sql=statement,
+            v_return_none=True,
+        )
+
+    async def page_anatomy_localizations_for_source(
+        self,
+        *,
+        requester_id: str,
+        source_task_id: str,
+        page: int,
+        limit: int,
+    ) -> tuple[list[Task], int]:
+        if page < 1 or limit < 1 or limit > 100:
+            raise ValueError("anatomy_localization_history_page_invalid")
+        statement = select(self.model).order_by(
+            self.model.created_at.desc(),
+            self.model.id.desc(),
+        )
+        return await self.get_datas(
+            page=page,
+            limit=limit,
+            v_start_sql=statement,
+            v_where=[
+                self.model.requester_id == requester_id,
+                self.model.source_task_id == source_task_id,
+                self.model.task_type == "anatomy_localization",
+            ],
+            v_return_count=True,
+            v_return_objs=True,
+        )
 
     async def list_non_terminal_for_session(
         self, *, session_id: str, for_update: bool = False

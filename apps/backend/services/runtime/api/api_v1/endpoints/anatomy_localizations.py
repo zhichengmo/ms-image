@@ -1,3 +1,4 @@
+from math import ceil
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -22,8 +23,9 @@ from apps.backend.schemas.anatomy_localization import (
     AnatomyLocalizationPrepareViewRequest,
     AnatomyLocalizationPrepareViewResponse,
     AnatomyLocalizationResponse,
+    AnatomyLocalizationTaskSummaryResponse,
 )
-from apps.backend.schemas.base import GenericResponse
+from apps.backend.schemas.base import GenericResponse, PageInfo, PagedResponse
 from apps.backend.services.runtime.api.api_v1.endpoints.imaging_errors import (
     rollback_and_map,
 )
@@ -127,6 +129,59 @@ async def get_task_service(
     db: AsyncSession = Depends(get_async_session),
 ) -> TaskService:
     return TaskService(db)
+
+
+@router.get(
+    "/current",
+    response_model=GenericResponse[AnatomyLocalizationTaskSummaryResponse | None],
+)
+async def get_current_anatomy_localization(
+    source_task_id: str = Query(..., min_length=1, max_length=64),
+    context: CallerContext = Depends(caller),
+    service: TaskService = Depends(get_task_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        data = await service.get_current_anatomy_localization_for_source(
+            source_task_id=source_task_id,
+            caller=context,
+        )
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return GenericResponse(message="当前器官定位任务查询成功", data=data)
+
+
+@router.get(
+    "/history",
+    response_model=PagedResponse[AnatomyLocalizationTaskSummaryResponse],
+)
+async def page_anatomy_localization_history(
+    source_task_id: str = Query(..., min_length=1, max_length=64),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    context: CallerContext = Depends(caller),
+    service: TaskService = Depends(get_task_service),
+    db: AsyncSession = Depends(get_async_session),
+):
+    try:
+        result = await service.page_anatomy_localizations_for_source(
+            source_task_id=source_task_id,
+            page=page,
+            page_size=page_size,
+            caller=context,
+        )
+    except Exception as exc:
+        return await rollback_and_map(db, exc)
+    return PagedResponse(
+        message="器官定位任务历史查询成功",
+        data=result.data,
+        page_info=PageInfo(
+            total=result.total,
+            page=result.page,
+            limit=result.limit,
+            total_pages=ceil(result.total / result.limit) if result.total else 0,
+        ),
+    )
 
 
 @router.get("", response_model=GenericResponse[AnatomyLocalizationResponse])

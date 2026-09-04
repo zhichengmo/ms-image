@@ -14,9 +14,22 @@ class Task(ImagingRecordBase):
         Index("ix_task_record_study_created", "study_id", "created_at"),
         Index("ix_task_record_requester_created", "requester_id", "created_at"),
         Index("ix_task_record_execution_retry", "execution_status", "next_retry_at"),
+        Index(
+            "ix_task_record_source_type_created",
+            "source_task_id",
+            "task_type",
+            "created_at",
+        ),
     )
 
     study_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="VARCHAR(64): Study opaque ID")
+    source_task_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment=(
+            "VARCHAR(64)|NULL: 来源诊断 Task opaque ID，仅 anatomy_localization 使用"
+        ),
+    )
     requester_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="VARCHAR(128): Caller 可信身份 opaque ID")
     request_id: Mapped[str] = mapped_column(String(128), nullable=False, comment="VARCHAR(128): Caller 请求幂等 ID")
     task_type: Mapped[str] = mapped_column(String(48), nullable=False, comment="VARCHAR(48): 类型 diagnose/quality_control/generate_report/replay/qualification")

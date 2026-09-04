@@ -93,10 +93,12 @@ from apps.backend.schemas.task import (
     TaskStatusResponse,
 )
 from apps.backend.schemas.anatomy_localization import (
+    AnatomyLocalizationHistoryPageResult,
     AnatomyLocalizationPrepareViewRequest,
     AnatomyLocalizationPrepareViewResponse,
     AnatomyLocalizationResponse,
     AnatomyLocalizationResultResponse,
+    AnatomyLocalizationTaskSummaryResponse,
     AnatomyLocalizationViewImageResponse,
 )
 from apps.backend.schemas.xray_quality import (
@@ -412,6 +414,25 @@ class TaskService:
         ):
             raise TaskStateConflictError("study_revision_not_ready")
 
+        source_task = None
+        if payload.source_task_id is not None:
+            source_task = await self._get_owned_diagnose_task(
+                source_task_id=payload.source_task_id,
+                caller=caller,
+            )
+            source_snapshot = source_task.request_snapshot_json
+            if (
+                source_task.study_id != study.id
+                or source_task.study_revision_id != study.revision_id
+                or not isinstance(source_snapshot, dict)
+                or source_snapshot.get("study_id") != study.id
+                or source_snapshot.get("study_revision_id") != study.revision_id
+                or source_snapshot.get("resolved_manifest_sha256")
+                != study.resolved_manifest_sha256
+                or source_snapshot.get("species") != payload.species
+            ):
+                raise TaskStateConflictError("task_source_reference_mismatch")
+
         config = None
         runtime_identity: dict[str, Any] | None = None
         if code_profile_key is not None:
@@ -626,7 +647,12 @@ class TaskService:
             quality_review=quality_review_snapshot,
             stage_ai_config_bindings=stage_ai_config_bindings,
             pet_profile=pet_profile_snapshot,
+            source_task_id=payload.source_task_id,
         )
+        if source_task is not None and (
+            source_task.request_snapshot_json.get("series") != snapshot.get("series")
+        ):
+            raise TaskStateConflictError("task_source_reference_mismatch")
         request_sha = self._sha(snapshot)
         identity = runtime_identity or {
             "ai_config_id": config.id,
@@ -644,8 +670,21 @@ class TaskService:
                 study_revision_id=study.revision_id,
                 config_id=config_id,
                 request_sha=request_sha,
+                source_task_id=payload.source_task_id,
             )
             return self._response(existing)
+
+        if payload.source_task_id is not None:
+            active_localization = (
+                await self.task_dal.get_non_terminal_anatomy_localization_for_source(
+                    requester_id=caller.subject_id,
+                    source_task_id=payload.source_task_id,
+                )
+            )
+            if active_localization is not None:
+                raise TaskStateConflictError(
+                    "anatomy_localization_source_task_in_progress"
+                )
 
         task_id = new_opaque_id()
         stage_id = new_opaque_id()
@@ -668,6 +707,7 @@ class TaskService:
         task_values = {
             "id": task_id,
             "study_id": study.id,
+            "source_task_id": payload.source_task_id,
             "requester_id": caller.subject_id,
             "request_id": payload.request_id,
             "task_type": payload.task_type,
@@ -710,6 +750,7 @@ class TaskService:
                 study_revision_id=study.revision_id,
                 config_id=config_id,
                 request_sha=request_sha,
+                source_task_id=payload.source_task_id,
             )
             return self._response(existing)
         stage = await self.stage_dal.create_idempotent(
@@ -1124,6 +1165,7 @@ class TaskService:
         quality_review: dict[str, Any] | None = None,
         stage_ai_config_bindings: dict[str, dict[str, Any]] | None = None,
         pet_profile: dict[str, Any] | None = None,
+        source_task_id: str | None = None,
     ) -> dict:
         """Freeze either a code-owned runtime identity or a legacy DB Config."""
         if (config is None) == (runtime_identity is None):
@@ -1143,6 +1185,13 @@ class TaskService:
             raise TaskStateConflictError("task_species_snapshot_invalid")
         if task_type != "diagnose" and clinical_context is not None:
             raise TaskStateConflictError("task_clinical_context_diagnose_only")
+        if (
+            source_task_id is not None
+            and task_type != XRAY_ANATOMY_LOCALIZATION_TASK_TYPE
+        ):
+            raise TaskStateConflictError(
+                "task_source_reference_anatomy_localization_only"
+            )
         frozen_clinical_context = freeze_clinical_context(
             clinical_context.model_dump(mode="json")
             if clinical_context is not None
@@ -1201,6 +1250,8 @@ class TaskService:
         }
         if quality_review is not None:
             snapshot["quality_review"] = json.loads(json.dumps(quality_review))
+        if source_task_id is not None:
+            snapshot["source_task_id"] = source_task_id
         if pet_profile is not None:
             snapshot["pet_profile"] = json.loads(json.dumps(pet_profile))
         if stage_ai_config_bindings is not None:
@@ -1344,15 +1395,106 @@ class TaskService:
 
     @staticmethod
     def _ensure_idempotent_task(
-        *, task, study_id: str, study_revision_id: str, config_id: str, request_sha: str
+        *,
+        task,
+        study_id: str,
+        study_revision_id: str,
+        config_id: str,
+        request_sha: str,
+        source_task_id: str | None,
     ) -> None:
         if (
             task.study_id != study_id
             or task.study_revision_id != study_revision_id
             or task.ai_config_id != config_id
             or task.request_sha256 != request_sha
+            or task.source_task_id != source_task_id
         ):
             raise TaskIdempotencyConflictError("task_idempotency_conflict")
+
+    async def _get_owned_diagnose_task(
+        self,
+        *,
+        source_task_id: str,
+        caller: CallerContext,
+    ):
+        normalized_source_task_id = source_task_id.strip()
+        if not normalized_source_task_id:
+            raise TaskNotFoundError("source_task_not_found")
+        task = await self.task_dal.get_by_id(normalized_source_task_id)
+        if task is None:
+            raise TaskNotFoundError("source_task_not_found")
+        if task.requester_id != caller.subject_id:
+            raise TaskAccessDeniedError("task_access_denied")
+        if task.task_type != "diagnose":
+            raise TaskStateConflictError("task_source_not_diagnose")
+        return task
+
+    @staticmethod
+    def _anatomy_localization_task_summary(
+        task,
+    ) -> AnatomyLocalizationTaskSummaryResponse:
+        if not isinstance(task.source_task_id, str) or not task.source_task_id:
+            raise TaskStateConflictError("anatomy_localization_source_link_invalid")
+        return AnatomyLocalizationTaskSummaryResponse(
+            task_id=task.id,
+            source_task_id=task.source_task_id,
+            study_id=task.study_id,
+            study_revision_id=task.study_revision_id,
+            request_id=task.request_id,
+            execution_status=task.execution_status,
+            result_available=task.execution_status == "completed",
+            state_version=task.state_version,
+            error_code=task.error_code,
+            next_retry_at=task.next_retry_at,
+            started_at=task.started_at,
+            finished_at=task.finished_at,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+        )
+
+    async def get_current_anatomy_localization_for_source(
+        self,
+        *,
+        source_task_id: str,
+        caller: CallerContext,
+    ) -> AnatomyLocalizationTaskSummaryResponse | None:
+        source_task = await self._get_owned_diagnose_task(
+            source_task_id=source_task_id,
+            caller=caller,
+        )
+        task = await self.task_dal.get_current_anatomy_localization_for_source(
+            requester_id=caller.subject_id,
+            source_task_id=source_task.id,
+        )
+        if task is None:
+            return None
+        return self._anatomy_localization_task_summary(task)
+
+    async def page_anatomy_localizations_for_source(
+        self,
+        *,
+        source_task_id: str,
+        page: int,
+        page_size: int,
+        caller: CallerContext,
+    ) -> AnatomyLocalizationHistoryPageResult:
+        source_task = await self._get_owned_diagnose_task(
+            source_task_id=source_task_id,
+            caller=caller,
+        )
+        rows, total = await self.task_dal.page_anatomy_localizations_for_source(
+            requester_id=caller.subject_id,
+            source_task_id=source_task.id,
+            page=page,
+            limit=page_size,
+        )
+        return AnatomyLocalizationHistoryPageResult(
+            data=[self._anatomy_localization_task_summary(item) for item in rows],
+            total=total,
+            page=page,
+            limit=page_size,
+        )
 
     async def get_task(self, *, task_id: str, caller: CallerContext) -> TaskResponse:
         task = await self.task_dal.get_by_id(task_id)
@@ -1360,7 +1502,21 @@ class TaskService:
             raise TaskNotFoundError("task_not_found")
         if task.requester_id != caller.subject_id:
             raise TaskAccessDeniedError("task_access_denied")
-        return self._response(task)
+        response = self._response(task)
+        if task.task_type != "diagnose":
+            return response
+        localization_task = (
+            await self.task_dal.get_current_anatomy_localization_for_source(
+                requester_id=caller.subject_id,
+                source_task_id=task.id,
+            )
+        )
+        localization = (
+            self._anatomy_localization_task_summary(localization_task)
+            if localization_task is not None
+            else None
+        )
+        return response.model_copy(update={"anatomy_localization": localization})
 
     async def get_anatomy_localization(
         self, *, task_id: str, caller: CallerContext
@@ -1489,6 +1645,7 @@ class TaskService:
             raise TaskStateConflictError("anatomy_localization_lineage_invalid")
         return AnatomyLocalizationResponse(
             task_id=task.id,
+            source_task_id=task.source_task_id,
             study_id=task.study_id,
             study_revision_id=task.study_revision_id,
             stage_checkpoint_id=stage.id,
@@ -1674,6 +1831,7 @@ class TaskService:
             )
         return AnatomyLocalizationPrepareViewResponse(
             task_id=localization.task_id,
+            source_task_id=localization.source_task_id,
             study_id=localization.study_id,
             study_revision_id=localization.study_revision_id,
             expires_in=ttl_seconds,

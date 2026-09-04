@@ -58,6 +58,7 @@ class AnatomyLocalizationPrepareViewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str
+    source_task_id: str | None = None
     study_id: str
     study_revision_id: str
     expires_in: int = Field(ge=1, le=900)
@@ -137,6 +138,7 @@ class AnatomyLocalizationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_id: str
+    source_task_id: str | None = None
     study_id: str
     study_revision_id: str
     stage_checkpoint_id: str
@@ -145,8 +147,37 @@ class AnatomyLocalizationResponse(BaseModel):
     result: AnatomyLocalizationResultResponse
 
 
+class AnatomyLocalizationTaskSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    source_task_id: str
+    study_id: str
+    study_revision_id: str
+    request_id: str
+    execution_status: str
+    result_available: bool
+    state_version: int = Field(ge=0)
+    error_code: str | None = None
+    next_retry_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AnatomyLocalizationHistoryPageResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: list[AnatomyLocalizationTaskSummaryResponse]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    limit: int = Field(ge=1, le=100)
+
+
 __all__ = [
     "AnatomyLocalizationImageResponse",
+    "AnatomyLocalizationHistoryPageResult",
     "AnatomyLocalizationLegendLabelResponse",
     "AnatomyLocalizationLegendResponse",
     "AnatomyLocalizationLegendSystemResponse",
@@ -155,5 +186,6 @@ __all__ = [
     "AnatomyLocalizationPrepareViewResponse",
     "AnatomyLocalizationResponse",
     "AnatomyLocalizationResultResponse",
+    "AnatomyLocalizationTaskSummaryResponse",
     "AnatomyLocalizationViewImageResponse",
 ]

@@ -327,6 +327,42 @@ class ImagingExecutionService:
             result=result,
         )
 
+    async def finalize_pre_call_failure(
+        self,
+        *,
+        stage_checkpoint_id: str,
+        owner_id: str,
+        error_code: str,
+    ) -> dict[str, Any]:
+        """Fail a leased Stage before a Logical Call or Provider request exists."""
+        stage = await self.stage_dal.get_by_id(stage_checkpoint_id)
+        if stage is None or stage.status != "running":
+            raise StageExecutionStateConflict("stage_not_running")
+        if stage.lease_owner_id != owner_id:
+            raise StageExecutionStateConflict("stage_lease_owner_conflict")
+        task = await self.task_dal.get_by_id_for_update(stage.task_id)
+        if task is None:
+            raise StageExecutionStateConflict("task_not_found")
+        if self._task_cancel_requested(task):
+            return await self._cancel_running_stage(
+                task=task,
+                stage=stage,
+                owner_id=owner_id,
+                provider_called=False,
+            )
+        if task.execution_status in {"completed", "failed", "dead_letter"}:
+            raise StageExecutionStateConflict("task_not_executable")
+        return await self._apply_stage_result(
+            task=task,
+            stage=stage,
+            owner_id=owner_id,
+            result=StageResult(
+                status="failed",
+                output={},
+                error_code=error_code,
+            ),
+        )
+
     @staticmethod
     def _consume_ai_call(
         *, handler: Any, context: StageExecutionContext, call_result: Mapping[str, Any]

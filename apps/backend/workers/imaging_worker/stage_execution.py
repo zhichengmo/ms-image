@@ -82,18 +82,30 @@ class StageExecutionWorker:
                 if ai_request is None:
                     raise StageExecutionStateConflict("ai_prompt_request_missing")
                 prompt_client = self.prompt_client or PromptRuntimeClient()
-                rendered_prompt = await prompt_client.render(
-                    service_code=settings.PROMPT_SERVICE_CODE,
-                    module_code=ai_request.module_code,
-                    prompt_key=ai_request.prompt_key,
-                    variables=AIRequestService.prompt_runtime_variables(
-                        prompt_command=ai_request.prompt_command
-                    ),
-                    locale=ai_request.locale,
-                    variant=ai_request.variant,
-                    trace_id=trace_id,
-                    request_id=event_id,
-                )
+                try:
+                    rendered_prompt = await prompt_client.render(
+                        service_code=settings.PROMPT_SERVICE_CODE,
+                        module_code=ai_request.module_code,
+                        prompt_key=ai_request.prompt_key,
+                        variables=AIRequestService.prompt_runtime_variables(
+                            prompt_command=ai_request.prompt_command
+                        ),
+                        locale=ai_request.locale,
+                        variant=ai_request.variant,
+                        trace_id=trace_id,
+                        request_id=event_id,
+                    )
+                except Exception:
+                    async with self.session_factory() as session:
+                        async with session.begin():
+                            output = await ImagingExecutionService(
+                                session
+                            ).finalize_pre_call_failure(
+                                stage_checkpoint_id=stage_id,
+                                owner_id=owner_id,
+                                error_code="stage_prompt_render_failed",
+                            )
+                    return self._completed(event_id=event_id, output=output)
                 async with self.session_factory() as session:
                     async with session.begin():
                         prepared = await ImagingExecutionService(

@@ -10,6 +10,9 @@ from apps.backend.core.ai.clinical_context import (
     CLINICAL_CONTEXT_V1,
     normalize_clinical_context_payload,
 )
+from apps.backend.schemas.anatomy_localization import (
+    AnatomyLocalizationTaskSummaryResponse,
+)
 from apps.backend.schemas.imaging_common import (
     normalize_required_text,
     normalize_utc_datetime,
@@ -102,6 +105,11 @@ class TaskCreate(BaseModel):
         min_length=1,
         max_length=64,
     )
+    source_task_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+    )
     pet_profile_id: str | None = Field(default=None, min_length=1, max_length=64)
     clinical_context: TaskClinicalContext | None = None
     trace_id: str = Field(min_length=1, max_length=128)
@@ -111,7 +119,7 @@ class TaskCreate(BaseModel):
     def normalize_text(cls, value: str) -> str:
         return normalize_required_text(value)
 
-    @field_validator("quality_review_task_id")
+    @field_validator("quality_review_task_id", "source_task_id")
     @classmethod
     def normalize_optional_task_id(cls, value: str | None) -> str | None:
         if value is None:
@@ -165,6 +173,16 @@ class TaskCreate(BaseModel):
             and self.quality_review_task_id is not None
         ):
             raise ValueError("task_quality_review_reference_diagnose_only")
+        if (
+            self.task_type != "anatomy_localization"
+            and self.source_task_id is not None
+        ):
+            raise ValueError("task_source_reference_anatomy_localization_only")
+        if (
+            self.task_type == "anatomy_localization"
+            and self.source_task_id is None
+        ):
+            raise ValueError("task_source_reference_required_for_anatomy_localization")
         return self
 
 
@@ -246,6 +264,7 @@ class TaskStatusResponse(BaseModel):
 
     id: str
     study_id: str
+    source_task_id: str | None = None
     request_id: str
     task_type: str
     study_revision_id: str
@@ -277,6 +296,7 @@ class TaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     study_id: str
+    source_task_id: str | None = None
     requester_id: str
     request_id: str
     task_type: str
@@ -289,6 +309,7 @@ class TaskResponse(BaseModel):
     ai_medical_status: str
     state_version: int
     current_report_id: str | None = None
+    anatomy_localization: AnatomyLocalizationTaskSummaryResponse | None = None
     request_snapshot_json: dict[str, Any] | None = None
     request_sha256: str
     trace_id: str

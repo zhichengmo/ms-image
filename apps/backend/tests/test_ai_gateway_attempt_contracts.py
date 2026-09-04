@@ -1250,12 +1250,29 @@ async def test_xray_task_create_uses_code_owned_runtime_without_config_db(
     from apps.backend.services.runtime.service import (
         task_service as task_service_module,
     )
-    from apps.backend.services.runtime.service.task_service import TaskService
+    from apps.backend.services.runtime.service.task_service import (
+        TaskService,
+        TaskStateConflictError,
+    )
 
     service = object.__new__(TaskService)
     registry = build_default_registry()
     manifest_sha = build_study_manifest([]).sha256
     created: dict[str, dict] = {}
+    source_task = SimpleNamespace(
+        id="diagnose_task_1",
+        requester_id="caller_1",
+        task_type="diagnose",
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_snapshot_json={
+            "study_id": "study_1",
+            "study_revision_id": "revision_1",
+            "resolved_manifest_sha256": manifest_sha,
+            "species": species,
+            "series": [],
+        },
+    )
 
     async def must_not_read_config(**_: str) -> None:
         raise AssertionError("AI Config DB must not be read for code-routed XRay tasks")
@@ -1295,7 +1312,9 @@ async def test_xray_task_create_uses_code_owned_runtime_without_config_db(
         )
     )
     service.task_dal = SimpleNamespace(
+        get_by_id=lambda _: value(source_task),
         get_by_business_key=lambda _: value(None),
+        get_non_terminal_anatomy_localization_for_source=lambda **_: value(None),
         create_idempotent=create_task,
     )
     service.series_dal = SimpleNamespace(list_for_study=lambda _: value([]))
@@ -1321,6 +1340,7 @@ async def test_xray_task_create_uses_code_owned_runtime_without_config_db(
             request_id=f"request_{species}",
             task_type="anatomy_localization",
             species=species,
+            source_task_id=source_task.id,
             trace_id=f"trace_{species}",
         ),
         caller=SimpleNamespace(subject_id="caller_1"),
@@ -1329,11 +1349,56 @@ async def test_xray_task_create_uses_code_owned_runtime_without_config_db(
     snapshot = task.request_snapshot_json
     assert snapshot["runtime_config_source"] == "code"
     assert snapshot["profile_key"] == "xray_anatomy_localization_v1"
+    assert snapshot["source_task_id"] == source_task.id
+    assert task.source_task_id == source_task.id
     assert task.ai_config_id == "code-route:xray_anatomy_localization_v1"
     assert task.routing_policy_version == "code-owned-stage-routes.v1"
     assert task.budget_snapshot_json == TaskService.CODE_ROUTED_BUDGET_POLICY
     assert created["stage"]["stage_key"] == "study_preparation"
     assert created["outbox"]["event_type"] == "execute_stage"
+
+    service.task_dal.get_by_business_key = lambda _: value(task)
+
+    async def must_not_check_active_localization(**_kwargs):
+        raise AssertionError("idempotent retry must return before the active-task gate")
+
+    service.task_dal.get_non_terminal_anatomy_localization_for_source = (
+        must_not_check_active_localization
+    )
+    retried = await service.create_task(
+        payload=TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id=f"request_{species}",
+            task_type="anatomy_localization",
+            species=species,
+            source_task_id=source_task.id,
+            trace_id=f"trace_{species}",
+        ),
+        caller=SimpleNamespace(subject_id="caller_1"),
+    )
+    assert retried is task
+
+    service.task_dal.get_by_business_key = lambda _: value(None)
+    service.task_dal.get_non_terminal_anatomy_localization_for_source = (
+        lambda **_: value(SimpleNamespace(id="localization_running"))
+    )
+    with pytest.raises(
+        TaskStateConflictError,
+        match="anatomy_localization_source_task_in_progress",
+    ):
+        await service.create_task(
+            payload=TaskCreate(
+                study_id="study_1",
+                study_revision_id="revision_1",
+                request_id=f"request_active_{species}",
+                task_type="anatomy_localization",
+                species=species,
+                source_task_id=source_task.id,
+                trace_id=f"trace_active_{species}",
+            ),
+            caller=SimpleNamespace(subject_id="caller_1"),
+        )
 
 
 @pytest.mark.anyio
@@ -2374,6 +2439,110 @@ async def test_stage_execution_worker_runs_prompt_then_gateway_without_db_config
     )
     assert captured["prepared_rendered_prompt"] == rendered
     assert "object_ref" not in finalized
+
+
+@pytest.mark.anyio
+async def test_stage_execution_worker_finalizes_prompt_render_failure_before_ai_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from apps.backend.core.ai.model_route import AiModelRoute
+    from apps.backend.services.runtime.service.imaging_execution_service import (
+        ImagingExecutionService,
+    )
+    from apps.backend.workers.imaging_worker.stage_execution import StageExecutionWorker
+
+    calls: list[str] = []
+    captured: dict[str, Any] = {}
+    ai_request = SimpleNamespace(
+        prompt_command=SimpleNamespace(
+            safe_context={"species": "cat", "study_id": "study_1"},
+            primary_complete_result=None,
+            quality_results=None,
+            route_context=None,
+            study_screening_result=None,
+            system_analysis_result=None,
+            final_medical_result=None,
+        ),
+        prompt_key="xray_cat_anatomy_localization",
+        route=AiModelRoute(models=("gemini-3.8-flash",), mode="race"),
+        module_code="xray",
+        locale="zh-CN",
+        variant="cat",
+    )
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        @asynccontextmanager
+        async def begin(self):
+            yield
+
+    def session_factory():
+        return FakeSession()
+
+    class FakePromptClient:
+        async def render(self, **_kwargs):
+            calls.append("prompt")
+            raise RuntimeError("nacos_prompt_output_schema_missing")
+
+    async def claim(self, **_kwargs):
+        return SimpleNamespace(id="stage_1")
+
+    async def prepare(self, **_kwargs):
+        calls.append("prepare")
+        return {
+            "network_required": False,
+            "prompt_render_required": True,
+            "ai_request": ai_request,
+        }
+
+    async def finalize_pre_call_failure(self, **kwargs):
+        calls.append("pre_call_finalize")
+        captured.update(kwargs)
+        return {"status": "failed"}
+
+    async def must_not_load_attempt(self, **_kwargs):
+        raise AssertionError("prompt failure must not create or load an AI attempt")
+
+    monkeypatch.setattr(ImagingExecutionService, "claim", claim)
+    monkeypatch.setattr(ImagingExecutionService, "prepare_stage_execution", prepare)
+    monkeypatch.setattr(
+        ImagingExecutionService,
+        "finalize_pre_call_failure",
+        finalize_pre_call_failure,
+    )
+    monkeypatch.setattr(
+        AIRequestService,
+        "load_attempt_for_network",
+        must_not_load_attempt,
+    )
+
+    result = await StageExecutionWorker(
+        session_factory_=session_factory,
+        prompt_client=FakePromptClient(),
+    ).execute(
+        event_id="event_1",
+        message={},
+        message_version="v1",
+        trace_id="trace_1",
+        owner_id="worker_1",
+        lease_seconds=120,
+    )
+
+    assert result["outcome"] == "completed"
+    assert calls == ["prepare", "prompt", "pre_call_finalize"]
+    assert captured == {
+        "stage_checkpoint_id": "stage_1",
+        "owner_id": "worker_1",
+        "error_code": "stage_prompt_render_failed",
+    }
 
 
 @pytest.mark.anyio
@@ -6206,6 +6375,7 @@ def _anatomy_localization_query_facts():
     )
     snapshot = {
         "snapshot_contract_version": TASK_REQUEST_SNAPSHOT_V3,
+        "source_task_id": "diagnose_task_1",
         "species": "cat",
         "resolved_manifest_sha256": resolved_manifest_sha256,
         "series": frozen_series,
@@ -6216,6 +6386,7 @@ def _anatomy_localization_query_facts():
     }
     task = SimpleNamespace(
         id="task_1",
+        source_task_id="diagnose_task_1",
         requester_id="caller_1",
         task_type="anatomy_localization",
         execution_status="completed",
@@ -6333,6 +6504,7 @@ async def test_anatomy_localization_query_returns_only_verified_lineage() -> Non
     )
 
     assert response.task_id == "task_1"
+    assert response.source_task_id == "diagnose_task_1"
     assert response.stage_checkpoint_id == "stage_2"
     assert response.source_call_id == "call_1"
     assert response.output_sha256 == facts["stages"][1].output_sha256
@@ -6340,6 +6512,128 @@ async def test_anatomy_localization_query_returns_only_verified_lineage() -> Non
     assert facts["task"].report_required is False
     assert facts["task"].current_report_id is None
     assert facts["task"].ai_medical_status == "not_produced"
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_current_and_history_are_source_and_owner_bound() -> (
+    None
+):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import (
+        TaskAccessDeniedError,
+        TaskService,
+    )
+
+    now = datetime.now(timezone.utc)
+    source_task = SimpleNamespace(
+        id="diagnose_task_1",
+        requester_id="caller_1",
+        task_type="diagnose",
+    )
+    localization_task = SimpleNamespace(
+        id="localization_task_1",
+        source_task_id=source_task.id,
+        study_id="study_1",
+        study_revision_id="revision_1",
+        request_id="request_1",
+        execution_status="completed",
+        state_version=3,
+        error_code=None,
+        next_retry_at=None,
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def get_by_id(task_id: str):
+        calls.append(("get_by_id", {"task_id": task_id}))
+        return source_task
+
+    async def get_current(**kwargs):
+        calls.append(("get_current", kwargs))
+        return localization_task
+
+    async def page_history(**kwargs):
+        calls.append(("page_history", kwargs))
+        return [localization_task], 1
+
+    service = object.__new__(TaskService)
+    service.task_dal = SimpleNamespace(
+        get_by_id=get_by_id,
+        get_current_anatomy_localization_for_source=get_current,
+        page_anatomy_localizations_for_source=page_history,
+    )
+    caller = SimpleNamespace(subject_id="caller_1")
+
+    current = await service.get_current_anatomy_localization_for_source(
+        source_task_id=" diagnose_task_1 ",
+        caller=caller,
+    )
+    history = await service.page_anatomy_localizations_for_source(
+        source_task_id="diagnose_task_1",
+        page=2,
+        page_size=10,
+        caller=caller,
+    )
+
+    assert current is not None
+    assert current.task_id == localization_task.id
+    assert current.source_task_id == source_task.id
+    assert history.data == [current]
+    assert (history.total, history.page, history.limit) == (1, 2, 10)
+    assert ("get_current", {"requester_id": "caller_1", "source_task_id": source_task.id}) in calls
+    assert (
+        "page_history",
+        {
+            "requester_id": "caller_1",
+            "source_task_id": source_task.id,
+            "page": 2,
+            "limit": 10,
+        },
+    ) in calls
+
+    source_task.requester_id = "caller_other"
+    with pytest.raises(TaskAccessDeniedError, match="task_access_denied"):
+        await service.get_current_anatomy_localization_for_source(
+            source_task_id=source_task.id,
+            caller=caller,
+        )
+    assert len([item for item in calls if item[0] == "get_current"]) == 1
+
+
+@pytest.mark.anyio
+async def test_anatomy_localization_current_returns_none_without_linked_task() -> None:
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    async def get_by_id(_task_id: str):
+        return SimpleNamespace(
+            id="diagnose_task_1",
+            requester_id="caller_1",
+            task_type="diagnose",
+        )
+
+    async def get_current(**_kwargs):
+        return None
+
+    service = object.__new__(TaskService)
+    service.task_dal = SimpleNamespace(
+        get_by_id=get_by_id,
+        get_current_anatomy_localization_for_source=get_current,
+    )
+
+    assert (
+        await service.get_current_anatomy_localization_for_source(
+            source_task_id="diagnose_task_1",
+            caller=SimpleNamespace(subject_id="caller_1"),
+        )
+        is None
+    )
 
 
 @pytest.mark.anyio
@@ -6565,9 +6859,11 @@ def test_anatomy_localization_task_schema_and_config_binding_are_exact() -> None
         request_id="request_1",
         task_type="anatomy_localization",
         species="cat",
+        source_task_id=" diagnose_task_1 ",
         trace_id="trace_1",
     )
     assert payload.clinical_context is None
+    assert payload.source_task_id == "diagnose_task_1"
     with pytest.raises(
         ValidationError,
         match="task_species_required_for_anatomy_localization",
@@ -6591,6 +6887,31 @@ def test_anatomy_localization_task_schema_and_config_binding_are_exact() -> None
             species="cat",
             clinical_context=_clinical_context_v1(),
             trace_id="trace_3",
+        )
+    with pytest.raises(
+        ValidationError,
+        match="task_source_reference_anatomy_localization_only",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_4",
+            task_type="diagnose",
+            species="cat",
+            source_task_id="diagnose_task_1",
+            trace_id="trace_4",
+        )
+    with pytest.raises(
+        ValidationError,
+        match="task_source_reference_required_for_anatomy_localization",
+    ):
+        TaskCreate(
+            study_id="study_1",
+            study_revision_id="revision_1",
+            request_id="request_5",
+            task_type="anatomy_localization",
+            species="cat",
+            trace_id="trace_5",
         )
 
     TaskService._validate_species_config_binding(
