@@ -13,7 +13,8 @@
 #   - Local MySQL on 127.0.0.1:3306 with the ms_image schema already created
 #   - Local RabbitMQ on localhost:5672 (guest login, vhost /)
 #   - Local Redis on localhost:6379
-#   - ms-ai-fast/.env contains AI_PLATFORM_OPENAI_BASE_URL + AI_PLATFORM_API_KEY
+#   - ms-ai-fast/.env contains AI_PLATFORM_API_KEY
+#   - ms-image/.env contains Nacos connection credentials
 #   - scripts/dev/keys/public.pem exists (NEVER commit the private key)
 #
 # Secrets are injected into process environments only. They are never printed.
@@ -23,6 +24,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON="/opt/homebrew/anaconda3/bin/python3.12"
 FAST_ENV="/Users/mozhicheng/workspace/code/cy-code/ms-ai-fast/.env"
+IMAGE_ENV="$REPO_ROOT/.env"
 KEYS_DIR="$REPO_ROOT/scripts/dev/keys"
 PUB="$KEYS_DIR/public.pem"
 API_PORT="${MS_IMAGE_LOCAL_API_PORT:-8010}"
@@ -322,14 +324,11 @@ fi
 if [[ ! -f "$FAST_ENV" ]]; then
     fail "Missing ms-ai-fast environment file at $FAST_ENV"
 fi
+if [[ ! -f "$IMAGE_ENV" ]]; then
+    fail "Missing ms-image environment file at $IMAGE_ENV"
+fi
 
-PLATFORM_BASE="$("$PYTHON" - "$FAST_ENV" <<'PY'
-from dotenv import dotenv_values
-import sys
-
-print(dotenv_values(sys.argv[1]).get("AI_PLATFORM_OPENAI_BASE_URL", ""))
-PY
-)"
+PLATFORM_BASE="http://8.149.245.40:8060/api/v1"
 PLATFORM_KEY="$("$PYTHON" - "$FAST_ENV" <<'PY'
 from dotenv import dotenv_values
 import sys
@@ -337,8 +336,34 @@ import sys
 print(dotenv_values(sys.argv[1]).get("AI_PLATFORM_API_KEY", ""))
 PY
 )"
-if [[ -z "$PLATFORM_BASE" || -z "$PLATFORM_KEY" ]]; then
-    fail "AI_PLATFORM_OPENAI_BASE_URL / AI_PLATFORM_API_KEY pair is missing"
+NACOS_VALUES="$("$PYTHON" - "$IMAGE_ENV" <<'PY'
+from dotenv import dotenv_values
+import sys
+
+values = dotenv_values(sys.argv[1])
+for key, default in (
+    ("NACOS_SERVER_ADDR", ""),
+    ("NACOS_CONTEXT_PATH", "/nacos"),
+    ("NACOS_USERNAME", ""),
+    ("NACOS_PASSWORD", ""),
+    ("NACOS_PROMPT_TIMEOUT_SECONDS", "10"),
+):
+    value = values.get(key, default)
+    print("" if value is None else value)
+PY
+)"
+{
+    IFS= read -r NACOS_SERVER_ADDR
+    IFS= read -r NACOS_CONTEXT_PATH
+    IFS= read -r NACOS_USERNAME
+    IFS= read -r NACOS_PASSWORD
+    IFS= read -r NACOS_PROMPT_TIMEOUT_SECONDS
+} <<< "$NACOS_VALUES"
+if [[ -z "$PLATFORM_KEY" ]]; then
+    fail "AI_PLATFORM_API_KEY is missing"
+fi
+if [[ -z "$NACOS_SERVER_ADDR" ]]; then
+    fail "NACOS_SERVER_ADDR is missing"
 fi
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
@@ -347,6 +372,14 @@ export SECRET_KEY="$(<"$PUB")"
 export APPLICATION_PORT="$API_PORT"
 export AI_PLATFORM_OPENAI_BASE_URL="$PLATFORM_BASE"
 export AI_PLATFORM_API_KEY="$PLATFORM_KEY"
+export PROMPT_RUNTIME_PROVIDER="nacos"
+export PROMPT_RUNTIME_CALLER_SERVICE="ms-image"
+export NACOS_SERVER_ADDR
+export NACOS_CONTEXT_PATH
+export NACOS_USERNAME
+export NACOS_PASSWORD
+export NACOS_PROMPT_NAMESPACE_ID="c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9"
+export NACOS_PROMPT_TIMEOUT_SECONDS
 export BROKER_ENABLED=true
 export AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED=false
 export AI_ATTEMPT_RECONCILE_POLICY_VERSION="${AI_ATTEMPT_RECONCILE_POLICY_VERSION:-ai-attempt-reconcile.v1}"

@@ -40,20 +40,23 @@ FULL_CHAIN_HARNESS_TASK_TYPE = "diagnose_full_chain"
 FULL_CHAIN_RUNTIME_TASK_TYPE = "diagnose"
 FULL_CHAIN_PROFILE = "xray_diagnose_full_chain_v1"
 FULL_CHAIN_EXPERIMENT_SCOPE = "full-chain-local-v1"
-FULL_CHAIN_CONFIGS = {
+FULL_CHAIN_MODEL = "gemini-3.8-flash"
+FULL_CHAIN_PROMPT_KEYS = {
     "cat": {
-        "quality_config_id": "7a754e24d4c1453483136d788ce86cae",
-        "root_config_id": "e6b1701cdccf42aaa8213a5de3efd401",
-        "root_config_version": "8.0.0-gemini-3.5-flash",
-        "model_pool_id": "a8a4b761670745ca98e59d31073a9628",
-        "requested_model": "gemini-3.5-flash",
-        "stage_config_ids": {
-            "study_screening": "0d6e99af090543249feb2c4563f43361",
-            "system_analysis": "208b22791c844aed84e3e68682438053",
-            "joint_primary_reader": "e6b1701cdccf42aaa8213a5de3efd401",
-            "targeted_review": "e8bb325014dd4291aa39b23a6154ac8b",
-            "report_generation": "bfa22f1383b847fc9b594e2f5896d2b4",
-        },
+        "batch_image_quality_review": "xray_cat_image_quality",
+        "study_screening": "xray_cat_study_screening",
+        "system_analysis": "xray_cat_system_analysis",
+        "joint_primary_reader": "xray_cat_primary_adjudication",
+        "targeted_review": "xray_cat_targeted_review",
+        "report_generation": "xray_cat_report_generation",
+    },
+    "dog": {
+        "batch_image_quality_review": "xray_dog_image_quality",
+        "study_screening": "xray_dog_study_screening",
+        "system_analysis": "xray_dog_system_analysis",
+        "joint_primary_reader": "xray_dog_primary_adjudication",
+        "targeted_review": "xray_dog_targeted_review",
+        "report_generation": "xray_dog_report_generation",
     },
 }
 FULL_CHAIN_STAGE_TOPOLOGY = (
@@ -1298,38 +1301,17 @@ def _require_stage_topology(
         require(stage.finished_at is not None, f"{label} Stage omitted finished_at")
 
 
-def _require_binding_matches_config(
-    *, binding: dict[str, Any], config: Any, stage_key: str
-) -> None:
-    expected = {
-        "ai_config_id": config.id,
-        "config_key": config.config_key,
-        "config_version": config.version,
-        "profile_key": config.profile_key,
-        "prompt_key": config.prompt_key,
-        "activation_scope": config.activation_scope,
-        "scope_key": config.scope_key,
-        "config_sha256": config.config_sha256,
-        "release_fingerprint": config.release_fingerprint,
-        "prompt_content_sha256": config.prompt_content_sha256,
-        "model_snapshot_sha256": config.model_snapshot_sha256,
-        "output_schema_sha256": config.output_schema_sha256,
-        "compiled_pipeline_sha256": config.compiled_pipeline_sha256,
-        "stage_registry_contract_version": config.stage_registry_contract_version,
-        "budget_policy_sha256": canonical_sha256(config.budget_policy_json),
-    }
-    require(binding == expected, f"{stage_key} frozen Config binding drifted")
-
-
 async def _audit_accepted_ai_call(
     *,
     attempt_dal: Any,
     call: Any,
     stage: Any,
-    config: Any,
     expected_image_count: int,
     expected_manifest_sha256: str | None,
     label: str,
+    expected_prompt_key: str,
+    expected_variant: str,
+    expected_model: str,
 ) -> dict[str, Any]:
     attempt_count = await attempt_dal.get_count(ai_call_id=call.id)
     attempt = await attempt_dal.get_by_call_attempt_no(
@@ -1397,22 +1379,79 @@ async def _audit_accepted_ai_call(
         f"{label} rendered Prompt messages are missing",
     )
 
-    require(config is not None and config.id == call.ai_config_id, f"{label} Config drifted")
-    require(config.config_sha256 == call.config_sha256, f"{label} Config SHA drifted")
-    require(config.output_schema_sha256 == call.schema_sha256, f"{label} Schema drifted")
-    require(config.status == "active", f"{label} Config is not active")
-    require(
-        isinstance(config.prompt_content, str) and bool(config.prompt_content.strip()),
-        f"{label} Config Prompt body is missing",
-    )
-    prompt_content_sha256 = require_sha256(
-        config.prompt_content_sha256,
-        f"{label} Config Prompt SHA256 is invalid",
+    reservation = call.budget_reservation_json
+    runtime = (
+        reservation.get("runtime_request") if isinstance(reservation, dict) else None
     )
     require(
-        hashlib.sha256(config.prompt_content.encode("utf-8")).hexdigest()
-        == prompt_content_sha256,
-        f"{label} Config Prompt body SHA256 drifted",
+        isinstance(runtime, dict)
+        and runtime.get("contract_version") == "ms-image-ai-runtime.v1",
+        f"{label} code-owned runtime request is missing",
+    )
+    prompt = runtime.get("prompt")
+    route = runtime.get("route")
+    response_schema = runtime.get("response_schema")
+    generation_params = runtime.get("generation_params")
+    require(isinstance(prompt, dict), f"{label} frozen Prompt identity is missing")
+    require(isinstance(route, dict), f"{label} frozen model route is missing")
+    require(
+        isinstance(response_schema, dict) and bool(response_schema),
+        f"{label} frozen response Schema is missing",
+    )
+    require(
+        isinstance(generation_params, dict),
+        f"{label} frozen generation parameters are missing",
+    )
+    require(
+        prompt.get("service_code") == "ms-image"
+        and prompt.get("module_code") == "xray"
+        and prompt.get("prompt_key") == expected_prompt_key
+        and prompt.get("locale") == "zh-CN"
+        and prompt.get("variant") == expected_variant
+        and prompt.get("prompt_resolved_variant") == expected_variant
+        and prompt.get("prompt_fallback_used") is False,
+        f"{label} Nacos Prompt identity drifted",
+    )
+    prompt_version = prompt.get("prompt_version_public_id")
+    prompt_content_hash = prompt.get("prompt_content_hash")
+    require(
+        isinstance(prompt_version, str) and bool(prompt_version.strip()),
+        f"{label} Nacos Prompt version is missing",
+    )
+    require(
+        isinstance(prompt_content_hash, str) and bool(prompt_content_hash.strip()),
+        f"{label} Nacos Prompt content hash is missing",
+    )
+    require(
+        prompt.get("variables_sha256") == call.context_sha256,
+        f"{label} Prompt variables SHA256 drifted",
+    )
+    require(
+        route == {"models": [expected_model], "mode": "race"}
+        and runtime.get("allowed_actual_models") == [expected_model]
+        and call.execution_mode == "race"
+        and call.requested_model == expected_model
+        and attempt.requested_model == expected_model
+        and call.actual_model == expected_model,
+        f"{label} code-owned model route drifted",
+    )
+    require(
+        runtime.get("connection_id") == "ms-ai-platform"
+        and runtime.get("provider_type") == "ms-ai-platform"
+        and runtime.get("api_format") == "chat-completions"
+        and attempt.connection_id == "ms-ai-platform"
+        and attempt.connection_sha256 == runtime.get("connection_sha256")
+        and attempt.provider_type == "ms-ai-platform"
+        and attempt.api_format == "chat-completions",
+        f"{label} AI Platform route drifted",
+    )
+    require(
+        canonical_sha256(response_schema) == call.schema_sha256,
+        f"{label} code-owned Schema SHA256 drifted",
+    )
+    require(
+        canonical_sha256(call.rendered_messages_json) == rendered_prompt_sha256,
+        f"{label} rendered Prompt messages SHA256 drifted",
     )
 
     require(
@@ -1458,8 +1497,7 @@ async def _audit_accepted_ai_call(
         "stage_checkpoint_id": stage.id,
         "ai_call_id": call.id,
         "attempt_id": attempt.id,
-        "ai_config_id": config.id,
-        "prompt_content_sha256": prompt_content_sha256,
+        "ai_config_id": call.ai_config_id,
         "rendered_prompt_sha256": rendered_prompt_sha256,
         "response_sha256": response_sha256,
         "requested_model": call.requested_model,
@@ -1469,6 +1507,10 @@ async def _audit_accepted_ai_call(
         "receipt_image_count": receipt["image_count"],
         "attempt_count": attempt_count,
         "reconcile_count": attempt.reconcile_count,
+        "prompt_key": expected_prompt_key,
+        "prompt_variant": expected_variant,
+        "prompt_version_public_id": prompt_version,
+        "prompt_content_hash": prompt_content_hash,
     }
 
 
@@ -1492,26 +1534,18 @@ async def _read_full_chain_runtime_receipt(
     from apps.backend.core.async_db import session_factory
     from apps.backend.crud.ai_call import AICallDal
     from apps.backend.crud.ai_call_attempt import AICallAttemptDal
-    from apps.backend.crud.ai_config_record import AIConfigRecordDal
     from apps.backend.crud.report import ReportDal
     from apps.backend.crud.stage_checkpoint import StageCheckpointDal
     from apps.backend.crud.task import TaskDal
 
-    identity = FULL_CHAIN_CONFIGS.get(species)
-    require(identity is not None, f"{species} full-chain Config identity is missing")
-    quality_config_id = identity["quality_config_id"]
-    root_config_id = identity["root_config_id"]
-    root_config_version = identity["root_config_version"]
-    model_pool_id = identity["model_pool_id"]
-    requested_model = identity["requested_model"]
-    stage_config_ids = identity["stage_config_ids"]
+    prompt_keys = FULL_CHAIN_PROMPT_KEYS.get(species)
+    require(prompt_keys is not None, f"{species} full-chain Prompt identity is missing")
 
     async with session_factory() as session:
         task_dal = TaskDal(session)
         stage_dal = StageCheckpointDal(session)
         call_dal = AICallDal(session)
         attempt_dal = AICallAttemptDal(session)
-        config_dal = AIConfigRecordDal(session)
         report_dal = ReportDal(session)
 
         quality_task = await task_dal.get_by_id(quality_task_id)
@@ -1536,29 +1570,26 @@ async def _read_full_chain_runtime_receipt(
         require(len(quality_calls) == 1, "Quality Task Call count drifted")
         quality_stage = quality_stages[1]
         quality_call = quality_calls[0]
-        quality_config = await config_dal.get_by_id(quality_call.ai_config_id)
+        require(
+            quality_snapshot.get("runtime_config_source") == "code"
+            and quality_snapshot.get("profile_key") == "xray_image_quality_v1"
+            and quality_snapshot.get("ai_config_id") == quality_task.ai_config_id
+            and quality_call.ai_config_id == quality_task.ai_config_id
+            and quality_call.config_sha256 == quality_snapshot.get("config_sha256"),
+            "Quality Task code-owned runtime identity drifted",
+        )
         quality_call_evidence = await _audit_accepted_ai_call(
             attempt_dal=attempt_dal,
             call=quality_call,
             stage=quality_stage,
-            config=quality_config,
             expected_image_count=image_count,
             expected_manifest_sha256=quality_snapshot.get(
                 "resolved_manifest_sha256"
             ),
             label="Quality Review",
-        )
-        require(
-            quality_config is not None
-            and quality_config.id == quality_config_id
-            and quality_config.task_type == "xray_quality_control"
-            and quality_config.profile_key == "xray_image_quality_v1",
-            "Quality Review Config task/profile drifted",
-        )
-        require(
-            quality_config.model_pool_id == model_pool_id
-            and quality_call.requested_model == requested_model,
-            "Quality Review model contract drifted",
+            expected_prompt_key=prompt_keys["batch_image_quality_review"],
+            expected_variant=species,
+            expected_model=FULL_CHAIN_MODEL,
         )
         quality_output = quality_stage.output_json
         require(
@@ -1583,16 +1614,40 @@ async def _read_full_chain_runtime_receipt(
             "Diagnose Task completion boundary drifted",
         )
         require(
-            diagnose_snapshot.get("profile_key") == FULL_CHAIN_PROFILE
-            and diagnose_snapshot.get("ai_config_id") == root_config_id,
-            "Diagnose full-chain Root Config drifted",
+            diagnose_snapshot.get("runtime_config_source") == "code"
+            and diagnose_snapshot.get("profile_key") == FULL_CHAIN_PROFILE
+            and diagnose_snapshot.get("ai_config_id") == diagnose_task.ai_config_id
+            and isinstance(diagnose_snapshot.get("config_sha256"), str)
+            and len(diagnose_snapshot["config_sha256"]) == 64,
+            "Diagnose full-chain code-owned runtime identity drifted",
+        )
+        stage_keys = {stage.stage_key for stage in diagnose_stages}
+        targeted_review_executed = "targeted_review" in stage_keys
+        expected_topology = (
+            FULL_CHAIN_STAGE_TOPOLOGY
+            if targeted_review_executed
+            else tuple(
+                item
+                for item in FULL_CHAIN_STAGE_TOPOLOGY
+                if item[0] != "targeted_review"
+            )
         )
         _require_stage_topology(
             diagnose_stages,
-            FULL_CHAIN_STAGE_TOPOLOGY,
+            expected_topology,
             label="Diagnose full-chain",
         )
-        require(len(diagnose_calls) == 5, "Diagnose full-chain Call count drifted")
+        expected_ai_stage_keys = (
+            "study_screening",
+            "system_analysis",
+            "joint_primary_reader",
+            *(("targeted_review",) if targeted_review_executed else ()),
+            "report_generation",
+        )
+        require(
+            len(diagnose_calls) == len(expected_ai_stage_keys),
+            "Diagnose full-chain Call count drifted",
+        )
         stages_by_key = {stage.stage_key: stage for stage in diagnose_stages}
         calls_by_stage_id = {call.stage_checkpoint_id: call for call in diagnose_calls}
         require(
@@ -1600,77 +1655,36 @@ async def _read_full_chain_runtime_receipt(
             "Diagnose full-chain created duplicate Calls for one Stage",
         )
 
-        bindings = diagnose_snapshot.get("stage_ai_config_bindings")
-        expected_binding_keys = {
-            "study_screening",
-            "system_analysis",
-            "targeted_review",
-            "report_generation",
-        }
         require(
-            isinstance(bindings, dict) and set(bindings) == expected_binding_keys,
-            "Diagnose full-chain Stage Config bindings drifted",
+            diagnose_snapshot.get("stage_ai_config_bindings") in (None, {}),
+            "Diagnose full-chain unexpectedly retained DB Config bindings",
         )
-
-        root_config = await config_dal.get_by_id(root_config_id)
-        require(root_config is not None, "Diagnose Root Config is missing")
-        root_budget = root_config.budget_policy_json
+        root_budget = diagnose_task.budget_snapshot_json
         require(
-            root_config.config_key == f"xray_diagnose_{species}"
-            and root_config.version == root_config_version
-            and root_config.profile_key == FULL_CHAIN_PROFILE
-            and root_config.task_type == FULL_CHAIN_RUNTIME_TASK_TYPE
-            and root_config.model_pool_id == model_pool_id
-            and isinstance(root_budget, dict)
-            and root_budget.get("max_total_calls") == 5
-            and root_budget.get("max_total_attempts") == 5,
-            "Diagnose Root Config contract drifted",
+            isinstance(root_budget, dict)
+            and root_budget.get("contract_version") == "ai-budget-policy.v1"
+            and root_budget.get("max_total_calls", 0) >= 5
+            and root_budget.get("max_total_attempts", 0) >= 5
+            and root_budget.get("reserve_before_send") is True,
+            "Diagnose code-owned runtime budget drifted",
         )
 
         stage_call_evidence: list[dict[str, Any]] = []
         audited_calls: dict[str, Any] = {}
-        for stage_key, expected_config_id in stage_config_ids.items():
+        for stage_key in expected_ai_stage_keys:
             stage = stages_by_key[stage_key]
             call = calls_by_stage_id.get(stage.id)
             require(call is not None, f"{stage_key} did not create exactly one Call")
             require(
-                call.ai_config_id == expected_config_id,
-                f"{stage_key} Config ID drifted",
+                call.ai_config_id == diagnose_task.ai_config_id
+                and call.config_sha256 == diagnose_snapshot.get("config_sha256"),
+                f"{stage_key} code-owned runtime identity drifted",
             )
-            config = await config_dal.get_by_id(expected_config_id)
-            require(config is not None, f"{stage_key} Config is missing")
-            require(
-                config.task_type == FULL_CHAIN_RUNTIME_TASK_TYPE
-                and config.model_pool_id == model_pool_id,
-                f"{stage_key} Config task/model pool drifted",
-            )
-            model_snapshot = config.model_snapshot_json
-            lanes = model_snapshot.get("lanes") if isinstance(model_snapshot, dict) else None
-            require(
-                isinstance(lanes, list)
-                and len(lanes) == 1
-                and isinstance(lanes[0], dict)
-                and lanes[0].get("lane_key") == "primary"
-                and lanes[0].get("max_attempts") == 1
-                and lanes[0].get("requested_model") == requested_model
-                and call.execution_mode == "single"
-                and call.requested_model == requested_model,
-                f"{stage_key} single-lane model contract drifted",
-            )
-            if stage_key != "joint_primary_reader":
-                binding = bindings.get(stage_key)
-                require(isinstance(binding, dict), f"{stage_key} Config binding is missing")
-                _require_binding_matches_config(
-                    binding=binding,
-                    config=config,
-                    stage_key=stage_key,
-                )
             expected_images = 0 if stage_key == "report_generation" else image_count
             call_evidence = await _audit_accepted_ai_call(
                 attempt_dal=attempt_dal,
                 call=call,
                 stage=stage,
-                config=config,
                 expected_image_count=expected_images,
                 expected_manifest_sha256=(
                     None
@@ -1678,6 +1692,9 @@ async def _read_full_chain_runtime_receipt(
                     else diagnose_snapshot.get("resolved_manifest_sha256")
                 ),
                 label=stage_key,
+                expected_prompt_key=prompt_keys[stage_key],
+                expected_variant=species,
+                expected_model=FULL_CHAIN_MODEL,
             )
             output = stage.output_json
             require(
@@ -1712,15 +1729,24 @@ async def _read_full_chain_runtime_receipt(
             stage_call_evidence.append(call_evidence)
 
         route_output = stages_by_key["family_routing"].output_json
-        require(
-            isinstance(route_output, dict)
-            and route_output.get("route_signal") == "targeted_review"
-            and isinstance(route_output.get("selected_family_key"), str)
-            and bool(route_output["selected_family_key"])
-            and isinstance(route_output.get("selected_focus_key"), str)
-            and bool(route_output["selected_focus_key"]),
-            "FamilyRouting did not produce a legal TargetedReview candidate",
-        )
+        if targeted_review_executed:
+            require(
+                isinstance(route_output, dict)
+                and route_output.get("route_signal") == "targeted_review"
+                and isinstance(route_output.get("selected_family_key"), str)
+                and bool(route_output["selected_family_key"])
+                and isinstance(route_output.get("selected_focus_key"), str)
+                and bool(route_output["selected_focus_key"]),
+                "FamilyRouting did not produce a legal TargetedReview candidate",
+            )
+        else:
+            require(
+                isinstance(route_output, dict)
+                and route_output.get("route_signal") == "primary_final"
+                and route_output.get("selected_family_key") is None
+                and route_output.get("selected_focus_key") is None,
+                "FamilyRouting did not preserve the legal primary-final branch",
+            )
 
         decision_output = stages_by_key["decision_finalization"].output_json
         report_stage = stages_by_key["report_generation"]
@@ -1765,8 +1791,9 @@ async def _read_full_chain_runtime_receipt(
         "full_chain_attempt_count": sum(
             item["attempt_count"] for item in stage_call_evidence
         ),
-        "targeted_family_key": route_output["selected_family_key"],
-        "targeted_focus_key": route_output["selected_focus_key"],
+        "targeted_review_executed": targeted_review_executed,
+        "targeted_family_key": route_output.get("selected_family_key"),
+        "targeted_focus_key": route_output.get("selected_focus_key"),
         "report_generation_image_counts": {
             "requested": stage_call_evidence[-1]["image_count_requested"],
             "sent": stage_call_evidence[-1]["image_count_sent"],
