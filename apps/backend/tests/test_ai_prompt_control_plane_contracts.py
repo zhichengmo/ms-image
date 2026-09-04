@@ -64,6 +64,7 @@ from apps.backend.services.ai_control.service.prompt_source import (
     build_source_receipt,
     nacos_data_id,
     normalize_imported_prompt,
+    parse_nacos_prompt_payload,
     receipt_sha256,
     variant_candidates,
 )
@@ -968,6 +969,29 @@ def test_prompt_source_xray_uses_exact_primary_coordinates() -> None:
             variant="common",
             locale="zh-CN",
         )
+
+
+def test_prompt_source_parses_canonical_and_enveloped_output_schema() -> None:
+    canonical = parse_nacos_prompt_payload(
+        {
+            "template": "{{ OUTPUT_SCHEMA_JSON | tojson }}",
+            "version": "1.0.0",
+            "output": {"type": "json_schema", "schema": {"type": "object"}},
+        }
+    )
+    enveloped = parse_nacos_prompt_payload(
+        {
+            "template": '{"prompt":"{{ REPORT_SCHEMA_JSON | tojson }}",'
+            '"output":{"type":"json_schema",'
+            '"schema":{"type":"object","required":[]}}}',
+            "version": "2.0.0",
+        }
+    )
+
+    assert canonical.template == "{{ OUTPUT_SCHEMA_JSON | tojson }}"
+    assert canonical.output_schema == {"type": "object"}
+    assert enveloped.template == "{{ REPORT_SCHEMA_JSON | tojson }}"
+    assert enveloped.output_schema == {"type": "object", "required": []}
 
 
 def test_species_primary_prompt_assets_preserve_v2_rendering_contract() -> None:

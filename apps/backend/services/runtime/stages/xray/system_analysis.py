@@ -27,7 +27,7 @@ class SystemAnalysisStageHandler:
 
     handler_key = "system_analysis"
     handler_version = "v1"
-    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    MODEL_ROUTE = AiModelRoute(models=("gemini-3.8-flash",), mode="race")
     PROMPT_KEYS = {"cat": "xray_cat_system_analysis", "dog": "xray_dog_system_analysis"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
@@ -43,6 +43,7 @@ class SystemAnalysisStageHandler:
                 prompt_command=prompt_command,
                 prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
                 route=self.MODEL_ROUTE,
+                variant=prompt_command.safe_context["species"],
             )
         )
 

@@ -205,13 +205,14 @@ class Settings(BaseSettings):
     OPERATIONAL_ALERT_TECHNICAL_FAILURES: int = Field(default=1, ge=0)
     OPERATIONAL_ALERT_ARTIFACT_DRIFT: int = Field(default=1, ge=0)
 
-    # Prompt runtime uses the same HTTP Render API contract as ms-ai-fast.
+    # Runtime reads Prompt content directly from Nacos by default; the HTTP
+    # transport remains available only for compatibility tests and deployments.
     PROMPT_RUNTIME_URL: str = ""
     PROMPT_RUNTIME_API_KEY: str = ""
     PROMPT_RUNTIME_ENV: str = "prod"
     PROMPT_RUNTIME_CALLER_SERVICE: str = "ms-image"
     PROMPT_RUNTIME_TIMEOUT_SECONDS: float = Field(30.0, gt=0, allow_inf_nan=False)
-    PROMPT_RUNTIME_PROVIDER: str = "http"
+    PROMPT_RUNTIME_PROVIDER: str = "nacos"
     PROMPT_SERVICE_CODE: str = "ms-image"
     NACOS_SERVER_ADDR: str = ""
     NACOS_CONTEXT_PATH: str = "/nacos"

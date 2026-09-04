@@ -32,7 +32,7 @@ class StudyScreeningStageHandler:
 
     handler_key = "study_screening"
     handler_version = "v1"
-    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    MODEL_ROUTE = AiModelRoute(models=("gemini-3.8-flash",), mode="race")
     PROMPT_KEYS = {"cat": "xray_cat_study_screening", "dog": "xray_dog_study_screening"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
@@ -48,6 +48,7 @@ class StudyScreeningStageHandler:
                 prompt_command=prompt_command,
                 prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
                 route=self.MODEL_ROUTE,
+                variant=prompt_command.safe_context["species"],
             )
         )
 

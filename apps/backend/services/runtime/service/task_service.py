@@ -1,7 +1,9 @@
+import asyncio
 import hashlib
 import json
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +42,12 @@ from apps.backend.core.imaging.manifest import (
     build_series_manifest_legacy,
     build_study_manifest,
     build_xray_diagnostic_series_manifest,
+    projection_fact_from_image,
+    validate_frozen_study_series,
+)
+from apps.backend.core.imaging.object_store import (
+    ObjectStorageGateway,
+    ObjectStoreError,
 )
 from apps.backend.core.imaging.xray_contract import (
     XRAY_ANATOMY_LOCALIZATION_TASK_TYPE,
@@ -85,8 +93,11 @@ from apps.backend.schemas.task import (
     TaskStatusResponse,
 )
 from apps.backend.schemas.anatomy_localization import (
+    AnatomyLocalizationPrepareViewRequest,
+    AnatomyLocalizationPrepareViewResponse,
     AnatomyLocalizationResponse,
     AnatomyLocalizationResultResponse,
+    AnatomyLocalizationViewImageResponse,
 )
 from apps.backend.schemas.xray_quality import (
     XRayQualityReviewResponse,
@@ -344,6 +355,7 @@ class TaskService:
         return config.output_schema_json
 
     def __init__(self, db: AsyncSession):
+        self.db = db
         self.session_dal = SessionDal(db)
         self.study_dal = StudyDal(db)
         self.series_dal = SeriesDal(db)
@@ -1483,6 +1495,189 @@ class TaskService:
             source_call_id=call.id,
             output_sha256=stage.output_sha256,
             result=AnatomyLocalizationResultResponse.model_validate(validated),
+        )
+
+    @staticmethod
+    def _anatomy_view_dimension(image, field_name: str) -> int | None:
+        metadata = image.technical_metadata_json
+        if not isinstance(metadata, dict):
+            return None
+        value = metadata.get(field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            return None
+        return value
+
+    @staticmethod
+    def _assert_anatomy_view_image_identity(*, image, frozen: dict[str, Any]) -> None:
+        try:
+            projection, projection_provenance = projection_fact_from_image(image)
+        except ManifestContractError as exc:
+            raise TaskStateConflictError(
+                "anatomy_localization_view_image_drift"
+            ) from exc
+        current = {
+            "image_id": image.id,
+            "series_id": image.series_id,
+            "logical_image_key": image.logical_image_key,
+            "image_version_no": image.image_version_no,
+            "sequence_no": image.sequence_no,
+            "image_role": image.image_role,
+            "image_kind": image.image_kind,
+            "file_format": image.file_format,
+            "projection": projection,
+            "projection_provenance": projection_provenance,
+            "storage_profile": image.storage_profile,
+            "object_key": image.object_key,
+            "object_version_id": image.object_version_id,
+            "sha256": image.sha256,
+            "size_bytes": image.size_bytes,
+            "content_type": image.content_type,
+        }
+        expected = {key: frozen[key] for key in current}
+        if image.status not in {"ready", "superseded"} or current != expected:
+            raise TaskStateConflictError("anatomy_localization_view_image_drift")
+        version_id = frozen.get("object_version_id")
+        if version_id is not None and (
+            version_id != version_id.strip() or not version_id or len(version_id) > 160
+        ):
+            raise TaskStateConflictError("anatomy_localization_view_image_drift")
+
+    async def prepare_anatomy_localization_view(
+        self,
+        *,
+        payload: AnatomyLocalizationPrepareViewRequest,
+        caller: CallerContext,
+        gateway_factory: Callable[[], ObjectStorageGateway],
+    ) -> AnatomyLocalizationPrepareViewResponse:
+        async with self.db.begin():
+            localization = await self.get_anatomy_localization(
+                task_id=payload.task_id,
+                caller=caller,
+            )
+            task = await self.task_dal.get_by_id(payload.task_id)
+            if task is None:
+                raise TaskNotFoundError("task_not_found")
+            snapshot = task.request_snapshot_json or {}
+            try:
+                frozen_series = validate_frozen_study_series(
+                    snapshot.get("series"),
+                    resolved_manifest_sha256=snapshot.get("resolved_manifest_sha256"),
+                )
+            except ManifestContractError as exc:
+                raise TaskStateConflictError(
+                    "anatomy_localization_view_manifest_invalid"
+                ) from exc
+
+            frozen_images: list[dict[str, Any]] = []
+            for series in frozen_series:
+                for item in series["ordered_images"]:
+                    frozen = dict(item)
+                    frozen["display_sequence_no"] = len(frozen_images) + 1
+                    frozen_images.append(frozen)
+            if not 2 <= len(frozen_images) <= 5:
+                raise TaskStateConflictError(
+                    "anatomy_localization_view_manifest_invalid"
+                )
+
+            manifest_image_ids = {item["image_id"] for item in frozen_images}
+            requested_image_ids = (
+                manifest_image_ids
+                if payload.image_ids is None
+                else set(payload.image_ids)
+            )
+            if not requested_image_ids.issubset(manifest_image_ids):
+                raise TaskStateConflictError(
+                    "anatomy_localization_view_image_not_frozen"
+                )
+
+            selected_images: list[dict[str, Any]] = []
+            for frozen in frozen_images:
+                if frozen["image_id"] not in requested_image_ids:
+                    continue
+                image = await self.image_dal.get_by_id(frozen["image_id"])
+                if image is None:
+                    raise TaskStateConflictError(
+                        "anatomy_localization_view_image_drift"
+                    )
+                self._assert_anatomy_view_image_identity(
+                    image=image,
+                    frozen=frozen,
+                )
+                selected_images.append(
+                    {
+                        "image_id": frozen["image_id"],
+                        "series_id": frozen["series_id"],
+                        "sequence_no": frozen["display_sequence_no"],
+                        "projection": frozen["projection"],
+                        "file_format": frozen["file_format"],
+                        "content_type": frozen["content_type"],
+                        "pixel_width": self._anatomy_view_dimension(
+                            image,
+                            "pixel_width",
+                        ),
+                        "pixel_height": self._anatomy_view_dimension(
+                            image,
+                            "pixel_height",
+                        ),
+                        "storage_profile": frozen["storage_profile"],
+                        "object_key": frozen["object_key"],
+                        "object_version_id": frozen["object_version_id"],
+                    }
+                )
+
+        gateway = gateway_factory()
+        gateway_profile = str(getattr(gateway, "storage_profile", "")).strip()
+        if not gateway_profile or any(
+            item["storage_profile"] != gateway_profile for item in selected_images
+        ):
+            raise ObjectStoreError("anatomy_localization_view_storage_profile_mismatch")
+        ttl_seconds = int(settings.OSS_SIGNED_URL_TTL_SECONDS)
+        if ttl_seconds < 1 or ttl_seconds > 900:
+            raise ObjectStoreError("object_signed_url_ttl_invalid")
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        signed_urls = await asyncio.gather(
+            *(
+                gateway.sign_download_url(
+                    object_key=item["object_key"],
+                    object_version_id=item["object_version_id"],
+                    expires_seconds=ttl_seconds,
+                )
+                for item in selected_images
+            )
+        )
+
+        response_images: list[AnatomyLocalizationViewImageResponse] = []
+        for item, signed_url in zip(selected_images, signed_urls, strict=True):
+            if not isinstance(signed_url, str):
+                raise ObjectStoreError("object_signed_url_invalid")
+            parsed_url = urlsplit(signed_url)
+            if (
+                parsed_url.scheme.casefold() != "https"
+                or not parsed_url.hostname
+                or parsed_url.username is not None
+                or parsed_url.password is not None
+            ):
+                raise ObjectStoreError("object_signed_url_invalid")
+            response_images.append(
+                AnatomyLocalizationViewImageResponse(
+                    image_id=item["image_id"],
+                    series_id=item["series_id"],
+                    sequence_no=item["sequence_no"],
+                    projection=item["projection"],
+                    file_format=item["file_format"],
+                    content_type=item["content_type"],
+                    pixel_width=item["pixel_width"],
+                    pixel_height=item["pixel_height"],
+                    expires_at=expires_at,
+                    signed_url=signed_url,
+                )
+            )
+        return AnatomyLocalizationPrepareViewResponse(
+            task_id=localization.task_id,
+            study_id=localization.study_id,
+            study_revision_id=localization.study_revision_id,
+            expires_in=ttl_seconds,
+            images=response_images,
         )
 
     async def get_xray_quality_review(

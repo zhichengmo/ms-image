@@ -22,7 +22,7 @@ class AnatomyLocalizationStageHandler:
 
     handler_key = "anatomy_localization"
     handler_version = "v1"
-    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    MODEL_ROUTE = AiModelRoute(models=("gemini-3.8-flash",), mode="race")
     PROMPT_KEYS = {"cat": "xray_cat_anatomy_localization", "dog": "xray_dog_anatomy_localization"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
@@ -39,6 +39,7 @@ class AnatomyLocalizationStageHandler:
                 prompt_command=prompt_command,
                 prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
                 route=self.MODEL_ROUTE,
+                variant=prompt_command.safe_context["species"],
             )
         )
 

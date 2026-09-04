@@ -21,6 +21,7 @@ from apps.backend.core.contexts import CallerContext, ControlPlaneContext
 
 if TYPE_CHECKING:
     from apps.backend.services.runtime.service.image_service import ImageService
+    from apps.backend.services.runtime.service.task_service import TaskService
 
 
 auth_domain = os.getenv('AUTH_DOMAIN')
@@ -348,6 +349,25 @@ async def get_image_storage_dependencies(
     return ImageStorageDependencies(
         db=db,
         service=ImageService(db),
+        gateway_factory=OSSObjectStore,
+    )
+
+
+@dataclass(frozen=True)
+class AnatomyLocalizationDisplayDependencies:
+    db: AsyncSession
+    service: "TaskService"
+    gateway_factory: Callable[[], ObjectStorageGateway]
+
+
+async def get_anatomy_localization_display_dependencies(
+    db: AsyncSession = Depends(get_explicit_transaction_session),
+) -> AnatomyLocalizationDisplayDependencies:
+    from apps.backend.services.runtime.service.task_service import TaskService
+
+    return AnatomyLocalizationDisplayDependencies(
+        db=db,
+        service=TaskService(db),
         gateway_factory=OSSObjectStore,
     )
 

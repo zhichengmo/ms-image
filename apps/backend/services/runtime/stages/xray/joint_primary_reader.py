@@ -27,7 +27,7 @@ class XRayJointPrimaryReaderStageHandler:
 
     handler_key = "joint_primary_reader"
     handler_version = "v1"
-    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    MODEL_ROUTE = AiModelRoute(models=("gemini-3.8-flash",), mode="race")
     PROMPT_KEYS = {"cat": "xray_cat_primary", "dog": "xray_dog_primary"}
     ADJUDICATION_PROMPT_KEYS = {
         "cat": "xray_cat_primary_adjudication",
@@ -52,6 +52,7 @@ class XRayJointPrimaryReaderStageHandler:
                 prompt_command=prompt_command,
                 prompt_key=prompt_keys[prompt_command.safe_context["species"]],
                 route=self.MODEL_ROUTE,
+                variant=prompt_command.safe_context["species"],
             )
         )
 

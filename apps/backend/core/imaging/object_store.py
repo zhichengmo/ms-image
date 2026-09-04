@@ -152,7 +152,11 @@ class ObjectStorageGateway(Protocol):
     ) -> ObjectValidation: ...
 
     async def sign_download_url(
-        self, *, object_key: str, expires_seconds: int = 300
+        self,
+        *,
+        object_key: str,
+        expires_seconds: int = 300,
+        object_version_id: str | None = None,
     ) -> str: ...
 
 
@@ -579,10 +583,35 @@ class OSSObjectStore:
             inspection=inspection,
         )
 
-    async def sign_download_url(self, *, object_key: str, expires_seconds: int = 300) -> str:
-        validate_object_key(object_key)
+    async def sign_download_url(
+        self,
+        *,
+        object_key: str,
+        expires_seconds: int = 300,
+        object_version_id: str | None = None,
+    ) -> str:
+        object_key = validate_object_key(object_key)
         ttl = self._ttl(expires_seconds)
-        return await asyncio.to_thread(self._bucket.sign_url, "GET", object_key, ttl)
+        params = None
+        if object_version_id is not None:
+            version_id = object_version_id.strip()
+            if not version_id or len(version_id) > 160:
+                raise ObjectStoreError("object_version_id_invalid")
+            params = {"versionId": version_id}
+        if params is None:
+            return await asyncio.to_thread(
+                self._bucket.sign_url,
+                "GET",
+                object_key,
+                ttl,
+            )
+        return await asyncio.to_thread(
+            self._bucket.sign_url,
+            "GET",
+            object_key,
+            ttl,
+            params=params,
+        )
 
 
 def _normalize_content_type(value: str) -> str:

@@ -8,7 +8,6 @@ persists Provider response bodies.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
@@ -21,9 +20,6 @@ from apps.backend.core.ai.prompting.contracts import canonical_json, sha256_json
 GATEWAY_PROFILE_V1 = "ai-gateway-profile.v1"
 AI_IMAGE_RECEIPT_V1 = "ai-image-receipt.v1"
 AI_IMAGE_RECEIPT_V2 = "ai-image-receipt.v2"
-_JSON_MARKDOWN_FENCE = re.compile(
-    r"\A```json[ \t]*\r?\n(?P<body>[\s\S]*?)\r?\n```[ \t]*\Z"
-)
 
 
 class GatewayContractError(ValueError):
@@ -144,18 +140,31 @@ def validate_signed_image_url(value: str, *, allowed_hosts: Iterable[str]) -> st
 
 
 def schema_validate_result(*, value: Any, schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Parse Provider message content and validate the frozen strict schema."""
+    """Parse Provider content like ms-ai-fast, then run the frozen strict schema."""
     if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.startswith("```"):
-            fenced = _JSON_MARKDOWN_FENCE.fullmatch(stripped)
-            if fenced is None or "```" in fenced.group("body"):
-                raise GatewayContractError("provider_response_json_invalid")
-            value = fenced.group("body").strip()
+        normalized = value.strip()
+        if normalized.startswith("```"):
+            lines = normalized.splitlines()
+            if lines:
+                lines = lines[1:]
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            normalized = "\n".join(lines).strip()
         try:
-            value = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise GatewayContractError("provider_response_json_invalid") from exc
+            value = json.loads(normalized)
+        except json.JSONDecodeError:
+            start = normalized.find("{")
+            end = normalized.rfind("}")
+            if start < 0 or end <= start:
+                raise GatewayContractError(
+                    "provider_response_json_invalid"
+                ) from None
+            try:
+                value = json.loads(normalized[start : end + 1])
+            except json.JSONDecodeError as exc:
+                raise GatewayContractError(
+                    "provider_response_json_invalid"
+                ) from exc
     if not isinstance(value, dict) or not isinstance(schema, Mapping):
         raise GatewayContractError("provider_response_schema_invalid")
     try:

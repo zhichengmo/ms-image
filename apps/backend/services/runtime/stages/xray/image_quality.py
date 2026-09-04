@@ -27,7 +27,7 @@ class BatchImageQualityReviewStageHandler:
 
     handler_key = "batch_image_quality_review"
     handler_version = "v1"
-    MODEL_ROUTE = AiModelRoute(models=("gpt-5.6-sol",), mode="race")
+    MODEL_ROUTE = AiModelRoute(models=("gemini-3.8-flash",), mode="race")
     PROMPT_KEYS = {"cat": "xray_cat_image_quality", "dog": "xray_dog_image_quality"}
 
     async def execute(self, context: StageExecutionContext) -> StageExecutionPlan:
@@ -46,6 +46,7 @@ class BatchImageQualityReviewStageHandler:
                 prompt_command=prompt_command,
                 prompt_key=self.PROMPT_KEYS[prompt_command.safe_context["species"]],
                 route=self.MODEL_ROUTE,
+                variant=prompt_command.safe_context["species"],
             )
         )
 

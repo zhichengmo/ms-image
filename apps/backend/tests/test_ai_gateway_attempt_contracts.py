@@ -250,6 +250,7 @@ async def test_prompt_runtime_client_uses_ms_ai_fast_http_render_contract(
         env="prod",
         caller_service="ms-image",
         timeout=3,
+        provider="http",
     ).render(
         service_code="ms-image",
         module_code="xray",
@@ -281,6 +282,179 @@ async def test_prompt_runtime_client_uses_ms_ai_fast_http_render_contract(
     assert rendered["messages"] == [{"role": "user", "content": "rendered"}]
     assert rendered["temperature"] == 0.15
     assert rendered["output_schema"] == SCHEMA
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("species", "prompt_key", "expected_data_id"),
+    [
+        (
+            "cat",
+            "xray_cat_study_screening",
+            "ms-image.x-ray.study-screening.cat.zh-CN",
+        ),
+        (
+            "dog",
+            "xray_dog_study_screening",
+            "ms-image.x-ray.study-screening.dog.zh-CN",
+        ),
+    ],
+)
+async def test_prompt_runtime_client_reads_exact_xray_prompt_from_nacos(
+    species: str,
+    prompt_key: str,
+    expected_data_id: str,
+) -> None:
+    from apps.backend.core.ai.prompt_runtime_client import PromptRuntimeClient
+
+    class FakeNacosSource:
+        namespace_id = "prompt-namespace"
+
+        def __init__(self) -> None:
+            self.fetches: list[dict[str, Any]] = []
+
+        async def fetch(
+            self,
+            *,
+            data_id: str,
+            version: str | None = None,
+            label: str | None = None,
+        ) -> dict[str, Any]:
+            self.fetches.append(
+                {"data_id": data_id, "version": version, "label": label}
+            )
+            return {
+                "promptKey": data_id,
+                "template": (
+                    "物种={{ species }}；Schema={{ OUTPUT_SCHEMA_JSON | tojson }}"
+                ),
+                "version": "2.0.0",
+                "label": "prod",
+                "md5": "a" * 32,
+                "output": {"type": "json_schema", "schema": SCHEMA},
+            }
+
+        async def aclose(self) -> None:
+            raise AssertionError("injected source must not be closed by runtime")
+
+    source = FakeNacosSource()
+    rendered = await PromptRuntimeClient(
+        base_url="",
+        api_key="",
+        provider="nacos",
+        nacos_source_client=source,
+    ).render(
+        service_code="ms-image",
+        module_code="xray",
+        prompt_key=prompt_key,
+        variables={"species": species, "unused": "must-not-reach-renderer"},
+        locale="zh-CN",
+        variant=species,
+    )
+
+    assert source.fetches == [
+        {"data_id": expected_data_id, "version": None, "label": None}
+    ]
+    assert rendered["requested_variant"] == species
+    assert rendered["resolved_variant"] == species
+    assert rendered["fallback_used"] is False
+    assert rendered["output_schema"] == SCHEMA
+    assert rendered["metadata"]["nacos_prompt_key"] == expected_data_id
+    assert f"物种={species}" in rendered["rendered_prompt"]
+    assert json.dumps(SCHEMA) in rendered["rendered_prompt"]
+
+
+@pytest.mark.anyio
+async def test_prompt_runtime_client_injects_report_schema_and_owns_client_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.backend.core.ai import prompt_runtime_client as runtime_module
+
+    created: list[Any] = []
+
+    class FakeOwnedNacosSource:
+        def __init__(self, **kwargs: Any) -> None:
+            self.namespace_id = kwargs["namespace_id"]
+            self.closed = False
+            created.append(self)
+
+        async def fetch(
+            self,
+            *,
+            data_id: str,
+            version: str | None = None,
+            label: str | None = None,
+        ) -> dict[str, Any]:
+            assert data_id == "ms-image.x-ray.report-generation.cat.zh-CN"
+            return {
+                "template": "ReportSchema={{ REPORT_SCHEMA_JSON | tojson }}",
+                "version": "1.0.0",
+                "output": {"type": "json_schema", "schema": SCHEMA},
+            }
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        runtime_module, "NacosPromptSourceClient", FakeOwnedNacosSource
+    )
+    monkeypatch.setattr(
+        runtime_module.settings, "NACOS_PROMPT_NAMESPACE_ID", "prompt-namespace"
+    )
+
+    rendered = await runtime_module.PromptRuntimeClient(
+        provider="nacos", base_url="", api_key=""
+    ).render(
+        service_code="ms-image",
+        module_code="xray",
+        prompt_key="xray_cat_report_generation",
+        variables={},
+        variant="cat",
+    )
+
+    assert rendered["output_schema"] == SCHEMA
+    assert json.dumps(SCHEMA) in rendered["rendered_prompt"]
+    assert len(created) == 1
+    assert created[0].closed is True
+
+
+@pytest.mark.anyio
+async def test_prompt_runtime_client_fails_closed_when_nacos_schema_is_missing() -> None:
+    from apps.backend.core.ai.prompt_runtime_client import PromptRuntimeClient
+
+    class FakeNacosSource:
+        namespace_id = "prompt-namespace"
+
+        async def fetch(self, **kwargs: Any) -> dict[str, Any]:
+            return {"template": "{{ species }}", "version": "1.0.0"}
+
+    with pytest.raises(RuntimeError, match="Nacos Prompt 缺少 output schema"):
+        await PromptRuntimeClient(
+            provider="nacos",
+            base_url="",
+            api_key="",
+            nacos_source_client=FakeNacosSource(),
+        ).render(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_cat_image_quality",
+            variables={"species": "cat"},
+            variant="cat",
+        )
+
+
+@pytest.mark.anyio
+async def test_prompt_runtime_client_rejects_unknown_provider() -> None:
+    from apps.backend.core.ai.prompt_runtime_client import PromptRuntimeClient
+
+    with pytest.raises(RuntimeError, match="不支持的 PROMPT_RUNTIME_PROVIDER"):
+        await PromptRuntimeClient(provider="unknown").render(
+            service_code="ms-image",
+            module_code="xray",
+            prompt_key="xray_cat_image_quality",
+            variables={},
+            variant="cat",
+        )
 
 
 def test_gateway_client_preserves_ms_ai_fast_platform_base_url() -> None:
@@ -778,6 +952,22 @@ def test_schema_validate_result_accepts_bare_json_and_one_complete_json_fence() 
     )
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        '说明\n```json\n{"result":"ok"}\n```',
+        '```json\n{"result":"ok"}\n```\n说明',
+        '```\n{"result":"ok"}\n```',
+        '```JSON\n{"result":"ok"}\n```',
+        '<analysis>internal reasoning</analysis>\n{"result":"ok"}',
+    ],
+)
+def test_schema_validate_result_uses_ms_ai_fast_json_object_extraction(
+    value: str,
+) -> None:
+    assert schema_validate_result(value=value, schema=SCHEMA) == {"result": "ok"}
+
+
 def test_schema_validate_result_runs_frozen_schema_after_fence_unwrap() -> None:
     with pytest.raises(
         GatewayContractError,
@@ -792,15 +982,12 @@ def test_schema_validate_result_runs_frozen_schema_after_fence_unwrap() -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        '说明\n```json\n{"result":"ok"}\n```',
-        '```json\n{"result":"ok"}\n```\n说明',
-        '```\n{"result":"ok"}\n```',
-        '```JSON\n{"result":"ok"}\n```',
         '```json\n{"result":"ok"}\n```\n```json\n{"result":"ok"}\n```',
         "```json\n{not json}\n```",
+        "plain text without an object",
     ],
 )
-def test_schema_validate_result_rejects_non_unique_or_non_json_fence(
+def test_schema_validate_result_rejects_ambiguous_or_invalid_json(
     value: str,
 ) -> None:
     with pytest.raises(GatewayContractError, match="provider_response_json_invalid"):
@@ -1173,12 +1360,12 @@ async def test_code_routed_lineage_uses_frozen_call_runtime_without_config_db() 
         ai_config_id=snapshot["ai_config_id"],
         config_sha256=config_sha256,
         schema_sha256=sha256_json(response_schema),
-        requested_model="gpt-5.6-sol",
+        requested_model="gemini-3.8-flash",
         execution_mode="race",
         budget_reservation_json={
             "runtime_request": {
                 "prompt": {"prompt_key": "xray_cat_image_quality"},
-                "route": {"models": ["gpt-5.6-sol"], "mode": "race"},
+                "route": {"models": ["gemini-3.8-flash"], "mode": "race"},
                 "response_schema": response_schema,
             }
         },
@@ -3390,6 +3577,99 @@ async def test_ai_attempt_reconcile_repeated_success_does_not_refinalize_stage()
     assert second == "attempt_finalized_stage_pending"
     assert attempt_finalize_count == 2
     assert stage_finalize_count == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("species", ["cat", "dog"])
+@pytest.mark.parametrize(
+    ("module_name", "handler_name", "builder_name", "stage_key", "expected_model"),
+    [
+        (
+            "apps.backend.services.runtime.stages.xray.image_quality",
+            "BatchImageQualityReviewStageHandler",
+            "build_xray_image_quality_ai_request_command",
+            "batch_image_quality_review",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.study_screening",
+            "StudyScreeningStageHandler",
+            "build_study_screening_ai_request_command",
+            "study_screening",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.system_analysis",
+            "SystemAnalysisStageHandler",
+            "build_system_analysis_ai_request_command",
+            "system_analysis",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.joint_primary_reader",
+            "XRayJointPrimaryReaderStageHandler",
+            "build_primary_ai_request_command",
+            "joint_primary_reader",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.targeted_review",
+            "XRayTargetedReviewStageHandler",
+            "build_targeted_ai_request_command",
+            "targeted_review",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.report_generation",
+            "ReportGenerationStageHandler",
+            "build_report_generation_ai_request_command",
+            "report_generation",
+            "gemini-3.8-flash",
+        ),
+        (
+            "apps.backend.services.runtime.stages.xray.anatomy_localization",
+            "AnatomyLocalizationStageHandler",
+            "build_anatomy_localization_ai_request_command",
+            "anatomy_localization",
+            "gemini-3.8-flash",
+        ),
+    ],
+)
+async def test_xray_ai_stage_request_uses_exact_species_variant(
+    monkeypatch,
+    species: str,
+    module_name: str,
+    handler_name: str,
+    builder_name: str,
+    stage_key: str,
+    expected_model: str,
+) -> None:
+    import importlib
+    from types import SimpleNamespace
+
+    from apps.backend.services.runtime.stages.contracts import StageExecutionContext
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(
+        module,
+        builder_name,
+        lambda *, task, stage: SimpleNamespace(
+            safe_context={"species": species}
+        ),
+    )
+    handler = getattr(module, handler_name)()
+    context = StageExecutionContext(
+        task=SimpleNamespace(id="task_1", request_snapshot_json={}),
+        stage=SimpleNamespace(stage_key=stage_key),
+    )
+
+    plan = await handler.execute(context)
+
+    assert plan.ai_request is not None
+    assert plan.ai_request.variant == species
+    assert plan.ai_request.prompt_key == handler.PROMPT_KEYS[species]
+    assert plan.ai_request.route.models == (expected_model,)
+    assert plan.ai_request.route.mode == "race"
 
 
 @pytest.mark.anyio
@@ -6737,7 +7017,7 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
         final_medical_result=None,
     )
     runtime_kwargs = {
-        "route": AiModelRoute(models=("gpt-5.6-sol",), mode="race"),
+        "route": AiModelRoute(models=("gemini-3.8-flash",), mode="race"),
         "prompt_key": "xray_cat_anatomy_localization",
         "module_code": "xray",
         "locale": "zh-CN",
@@ -6774,9 +7054,9 @@ async def test_anatomy_localization_prepare_structured_call_creates_one_call_and
     call = call_dal.created[0]
     attempt = attempt_dal.created[0]
     assert call.execution_mode == "race"
-    assert call.requested_model == "gpt-5.6-sol"
+    assert call.requested_model == "gemini-3.8-flash"
     assert call.budget_reservation_json["runtime_request"]["route"] == {
-        "models": ["gpt-5.6-sol"],
+        "models": ["gemini-3.8-flash"],
         "mode": "race",
     }
     assert call.attempt_count == 1
