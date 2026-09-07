@@ -3,10 +3,16 @@ import os
 import rsa
 import base64
 import json
+import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from fastapi import Depends, Header, HTTPException, status, Security
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBasic,
+    HTTPBasicCredentials,
+    HTTPBearer,
+)
 from typing import TYPE_CHECKING, Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +32,7 @@ if TYPE_CHECKING:
 
 auth_domain = os.getenv('AUTH_DOMAIN')
 http_bearer = HTTPBearer(auto_error=False)
+http_basic = HTTPBasic(auto_error=False)
 admin_http_bearer = HTTPBearer(auto_error=False)
 _PLACEHOLDER_JWT_SECRETS = frozenset(
     {
@@ -58,6 +65,50 @@ def _unauthorized(detail: str = "Invalid bearer token") -> HTTPException:
         detail=detail,
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def _basic_unauthorized(detail: str = "Incorrect username or password") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": 'Basic realm="ms-image-runtime"'},
+    )
+
+
+def _missing_runtime_credentials() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing authorization credentials",
+        headers={
+            "WWW-Authenticate": 'Basic realm="ms-image-runtime", Bearer',
+        },
+    )
+
+
+def _basic_auth_payload(credentials: HTTPBasicCredentials) -> dict:
+    configured_username = settings.BASIC_AUTH_USERNAME.strip()
+    configured_password = settings.BASIC_AUTH_PASSWORD
+    if not configured_username or not configured_password:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Basic authentication is not configured",
+        )
+
+    username_matches = secrets.compare_digest(
+        credentials.username.encode("utf-8"),
+        configured_username.encode("utf-8"),
+    )
+    password_matches = secrets.compare_digest(
+        credentials.password.encode("utf-8"),
+        configured_password.encode("utf-8"),
+    )
+    if not (username_matches and password_matches):
+        raise _basic_unauthorized()
+
+    return {
+        "sub": settings.BASIC_AUTH_SUBJECT.strip(),
+        "scopes": settings.BASIC_AUTH_SCOPES.split(),
+    }
 
 
 def _decode_token(
@@ -95,17 +146,22 @@ def _decode_token(
 
 
 def get_jwt_data(
-    data: Optional[HTTPAuthorizationCredentials] = Security(http_bearer)
+    data: Optional[HTTPAuthorizationCredentials] = Security(http_bearer),
+    basic_credentials: Optional[HTTPBasicCredentials] = Security(http_basic),
 ) -> dict:
-    if data is None:
-        raise _unauthorized("Missing bearer token")
-    return _decode_token(
-        data.credentials,
-        key=settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM,
-        issuer=settings.JWT_ISSUER,
-        audience=settings.JWT_AUDIENCE,
-    )
+    """Authenticate Runtime callers with Bearer JWT or configured Basic Auth."""
+
+    if data is not None:
+        return _decode_token(
+            data.credentials,
+            key=settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM,
+            issuer=settings.JWT_ISSUER,
+            audience=settings.JWT_AUDIENCE,
+        )
+    if basic_credentials is not None:
+        return _basic_auth_payload(basic_credentials)
+    raise _missing_runtime_credentials()
 
 
 def get_admin_jwt_data(

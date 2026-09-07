@@ -16,9 +16,12 @@ eggs/
 .eggs/
 lib/
 lib64/
-# The application scaffold intentionally owns a small app/lib package.
-!app/lib/
-!app/lib/*.py
+# The application scaffold intentionally owns a small backend helper package.
+!apps/backend/lib/
+!apps/backend/lib/*.py
+# The X-Ray frontend owns TypeScript runtime helpers under src/lib.
+!apps/frontend/src/lib/
+!apps/frontend/src/lib/*.ts
 parts/
 sdist/
 var/
@@ -169,3 +172,7 @@ docs/artifacts/*-before-schema-change.sql
 
 # Local dev-only keys and tokens (never commit)
 scripts/dev/keys/
+
+# Browser automation traces and local UI evidence
+.playwright-cli/
+output/

@@ -1,5 +1,7 @@
 # MS-Image 当前开发合同与会话执行规范
 
+> 2026-09-07 状态校正：下文 1.2、2.x 及按日期冻结的执行范围保留历史上下文，当前任务以用户新授权和 `.agent-handoff/snapshot.md` 为准。Basic Auth 下 Cat 两图已完成真实上传、Quality、Diagnose、Localization 和报告；猫狗 2–5 图完整矩阵与医学准确率尚未通过。并行验收必须检查 AI Stage/Attempt 实际区间，不能仅凭 Task 生命周期重叠；本地 Worker 默认两个执行槽位。
+
 > 文档版本：v1.4
 >
 > 更新日期：2026-09-02
@@ -207,7 +209,7 @@ Report：没有生成
 |---|---|---|---|
 | `diagnose` Task、cat/dog species 冻结 | `IMPLEMENTED` | species 来自调用方并进入冻结 Snapshot，不运行时查询 latest | `apps/backend/schemas/task.py`、`task_service.py` |
 | StudyPreparation → JointPrimaryReader → DecisionFinalization | `RUNTIME_QUALIFIED`（独立实验链） | 保留“跳过 Screening 且不含 SystemAnalysis”的证据边界 | `apps/backend/core/pipeline.py`、`.agent-handoff/validation.md` |
-| FamilyRouting/TargetedReview 条件分支 | `PARTIAL_RUNTIME_QUALIFIED` | FamilyRouting 已 PASS；TargetedReview 未触发，不能合并记为通过 | `family_routing.py`、`targeted_review.py`、`.agent-handoff/validation.md` |
+| FamilyRouting/TargetedReview 条件分支 | `RUNTIME_QUALIFIED`（历史受控病例） | 2026-09-03 有合法 candidate 触发证据；每次新运行仍须区分触发与合法 primary_final，不保证所有病例触发 | `family_routing.py`、`targeted_review.py`、`.agent-handoff/validation.md` |
 | Task → final Report → current/history | `RUNTIME_QUALIFIED`（有历史证据） | StudyScreening 独立资格 Task 不得生成 Report | `.agent-handoff/validation.md` |
 | `xray_quality_control` / BatchImageQualityReview | `RUNTIME_QUALIFIED`（工程） | 作为 StudyScreening 的显式冻结上游，不查询 latest、不允许客户端提交 Quality JSON | `image_quality.py`、`xray_quality.py`、`.agent-handoff/validation.md` |
 | StudyScreening v1 Prompt/Schema/validator/Profile | `FROZEN / REPLAY_COMPATIBLE` | 保留历史 `1.0.0` 与 strict projection equality，不覆盖、不放宽 | `study_screening_contract.py`、`study_screening.v1.schema.json` |
@@ -229,7 +231,7 @@ Report：没有生成
 | Localization 查询 API | `IMPLEMENTED` | 只返回安全 DTO；不泄露 Prompt、Config、receipt 正文 | `endpoints/anatomy_localizations.py`、`task_service.py` |
 | 现有本地 E2E Harness Localization 分支 | `IMPLEMENTED` | 不创建第二套 Harness；默认 diagnose 行为兼容 | `scripts/dev/run_e2e_local.py` |
 | Localization 静态/合同验证 | `STATIC_VALIDATION_PASSED` | 只代表代码和合同，不代表 Provider 成功 | `.agent-handoff/validation.md` |
-| Localization 真实 2–5 图资格 | `FAILED / NOT_CONFIRMED` | 首格失败即停；不得直接续跑剩余七格 | `.agent-handoff/snapshot.md`、`risks.md` |
+| Localization 真实 2–5 图资格 | `CAT_2_IMAGE_RUNTIME_PASS / FULL_MATRIX_UNKNOWN` | 2026-09-07 Cat 两图单 Call/Attempt 工程通过；不得将单病例外推为猫狗全矩阵或医学准确率 | `.agent-handoff/snapshot.md`、`risks.md` |
 
 ### 3.5 Evaluation 与其他支撑能力
 

@@ -55,7 +55,8 @@ if settings.ENV == 'dev':
         CORSMiddleware,
         allow_origins=origins,
         # Wildcard origins and credentialed browser requests are incompatible
-        # as a safe production contract.  XRay auth uses explicit JWT headers.
+        # as a safe production contract. XRay auth uses explicit Authorization
+        # headers (configured Basic Auth or Bearer JWT).
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],

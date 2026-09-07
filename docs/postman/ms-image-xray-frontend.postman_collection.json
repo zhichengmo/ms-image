@@ -1,0 +1,3494 @@
+{
+  "info": {
+    "_postman_id": "7f99a2c4-09d7-4f94-b56b-cd8eb54f0e1a",
+    "name": "MS-Image X-Ray 前端全链联调（2–5 图）",
+    "description": "面向前端的真实 Runtime 联调集合：Session → Study → 2–5 图上传 → Quality → Diagnose/Report → Anatomy Localization/Overlay。仅覆盖 Runtime 业务接口，不包含 Admin、AI Control、Evaluation。详细合同与证据边界见 docs/postman/ms-image-xray-frontend-guide.md。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "basic",
+    "basic": [
+      {
+        "key": "username",
+        "value": "{{runtime_username}}",
+        "type": "string"
+      },
+      {
+        "key": "password",
+        "value": "{{runtime_password}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "00 环境与只读能力",
+      "description": "先配置 runtime_username 与 runtime_password，再运行 readiness。所有 Runtime 接口默认继承 Collection Basic Auth；OSS PUT 单独 noauth。",
+      "item": [
+        {
+          "name": "01. Runtime 依赖就绪",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/readiness",
+            "description": "用途：检查数据库、Redis、imaging broker 等 Runtime 主链依赖。同步 Prompt=0；异步 Prompt=0；Provider=0。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('Runtime ready=true', function () { pm.expect(payload.data.ready).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. Runtime 健康检查",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/health",
+            "description": "只证明进程存活，不替代 readiness。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. Runtime 版本",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/version",
+            "description": "读取 Runtime 版本信息。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04. 器官定位图例",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/legend?label_contract_version=xray-anatomy-labels.v1&locale=zh-CN",
+            "description": "读取稳定的器官系统、中文名称、颜色与排序。前端可缓存合同版本，但不得把 signed URL 一并持久化。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('图例合同版本正确', function () { pm.expect(payload.data.label_contract_version).to.eql('xray-anatomy-labels.v1'); });",
+                  "pm.test('图例包含 6 个系统', function () { pm.expect(payload.data.systems).to.be.an('array').with.lengthOf(6); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 Session 与 Study",
+      "description": "创建 Session/Study/Series，最终在影像 ready 后冻结 Study。",
+      "item": [
+        {
+          "name": "01. 创建 Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/sessions",
+            "description": "建立一次前端诊断业务会话。每次运行此请求都会生成新的 run_id 和 UTC recorded_at，并清理本轮输出变量。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_system\": \"ms-image-postman\",\n  \"source_session_id\": \"{{run_id}}\",\n  \"source_medical_record_id\": \"{{case_key}}\",\n  \"subject_id\": \"{{subject_id}}\",\n  \"request_id\": \"session-{{run_id}}\",\n  \"started_at\": \"{{recorded_at}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (!Number.isInteger(count) || count < 2 || count > 5) { throw new Error('image_count 必须是 2..5 的整数'); }",
+                  "const species = String(pm.collectionVariables.get('species') || '').toLowerCase();",
+                  "if (!['cat', 'dog'].includes(species)) { throw new Error('species 只允许 cat|dog'); }",
+                  "const runId = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;",
+                  "pm.collectionVariables.set('run_id', runId);",
+                  "pm.collectionVariables.set('recorded_at', new Date().toISOString());",
+                  "for (const key of ['session_id','study_id','study_revision_id','series_id','quality_review_task_id','diagnose_task_id','localization_task_id','report_id','localization_view_expires_at']) { pm.collectionVariables.unset(key); }",
+                  "for (let i = 1; i <= 5; i += 1) { pm.collectionVariables.set(`image_poll_count_${i}`, '0'); }",
+                  "pm.collectionVariables.set('task_poll_count', '0');",
+                  "for (const key of ['quality_poll_count','diagnose_poll_count','localization_poll_count']) { pm.collectionVariables.set(key, '0'); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('session_id', payload.data.id);",
+                  "pm.collectionVariables.set('session_state_version', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 查询 Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/sessions?id={{session_id}}",
+            "description": "读取 Session 当前状态和 state_version；纯读。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('session_state_version', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 创建 X-Ray Study（2–5 图）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/studies",
+            "description": "用途：在 Session 下创建 X-Ray Study 并声明本次预计影像数量。同步 Prompt=0；异步 Prompt=0；Provider=0。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"source_study_id\": \"{{case_key}}-{{run_id}}\",\n  \"modality_type\": \"xray\",\n  \"metadata_schema_version\": \"xray-study.v1\",\n  \"expected_image_count\": {{image_count}},\n  \"completeness_attested_by\": \"ms-image-frontend-postman\",\n  \"identity_status\": \"confirmed\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('study_id', payload.data.id);",
+                  "pm.collectionVariables.set('study_state_version', String(payload.data.state_version));",
+                  "if (payload.data.current_revision_id) pm.collectionVariables.set('study_revision_id', payload.data.current_revision_id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04. 创建 Series",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/series",
+            "description": "用途：在 Study 下创建 Series；ready Study 后新增 Series 的状态合同由 Service 守卫。同步 Prompt=0；异步 Prompt=0；Provider=0。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"series_key\": \"series-{{run_id}}\",\n  \"series_no\": 1,\n  \"metadata_schema_version\": \"xray-series.v1\",\n  \"expected_image_count\": {{image_count}},\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('series_id', payload.data.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 真实影像上传（2–5 图）",
+      "description": "每张图按 prepare → OSS PUT → complete → poll ready。设置 image_count=2..5，超出数量的槽位自动跳过。Runner 建议 delay=1000ms。",
+      "item": [
+        {
+          "name": "04.1 申请第 1 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/prepare-upload",
+            "description": "用途：为第 1 张原始 X-Ray 影像创建 Image 和 OSS 直传票据。同步 Prompt=0；异步 Prompt=0；Provider=0。槽位大于 image_count 时自动跳过。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"logical_image_key\": \"image-1-{{run_id}}\",\n  \"sequence_no\": 1,\n  \"image_role\": \"original\",\n  \"image_kind\": \"instance\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_1}}\",\n  \"expected_sha256\": \"{{image_sha256_1}}\",\n  \"expected_size_bytes\": {{image_size_bytes_1}},\n  \"declared_content_type\": \"{{image_content_type_1}}\",\n  \"projection\": \"{{projection_1}}\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (1 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_1\", \"image_size_bytes_1\", \"projection_1\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_id_1', payload.data.image.id);",
+                  "pm.collectionVariables.set('image_state_version_1', String(payload.data.image.state_version));",
+                  "pm.collectionVariables.set('image_generation_1', String(payload.data.generation));",
+                  "pm.collectionVariables.set('signed_url_1', payload.data.signed_url);",
+                  "pm.collectionVariables.set('required_headers_1', JSON.stringify(payload.data.required_headers || {}));",
+                  "pm.test('上传模式为 direct_put', function () { pm.expect(payload.data.upload_mode).to.eql('direct_put'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.1 上传第 1 张真实影像到对象存储",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{image_content_type_1}}",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{signed_url_1}}",
+            "description": "用途：使用签名 URL 上传第 1 张原始字节。该请求不是 MS-Image REST 接口；必须 noauth，不能携带 Runtime Authorization。Prompt=0；Provider=0。GUI 可能需要手工重新选择本地文件；Newman 需要允许读取对应目录。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_path_1}}"
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (1 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_1\", \"image_size_bytes_1\", \"projection_1\", \"image_path_1\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "const headerJson = pm.collectionVariables.get(`required_headers_${pm.info.requestName.match(/第 (\\d+) 张/)[1]}`) || '{}';",
+                  "const required = JSON.parse(headerJson);",
+                  "Object.keys(required).forEach((key) => pm.request.headers.upsert({ key, value: String(required[key]) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OSS PUT 成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.1 确认第 1 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/complete-upload",
+            "description": "用途：确认第 1 张对象已上传，校验对象事实并写入影像验证 Outbox。同步 Prompt=0；异步医学 Prompt=0；Provider=0。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_1}}\",\n  \"expected_state_version\": {{image_state_version_1}},\n  \"generation\": {{image_generation_1}},\n  \"trace_id\": \"image-complete-1-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (1 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_1\", \"image_size_bytes_1\", \"projection_1\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_1', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.1 等待第 1 张影像处理完成",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images?id={{image_id_1}}",
+            "description": "用途：轮询第 1 张 Image，直到 ready。同步 Prompt=0；异步 Prompt=0；Provider=0。仅 Runner/Newman 自动循环。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (1 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_1\", \"image_size_bytes_1\", \"projection_1\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_1', String(payload.data.state_version));",
+                  "const state = payload.data.status;",
+                  "if (state === 'ready') {",
+                  "  pm.test('Image ready', function () { pm.expect(state).to.eql('ready'); });",
+                  "} else if (['quarantined','deleted'].includes(state)) {",
+                  "  throw new Error(`Image 失败终态: ${state}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('image_poll_count_1') || 0) + 1;",
+                  "  pm.collectionVariables.set('image_poll_count_1', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('image_poll_max') || 60);",
+                  "  if (next > max) throw new Error(`Image 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.2 申请第 2 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/prepare-upload",
+            "description": "用途：为第 2 张原始 X-Ray 影像创建 Image 和 OSS 直传票据。同步 Prompt=0；异步 Prompt=0；Provider=0。槽位大于 image_count 时自动跳过。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"logical_image_key\": \"image-2-{{run_id}}\",\n  \"sequence_no\": 2,\n  \"image_role\": \"original\",\n  \"image_kind\": \"instance\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_2}}\",\n  \"expected_sha256\": \"{{image_sha256_2}}\",\n  \"expected_size_bytes\": {{image_size_bytes_2}},\n  \"declared_content_type\": \"{{image_content_type_2}}\",\n  \"projection\": \"{{projection_2}}\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (2 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_2\", \"image_size_bytes_2\", \"projection_2\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_id_2', payload.data.image.id);",
+                  "pm.collectionVariables.set('image_state_version_2', String(payload.data.image.state_version));",
+                  "pm.collectionVariables.set('image_generation_2', String(payload.data.generation));",
+                  "pm.collectionVariables.set('signed_url_2', payload.data.signed_url);",
+                  "pm.collectionVariables.set('required_headers_2', JSON.stringify(payload.data.required_headers || {}));",
+                  "pm.test('上传模式为 direct_put', function () { pm.expect(payload.data.upload_mode).to.eql('direct_put'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.2 上传第 2 张真实影像到对象存储",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{image_content_type_2}}",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{signed_url_2}}",
+            "description": "用途：使用签名 URL 上传第 2 张原始字节。该请求不是 MS-Image REST 接口；必须 noauth，不能携带 Runtime Authorization。Prompt=0；Provider=0。GUI 可能需要手工重新选择本地文件；Newman 需要允许读取对应目录。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_path_2}}"
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (2 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_2\", \"image_size_bytes_2\", \"projection_2\", \"image_path_2\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "const headerJson = pm.collectionVariables.get(`required_headers_${pm.info.requestName.match(/第 (\\d+) 张/)[1]}`) || '{}';",
+                  "const required = JSON.parse(headerJson);",
+                  "Object.keys(required).forEach((key) => pm.request.headers.upsert({ key, value: String(required[key]) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OSS PUT 成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.2 确认第 2 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/complete-upload",
+            "description": "用途：确认第 2 张对象已上传，校验对象事实并写入影像验证 Outbox。同步 Prompt=0；异步医学 Prompt=0；Provider=0。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_2}}\",\n  \"expected_state_version\": {{image_state_version_2}},\n  \"generation\": {{image_generation_2}},\n  \"trace_id\": \"image-complete-2-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (2 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_2\", \"image_size_bytes_2\", \"projection_2\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_2', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.2 等待第 2 张影像处理完成",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images?id={{image_id_2}}",
+            "description": "用途：轮询第 2 张 Image，直到 ready。同步 Prompt=0；异步 Prompt=0；Provider=0。仅 Runner/Newman 自动循环。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (2 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_2\", \"image_size_bytes_2\", \"projection_2\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_2', String(payload.data.state_version));",
+                  "const state = payload.data.status;",
+                  "if (state === 'ready') {",
+                  "  pm.test('Image ready', function () { pm.expect(state).to.eql('ready'); });",
+                  "} else if (['quarantined','deleted'].includes(state)) {",
+                  "  throw new Error(`Image 失败终态: ${state}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('image_poll_count_2') || 0) + 1;",
+                  "  pm.collectionVariables.set('image_poll_count_2', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('image_poll_max') || 60);",
+                  "  if (next > max) throw new Error(`Image 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.3 申请第 3 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/prepare-upload",
+            "description": "用途：为第 3 张原始 X-Ray 影像创建 Image 和 OSS 直传票据。同步 Prompt=0；异步 Prompt=0；Provider=0。槽位大于 image_count 时自动跳过。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"logical_image_key\": \"image-3-{{run_id}}\",\n  \"sequence_no\": 3,\n  \"image_role\": \"original\",\n  \"image_kind\": \"instance\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_3}}\",\n  \"expected_sha256\": \"{{image_sha256_3}}\",\n  \"expected_size_bytes\": {{image_size_bytes_3}},\n  \"declared_content_type\": \"{{image_content_type_3}}\",\n  \"projection\": \"{{projection_3}}\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (3 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_3\", \"image_size_bytes_3\", \"projection_3\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_id_3', payload.data.image.id);",
+                  "pm.collectionVariables.set('image_state_version_3', String(payload.data.image.state_version));",
+                  "pm.collectionVariables.set('image_generation_3', String(payload.data.generation));",
+                  "pm.collectionVariables.set('signed_url_3', payload.data.signed_url);",
+                  "pm.collectionVariables.set('required_headers_3', JSON.stringify(payload.data.required_headers || {}));",
+                  "pm.test('上传模式为 direct_put', function () { pm.expect(payload.data.upload_mode).to.eql('direct_put'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.3 上传第 3 张真实影像到对象存储",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{image_content_type_3}}",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{signed_url_3}}",
+            "description": "用途：使用签名 URL 上传第 3 张原始字节。该请求不是 MS-Image REST 接口；必须 noauth，不能携带 Runtime Authorization。Prompt=0；Provider=0。GUI 可能需要手工重新选择本地文件；Newman 需要允许读取对应目录。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_path_3}}"
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (3 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_3\", \"image_size_bytes_3\", \"projection_3\", \"image_path_3\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "const headerJson = pm.collectionVariables.get(`required_headers_${pm.info.requestName.match(/第 (\\d+) 张/)[1]}`) || '{}';",
+                  "const required = JSON.parse(headerJson);",
+                  "Object.keys(required).forEach((key) => pm.request.headers.upsert({ key, value: String(required[key]) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OSS PUT 成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.3 确认第 3 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/complete-upload",
+            "description": "用途：确认第 3 张对象已上传，校验对象事实并写入影像验证 Outbox。同步 Prompt=0；异步医学 Prompt=0；Provider=0。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_3}}\",\n  \"expected_state_version\": {{image_state_version_3}},\n  \"generation\": {{image_generation_3}},\n  \"trace_id\": \"image-complete-3-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (3 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_3\", \"image_size_bytes_3\", \"projection_3\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_3', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.3 等待第 3 张影像处理完成",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images?id={{image_id_3}}",
+            "description": "用途：轮询第 3 张 Image，直到 ready。同步 Prompt=0；异步 Prompt=0；Provider=0。仅 Runner/Newman 自动循环。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (3 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_3\", \"image_size_bytes_3\", \"projection_3\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_3', String(payload.data.state_version));",
+                  "const state = payload.data.status;",
+                  "if (state === 'ready') {",
+                  "  pm.test('Image ready', function () { pm.expect(state).to.eql('ready'); });",
+                  "} else if (['quarantined','deleted'].includes(state)) {",
+                  "  throw new Error(`Image 失败终态: ${state}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('image_poll_count_3') || 0) + 1;",
+                  "  pm.collectionVariables.set('image_poll_count_3', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('image_poll_max') || 60);",
+                  "  if (next > max) throw new Error(`Image 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.4 申请第 4 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/prepare-upload",
+            "description": "用途：为第 4 张原始 X-Ray 影像创建 Image 和 OSS 直传票据。同步 Prompt=0；异步 Prompt=0；Provider=0。槽位大于 image_count 时自动跳过。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"logical_image_key\": \"image-4-{{run_id}}\",\n  \"sequence_no\": 4,\n  \"image_role\": \"original\",\n  \"image_kind\": \"instance\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_4}}\",\n  \"expected_sha256\": \"{{image_sha256_4}}\",\n  \"expected_size_bytes\": {{image_size_bytes_4}},\n  \"declared_content_type\": \"{{image_content_type_4}}\",\n  \"projection\": \"{{projection_4}}\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (4 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_4\", \"image_size_bytes_4\", \"projection_4\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_id_4', payload.data.image.id);",
+                  "pm.collectionVariables.set('image_state_version_4', String(payload.data.image.state_version));",
+                  "pm.collectionVariables.set('image_generation_4', String(payload.data.generation));",
+                  "pm.collectionVariables.set('signed_url_4', payload.data.signed_url);",
+                  "pm.collectionVariables.set('required_headers_4', JSON.stringify(payload.data.required_headers || {}));",
+                  "pm.test('上传模式为 direct_put', function () { pm.expect(payload.data.upload_mode).to.eql('direct_put'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.4 上传第 4 张真实影像到对象存储",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{image_content_type_4}}",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{signed_url_4}}",
+            "description": "用途：使用签名 URL 上传第 4 张原始字节。该请求不是 MS-Image REST 接口；必须 noauth，不能携带 Runtime Authorization。Prompt=0；Provider=0。GUI 可能需要手工重新选择本地文件；Newman 需要允许读取对应目录。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_path_4}}"
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (4 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_4\", \"image_size_bytes_4\", \"projection_4\", \"image_path_4\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "const headerJson = pm.collectionVariables.get(`required_headers_${pm.info.requestName.match(/第 (\\d+) 张/)[1]}`) || '{}';",
+                  "const required = JSON.parse(headerJson);",
+                  "Object.keys(required).forEach((key) => pm.request.headers.upsert({ key, value: String(required[key]) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OSS PUT 成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.4 确认第 4 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/complete-upload",
+            "description": "用途：确认第 4 张对象已上传，校验对象事实并写入影像验证 Outbox。同步 Prompt=0；异步医学 Prompt=0；Provider=0。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_4}}\",\n  \"expected_state_version\": {{image_state_version_4}},\n  \"generation\": {{image_generation_4}},\n  \"trace_id\": \"image-complete-4-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (4 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_4\", \"image_size_bytes_4\", \"projection_4\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_4', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.4 等待第 4 张影像处理完成",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images?id={{image_id_4}}",
+            "description": "用途：轮询第 4 张 Image，直到 ready。同步 Prompt=0；异步 Prompt=0；Provider=0。仅 Runner/Newman 自动循环。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (4 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_4\", \"image_size_bytes_4\", \"projection_4\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_4', String(payload.data.state_version));",
+                  "const state = payload.data.status;",
+                  "if (state === 'ready') {",
+                  "  pm.test('Image ready', function () { pm.expect(state).to.eql('ready'); });",
+                  "} else if (['quarantined','deleted'].includes(state)) {",
+                  "  throw new Error(`Image 失败终态: ${state}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('image_poll_count_4') || 0) + 1;",
+                  "  pm.collectionVariables.set('image_poll_count_4', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('image_poll_max') || 60);",
+                  "  if (next > max) throw new Error(`Image 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04.5 申请第 5 张影像上传地址",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/prepare-upload",
+            "description": "用途：为第 5 张原始 X-Ray 影像创建 Image 和 OSS 直传票据。同步 Prompt=0；异步 Prompt=0；Provider=0。槽位大于 image_count 时自动跳过。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"series_id\": \"{{series_id}}\",\n  \"logical_image_key\": \"image-5-{{run_id}}\",\n  \"sequence_no\": 5,\n  \"image_role\": \"original\",\n  \"image_kind\": \"instance\",\n  \"metadata_schema_version\": \"xray-image.v1\",\n  \"file_format\": \"{{image_file_format_5}}\",\n  \"expected_sha256\": \"{{image_sha256_5}}\",\n  \"expected_size_bytes\": {{image_size_bytes_5}},\n  \"declared_content_type\": \"{{image_content_type_5}}\",\n  \"projection\": \"{{projection_5}}\",\n  \"technical_metadata\": {\"source\": \"postman\"}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (5 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_5\", \"image_size_bytes_5\", \"projection_5\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_id_5', payload.data.image.id);",
+                  "pm.collectionVariables.set('image_state_version_5', String(payload.data.image.state_version));",
+                  "pm.collectionVariables.set('image_generation_5', String(payload.data.generation));",
+                  "pm.collectionVariables.set('signed_url_5', payload.data.signed_url);",
+                  "pm.collectionVariables.set('required_headers_5', JSON.stringify(payload.data.required_headers || {}));",
+                  "pm.test('上传模式为 direct_put', function () { pm.expect(payload.data.upload_mode).to.eql('direct_put'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05.5 上传第 5 张真实影像到对象存储",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "{{image_content_type_5}}",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": "{{signed_url_5}}",
+            "description": "用途：使用签名 URL 上传第 5 张原始字节。该请求不是 MS-Image REST 接口；必须 noauth，不能携带 Runtime Authorization。Prompt=0；Provider=0。GUI 可能需要手工重新选择本地文件；Newman 需要允许读取对应目录。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": "{{image_path_5}}"
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (5 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_5\", \"image_size_bytes_5\", \"projection_5\", \"image_path_5\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}",
+                  "const headerJson = pm.collectionVariables.get(`required_headers_${pm.info.requestName.match(/第 (\\d+) 张/)[1]}`) || '{}';",
+                  "const required = JSON.parse(headerJson);",
+                  "Object.keys(required).forEach((key) => pm.request.headers.upsert({ key, value: String(required[key]) }));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OSS PUT 成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06.5 确认第 5 张影像上传完成",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/complete-upload",
+            "description": "用途：确认第 5 张对象已上传，校验对象事实并写入影像验证 Outbox。同步 Prompt=0；异步医学 Prompt=0；Provider=0。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{image_id_5}}\",\n  \"expected_state_version\": {{image_state_version_5}},\n  \"generation\": {{image_generation_5}},\n  \"trace_id\": \"image-complete-5-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (5 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_5\", \"image_size_bytes_5\", \"projection_5\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_5', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07.5 等待第 5 张影像处理完成",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images?id={{image_id_5}}",
+            "description": "用途：轮询第 5 张 Image，直到 ready。同步 Prompt=0；异步 Prompt=0；Provider=0。仅 Runner/Newman 自动循环。\n\n产品合同：本轮 X-Ray 必须使用 2–5 张原始影像。OSS PUT 必须 noauth，不能携带 Runtime Authorization。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const count = Number(pm.collectionVariables.get('image_count'));",
+                  "if (5 > count) {",
+                  "  pm.execution.skipRequest();",
+                  "} else {",
+                  "  for (const key of [\"image_sha256_5\", \"image_size_bytes_5\", \"projection_5\"]) {",
+                  "    const value = pm.collectionVariables.get(key);",
+                  "    if (value === undefined || value === null || String(value).trim() === '') {",
+                  "      throw new Error(`活动影像槽缺少变量: ${key}`);",
+                  "    }",
+                  "  }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('image_state_version_5', String(payload.data.state_version));",
+                  "const state = payload.data.status;",
+                  "if (state === 'ready') {",
+                  "  pm.test('Image ready', function () { pm.expect(state).to.eql('ready'); });",
+                  "} else if (['quarantined','deleted'].includes(state)) {",
+                  "  throw new Error(`Image 失败终态: ${state}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('image_poll_count_5') || 0) + 1;",
+                  "  pm.collectionVariables.set('image_poll_count_5', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('image_poll_max') || 60);",
+                  "  if (next > max) throw new Error(`Image 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "21. 分页查询 Series 影像",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/images/page?series_id={{series_id}}&current_only=true&page=1&page_size=20",
+            "description": "前端批量刷新影像状态的首选列表接口；返回运行安全摘要，不返回对象存储密钥或下载 URL。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('分页 data 为数组', function () { pm.expect(payload.data).to.be.an('array'); });",
+                  "pm.test('返回 page_info', function () { pm.expect(payload.page_info).to.be.an('object'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05. 查询 Study 与冻结前状态",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/studies?id={{study_id}}",
+            "description": "用途：读取 Study/Series 聚合状态、revision 和影像计数，为 finalize 提供 CAS 事实。同步 Prompt=0；异步 Prompt=0；Provider=0。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('study_state_version', String(payload.data.state_version));",
+                  "pm.collectionVariables.set('study_revision_id', payload.data.current_revision_id);",
+                  "pm.test('Study revision 已生成', function () { pm.expect(payload.data.current_revision_id).to.be.a('string').and.not.empty; });",
+                  "if (payload.data.expected_image_count !== undefined) pm.test('Study expected 数量一致', function () { pm.expect(payload.data.expected_image_count).to.eql(Number(pm.collectionVariables.get('image_count'))); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06. Finalize Study",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/studies/finalize",
+            "description": "用途：以 CAS 方式冻结 ready Study/Revision。同步 Prompt=0；异步 Prompt=0；Provider=0。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{study_id}}\",\n  \"expected_state_version\": {{study_state_version}},\n  \"current_revision_id\": \"{{study_revision_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('study_state_version', String(payload.data.state_version));",
+                  "pm.collectionVariables.set('study_revision_id', payload.data.current_revision_id);",
+                  "pm.test('Study ready', function () { pm.expect(payload.data.status).to.eql('ready'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Quality Review",
+      "description": "先完成 Quality，再把质量 Task ID 冻结进 diagnose。",
+      "item": [
+        {
+          "name": "01. 创建 X-Ray Quality Review Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/xray-quality-reviews",
+            "description": "创建 2–5 图批量质量审查。HTTP 201 仅表示已受理；真实 AI 执行发生在 Worker。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"study_revision_id\": \"{{study_revision_id}}\",\n  \"request_id\": \"quality-{{run_id}}\",\n  \"species\": \"{{species}}\",\n  \"trace_id\": \"quality-trace-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('quality_review_task_id', payload.data.id);",
+                  "pm.collectionVariables.set('quality_task_state_version', String(payload.data.state_version));",
+                  "pm.collectionVariables.set('quality_poll_count', '0');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 轮询 Quality Task",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks?id={{quality_review_task_id}}",
+            "description": "轮询异步 Task。GET 本身不会推进任务或调用 Provider。Collection Runner 中会自循环；手工 Send 时请按 execution_status 自行重试。建议 Runner delay 设置为 1000ms。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('quality_task_state_version', String(payload.data.state_version));",
+                  "const state = payload.data.execution_status;",
+                  "if (state === 'completed') {",
+                  "  pm.test('Task completed', function () { pm.expect(state).to.eql('completed'); });",
+                  "  pm.test('Task 有 finished_at', function () { pm.expect(payload.data.finished_at).to.be.a('string').and.not.empty; });",
+                  "} else if (['failed', 'cancelled', 'dead_letter'].includes(state)) {",
+                  "  throw new Error(`Task 失败终态: ${state}; error_code=${payload.data.error_code || ''}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('quality_poll_count') || 0) + 1;",
+                  "  pm.collectionVariables.set('quality_poll_count', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('task_poll_max') || 180);",
+                  "  if (next > max) throw new Error(`Task 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 查询 Quality Review 结果",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/xray-quality-reviews?task_id={{quality_review_task_id}}",
+            "description": "仅在 Quality Task completed 后读取冻结的质量结果。diagnose 必须引用该 Task ID，不能由客户端直接提交质量 JSON。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('Quality 结果覆盖 2–5 图', function () { pm.expect(payload.data.result.images.length).to.be.within(2, 5); });",
+                  "pm.test('物种一致', function () { pm.expect(payload.data.result.species).to.eql(pm.collectionVariables.get('species')); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Diagnosis 与 Report",
+      "description": "主诊断和报告读取链。",
+      "item": [
+        {
+          "name": "01. 创建 Diagnose Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks",
+            "description": "创建主诊断 Task。quality_review_task_id 必须来自同 Study/revision/manifest/species 的已完成 Quality Task；clinical_context 只允许 diagnose 使用。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"study_revision_id\": \"{{study_revision_id}}\",\n  \"request_id\": \"diagnose-{{run_id}}\",\n  \"task_type\": \"diagnose\",\n  \"species\": \"{{species}}\",\n  \"quality_review_task_id\": \"{{quality_review_task_id}}\",\n  \"clinical_context\": {\n    \"contract_version\": \"xray-clinical-context.v1\",\n    \"source\": {\n      \"system\": \"postman\",\n      \"recorded_at\": \"{{recorded_at}}\",\n      \"temporal_scope\": \"available_at_request\"\n    },\n    \"chief_complaint\": \"前端联调病例\",\n    \"study_reason\": \"X-Ray 检查\"\n  },\n  \"trace_id\": \"diagnose-trace-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('diagnose_task_id', payload.data.id);",
+                  "pm.collectionVariables.set('diagnose_task_state_version', String(payload.data.state_version));",
+                  "pm.collectionVariables.set('diagnose_poll_count', '0');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 轮询 Diagnose Task",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks?id={{diagnose_task_id}}",
+            "description": "轮询异步 Task。GET 本身不会推进任务或调用 Provider。Collection Runner 中会自循环；手工 Send 时请按 execution_status 自行重试。建议 Runner delay 设置为 1000ms。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('diagnose_task_state_version', String(payload.data.state_version));",
+                  "const state = payload.data.execution_status;",
+                  "if (state === 'completed') {",
+                  "  pm.test('Task completed', function () { pm.expect(state).to.eql('completed'); });",
+                  "  pm.test('Task 有 finished_at', function () { pm.expect(payload.data.finished_at).to.be.a('string').and.not.empty; });",
+                  "  pm.test('诊断任务已产生 current_report_id', function () { pm.expect(payload.data.current_report_id).to.be.a('string').and.not.empty; });",
+                  "  pm.collectionVariables.set('report_id', payload.data.current_report_id);",
+                  "} else if (['failed', 'cancelled', 'dead_letter'].includes(state)) {",
+                  "  throw new Error(`Task 失败终态: ${state}; error_code=${payload.data.error_code || ''}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('diagnose_poll_count') || 0) + 1;",
+                  "  pm.collectionVariables.set('diagnose_poll_count', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('task_poll_max') || 180);",
+                  "  if (next > max) throw new Error(`Task 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 查询当前 Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/reports/current?task_id={{diagnose_task_id}}",
+            "description": "查询 diagnose 当前 final/published Report；未生成时 data=null。不要在日志打印完整医疗报告。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "const taskReportId = pm.collectionVariables.get('report_id');",
+                  "pm.test('current Report 与 Task.current_report_id 一致', function () { pm.expect(payload.data.id).to.eql(taskReportId); });",
+                  "pm.collectionVariables.set('report_id', payload.data.id);",
+                  "pm.collectionVariables.set('report_content_sha256', payload.data.content_sha256);",
+                  "pm.test('Report 可展示', function () { pm.expect(payload.data.status).to.be.oneOf(['final', 'published']); });",
+                  "const result = payload.data.content_json && payload.data.content_json.complete_medical_result;",
+                  "pm.test('CompleteMedicalResult v2', function () { pm.expect(result && result.result_schema_version).to.eql('xray-complete-medical-result.v2'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04. 查询 Report 历史",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/reports/history?task_id={{diagnose_task_id}}",
+            "description": "查询 diagnose 的全部 Report revision；可包含 final、published、superseded、void。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('Report history 非空', function () { pm.expect(payload.data).to.be.an('array').and.not.empty; });",
+                  "const currentId = pm.collectionVariables.get('report_id');",
+                  "const latest = payload.data[0];",
+                  "pm.test('history 最新 Report 与 current 一致', function () { pm.expect(latest.id).to.eql(currentId); });",
+                  "pm.test('current/history content SHA 一致', function () { pm.expect(latest.content_sha256).to.eql(pm.collectionVariables.get('report_content_sha256')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05. 按 ID 查询 Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/reports?id={{report_id}}",
+            "description": "按 query id 查询单个 Report；资源 ID 不使用 /{id} 路由。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('Report ID 一致', function () { pm.expect(payload.data.id).to.eql(pm.collectionVariables.get('report_id')); });",
+                  "pm.test('Report content SHA 一致', function () { pm.expect(payload.data.content_sha256).to.eql(pm.collectionVariables.get('report_content_sha256')); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Anatomy Localization 展示",
+      "description": "独立展示 Task、current/history/result、短 TTL 原图 URL 和 legend。",
+      "item": [
+        {
+          "name": "01. 查询当前 Localization（创建前可返回 null）",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/current?source_task_id={{diagnose_task_id}}",
+            "description": "按主诊断 Task 查询当前关联 Localization。没有关联记录时 data=null，不是错误。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 创建 Anatomy Localization Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks",
+            "description": "创建独立展示 Task。source_task_id 必填并指向 diagnose；不得传 clinical_context、pet_profile_id 或 quality_review_task_id。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"study_id\": \"{{study_id}}\",\n  \"study_revision_id\": \"{{study_revision_id}}\",\n  \"request_id\": \"localization-{{run_id}}\",\n  \"task_type\": \"anatomy_localization\",\n  \"species\": \"{{species}}\",\n  \"source_task_id\": \"{{diagnose_task_id}}\",\n  \"trace_id\": \"localization-trace-{{run_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('localization_task_id', payload.data.id);",
+                  "pm.collectionVariables.set('localization_task_state_version', String(payload.data.state_version));",
+                  "pm.collectionVariables.set('task_id_to_query', payload.data.id);",
+                  "pm.collectionVariables.set('localization_poll_count', '0');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 轮询 Localization Task",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks?id={{localization_task_id}}",
+            "description": "轮询异步 Task。GET 本身不会推进任务或调用 Provider。Collection Runner 中会自循环；手工 Send 时请按 execution_status 自行重试。建议 Runner delay 设置为 1000ms。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('localization_task_state_version', String(payload.data.state_version));",
+                  "const state = payload.data.execution_status;",
+                  "if (state === 'completed') {",
+                  "  pm.test('Task completed', function () { pm.expect(state).to.eql('completed'); });",
+                  "  pm.test('Task 有 finished_at', function () { pm.expect(payload.data.finished_at).to.be.a('string').and.not.empty; });",
+                  "} else if (['failed', 'cancelled', 'dead_letter'].includes(state)) {",
+                  "  throw new Error(`Task 失败终态: ${state}; error_code=${payload.data.error_code || ''}`);",
+                  "} else {",
+                  "  const next = Number(pm.collectionVariables.get('localization_poll_count') || 0) + 1;",
+                  "  pm.collectionVariables.set('localization_poll_count', String(next));",
+                  "  const max = Number(pm.collectionVariables.get('task_poll_max') || 180);",
+                  "  if (next > max) throw new Error(`Task 轮询超时: ${state}`);",
+                  "  pm.execution.setNextRequest(pm.info.requestName);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04. 查询当前 Localization",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/current?source_task_id={{diagnose_task_id}}",
+            "description": "返回当前关联任务摘要；前端从 result_available 判断是否可读取结果。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('当前 Localization 指向 diagnose', function () { pm.expect(payload.data.source_task_id).to.eql(pm.collectionVariables.get('diagnose_task_id')); });",
+                  "pm.collectionVariables.set('localization_task_id', payload.data.task_id);",
+                  "pm.collectionVariables.set('localization_task_state_version', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05. 分页查询 Localization 历史",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/history?source_task_id={{diagnose_task_id}}&page=1&page_size=20",
+            "description": "展示链专用历史接口；在 tasks/page 已知阻断期间，前端应使用本接口获取定位任务历史。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('历史 data 为数组', function () { pm.expect(payload.data).to.be.an('array'); });",
+                  "pm.test('历史有 page_info', function () { pm.expect(payload.page_info).to.be.an('object'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06. 查询 Localization 结果",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations?task_id={{localization_task_id}}",
+            "description": "读取 normalized bbox 结果。bbox 顺序固定为 [x_min,y_min,x_max,y_max]，范围 0–1、正面积，坐标相对原始完整影像。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('Localization 合同版本正确', function () { pm.expect(payload.data.result.contract_version).to.eql('xray-anatomy-localization.v1'); });",
+                  "pm.test('结果覆盖 2–5 图', function () { pm.expect(payload.data.result.images.length).to.be.within(2, 5); });",
+                  "pm.test('source_task_id 指向 diagnose', function () { pm.expect(payload.data.source_task_id).to.eql(pm.collectionVariables.get('diagnose_task_id')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07. 准备 Localization 展示影像",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/prepare-view",
+            "description": "为 Localization 冻结原图签发短 TTL HTTPS 下载地址。请求体不接受 expires_in；TTL 由服务端配置并在响应返回。signed_url 不得持久化、打日志或发送给第三方。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"task_id\": \"{{localization_task_id}}\",\n  \"image_ids\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('返回 1–5 个展示 URL', function () { pm.expect(payload.data.images.length).to.be.within(1, 5); });",
+                  "pm.test('TTL 不超过 900 秒', function () { pm.expect(payload.data.expires_in).to.be.within(1, 900); });",
+                  "const expiries = payload.data.images.map((item) => item.expires_at).filter(Boolean);",
+                  "if (expiries.length) pm.collectionVariables.set('localization_view_expires_at', expiries.sort()[0]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08. 查询 Localization 图例",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/anatomy-localizations/legend?label_contract_version=xray-anatomy-labels.v1&locale=zh-CN",
+            "description": "读取稳定的器官系统、中文名称、颜色与排序。前端可缓存合同版本，但不得把 signed URL 一并持久化。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.test('图例合同版本正确', function () { pm.expect(payload.data.label_contract_version).to.eql('xray-anatomy-labels.v1'); });",
+                  "pm.test('图例包含 6 个系统', function () { pm.expect(payload.data.systems).to.be.an('array').with.lengthOf(6); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 查询、取消与会话收尾",
+      "description": "辅助查询和显式状态变更。写操作默认跳过，防止 Runner 误操作。",
+      "item": [
+        {
+          "name": "01. 按 ID 查询任意 Task",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks?id={{task_id_to_query}}",
+            "description": "把 task_id_to_query 设置为 Quality、Diagnose 或 Localization Task ID。纯读。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02. 取消指定 Task（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks/cancel",
+            "description": "CAS 取消。默认关闭以避免 Runner 误取消；先设置 cancel_task_id、cancel_task_state_version，再显式将 enable_mutations=true。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{cancel_task_id}}\",\n  \"expected_state_version\": {{cancel_task_state_version}},\n  \"reason\": \"前端用户主动取消\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('enable_mutations') !== 'true') { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03. 完成 Session（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/sessions/complete",
+            "description": "所有 Study 处理完成后推进 Session；默认跳过，需 enable_mutations=true。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{session_id}}\",\n  \"expected_state_version\": {{session_state_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('enable_mutations') !== 'true') { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('session_state_version', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04. 关闭 Session（默认跳过）",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/sessions/close",
+            "description": "关闭已完成 Session；默认跳过，需 enable_mutations=true。",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{session_id}}\",\n  \"expected_state_version\": {{session_state_version}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('enable_mutations') !== 'true') { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 状态成功', function () { pm.expect(pm.response.code).to.be.within(200, 299); });",
+                  "const payload = pm.response.json();",
+                  "pm.test('统一响应 success=true', function () { pm.expect(payload.success).to.eql(true); });",
+                  "pm.collectionVariables.set('session_state_version', String(payload.data.state_version));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 已知阻断",
+      "description": "这里的请求默认跳过，仅用于追踪已知阻断，不应成为前端依赖。",
+      "item": [
+        {
+          "name": "01. tasks/page 已知 422 阻断（默认跳过）",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "{{runtime_username}}",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{runtime_password}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{runtime_base_url}}/tasks/page?study_id={{study_id}}&page=1&page_size=20",
+            "description": "截至 2026-09-04 的真实联调证据：该接口返回 422。前端暂时不要依赖；使用已知 Task ID、Task 关联摘要及 anatomy-localizations/history。只有排查时设置 enable_known_blocker_probe=true。"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('enable_known_blocker_probe') !== 'true') { pm.execution.skipRequest(); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('已知问题仍返回 422，若变为 2xx 请重新资格化并更新文档', function () { pm.expect(pm.response.code).to.be.oneOf([200, 422]); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const username = pm.collectionVariables.get('runtime_username');",
+          "const password = pm.collectionVariables.get('runtime_password');",
+          "if ((!username || !password) && !String(pm.request.url).includes('/health') && !String(pm.request.url).includes('/version') && !String(pm.request.url).includes('/readiness')) {",
+          "  throw new Error('请先设置 Collection 变量 runtime_username 与 runtime_password');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "runtime_base_url",
+      "value": "http://127.0.0.1:8010/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "runtime_username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "runtime_password",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_count",
+      "value": "2",
+      "type": "string"
+    },
+    {
+      "key": "species",
+      "value": "cat",
+      "type": "string"
+    },
+    {
+      "key": "case_key",
+      "value": "ms-image-frontend-case",
+      "type": "string"
+    },
+    {
+      "key": "subject_id",
+      "value": "frontend-subject",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "recorded_at",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "study_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "study_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "study_revision_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "series_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quality_review_task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quality_task_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "diagnose_task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "diagnose_task_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "localization_task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "localization_task_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "report_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "report_content_sha256",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "localization_view_expires_at",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "quality_poll_count",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "diagnose_poll_count",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "localization_poll_count",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "task_poll_max",
+      "value": "180",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_max",
+      "value": "60",
+      "type": "string"
+    },
+    {
+      "key": "task_id_to_query",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cancel_task_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cancel_task_state_version",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "enable_mutations",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "enable_known_blocker_probe",
+      "value": "false",
+      "type": "string"
+    },
+    {
+      "key": "image_path_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_1",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_1",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_size_bytes_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projection_1",
+      "value": "lateral",
+      "type": "string"
+    },
+    {
+      "key": "image_id_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_1",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_1",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_1",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "required_headers_1",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_count_1",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_path_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_2",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_2",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_size_bytes_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projection_2",
+      "value": "ventrodorsal",
+      "type": "string"
+    },
+    {
+      "key": "image_id_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_2",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_2",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "required_headers_2",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_count_2",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_path_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_3",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_3",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_size_bytes_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projection_3",
+      "value": "lateral",
+      "type": "string"
+    },
+    {
+      "key": "image_id_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_3",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_3",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_3",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "required_headers_3",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_count_3",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_path_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_4",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_4",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_size_bytes_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projection_4",
+      "value": "ventrodorsal",
+      "type": "string"
+    },
+    {
+      "key": "image_id_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_4",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_4",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_4",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "required_headers_4",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_count_4",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_path_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_file_format_5",
+      "value": "jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_content_type_5",
+      "value": "image/jpeg",
+      "type": "string"
+    },
+    {
+      "key": "image_sha256_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_size_bytes_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "projection_5",
+      "value": "lateral",
+      "type": "string"
+    },
+    {
+      "key": "image_id_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "image_state_version_5",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "image_generation_5",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "signed_url_5",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "required_headers_5",
+      "value": "{}",
+      "type": "string"
+    },
+    {
+      "key": "image_poll_count_5",
+      "value": "0",
+      "type": "string"
+    }
+  ]
+}

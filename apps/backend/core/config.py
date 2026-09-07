@@ -114,6 +114,13 @@ class Settings(BaseSettings):
 
     IMAGING_REQUIRED_SCOPE: str = "imaging:run"
 
+    # Runtime Basic Auth settings.  Credentials must be injected through the
+    # deployment environment; an empty pair keeps Basic Auth disabled.
+    BASIC_AUTH_USERNAME: str = ""
+    BASIC_AUTH_PASSWORD: str = ""
+    BASIC_AUTH_SUBJECT: str = "ms-image-basic-user"
+    BASIC_AUTH_SCOPES: str = "imaging:run"
+
     # Admin JWT settings
     ADMIN_ALGORITHM: str = "HS256"
     ADMIN_SECRET_KEY: str = ""
@@ -282,6 +289,22 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AI_PLATFORM_OPENAI_BASE_URL 与 AI_PLATFORM_API_KEY 必须成组配置"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_basic_auth_profile(self):
+        username = self.BASIC_AUTH_USERNAME.strip()
+        password = self.BASIC_AUTH_PASSWORD
+        if bool(username) != bool(password):
+            raise ValueError(
+                "BASIC_AUTH_USERNAME 与 BASIC_AUTH_PASSWORD 必须成组配置"
+            )
+        if username and ":" in username:
+            raise ValueError("BASIC_AUTH_USERNAME 不能包含冒号")
+        if username and not self.BASIC_AUTH_SUBJECT.strip():
+            raise ValueError("BASIC_AUTH_SUBJECT 不能为空")
+        if username and not self.BASIC_AUTH_SCOPES.split():
+            raise ValueError("BASIC_AUTH_SCOPES 不能为空")
         return self
 
     @model_validator(mode="after")

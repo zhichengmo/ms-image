@@ -1,277 +1,5 @@
 # 当前工作日志
 
-## 2026-08-31 — Anatomy Localization v1 控制面完成与 Runtime 前置阻断
-
-- 在用户明确授权后完成猫狗 exact Nacos `1.0.0` Prompt 发布/回读、Prompt import/validate、两个不可变 Localization Config compile/create/validate/activate；Prompt/Schema/Label/ModelPool/Connection SHA 对账通过，diagnose active Config 集合未改变。
-- 临时 AI Control 使用进程内 Admin secret 完成生命周期后停止；secret/token 未输出、未持久化。
-- 启动唯一 `run_local_chain.sh`，验证 API health/readiness、Relay heartbeat、Worker concurrency=1、consumer=1、Beat/reconcile scheduler=0。
-- 首个 `cat-02` Harness 命令在 `load_case_manifest()` 阶段因缺少 `MS_IMAGE_XRAY_DATA_ROOT` 返回失败；该阶段早于 token、Runtime client 与 `run_once()`，因此未创建 Task/AICall/Attempt、未调用 Provider，未产生 evidence 文件；仓库外临时空目录随后移除。
-- 按用户既定“任一 manifest 失败即停、不重复”合同，未补环境重跑，也未进入其余七格。随后停止 launcher；8002/8010、Runtime/Relay/Worker 与 lock 均已清理，未影响 RabbitMQ 或其他项目进程。
-- 仓库、当前 shell 和常用 `.env` 均未提供数据根目录；全盘只读搜索约 60 秒无结果后终止。下一次运行需用户提供路径并明确允许新尝试。
-- 本轮未修改业务代码、Prompt/Config 版本、ModelPool/Connection、migration、Docker、Git stage/commit/push 或受保护 archive/postman。
-
-## 2026-08-31 — Anatomy Localization v1 X-Ray 数据根目录只读资格检查
-
-- 用户提供 `/Users/mozhicheng/workspace/documents/X光_没问题_全量过滤` 后，只读核对八份 `cat/dog × 2/3/4/5` manifest；直接调用现有 `load_case_manifest()`，8/8 均通过路径、SHA256、size、JPEG/content type、sequence 和 2–5 图数量门禁。
-- 目标集合共 28 张且 28 个 SHA 均唯一；Pillow `verify()+load()` 28/28 成功，尺寸范围 `624×1080` 至 `2100×2088`，无空文件、损坏、零尺寸或内容重复；目标文件无 symlink，根目录可读。
-- 只读视觉抽样猫胸腔与犬肌肉骨骼代表图，确认属于可辨识 X-Ray；未做疾病、bbox 或医学准确率判断。
-- 结论：该目录可直接作为下一次资格化的 `MS_IMAGE_XRAY_DATA_ROOT`。manifest 仍为 `engineering_candidate`、projection=`UNKNOWN`，不能升级为 Dataset/Gold/医学证据。
-- 本轮未启动 Runtime/Relay/Worker，未创建 Task/AICall/Attempt，未调用 Provider，未写 evidence，未修改业务代码、数据文件或受保护 archive/postman。新的八格尝试仍等待用户明确允许。
-- 尝试按项目规则派发 3 个 `default` 只读子代理，但当前默认角色配置请求了模型不支持的 reasoning 档位，3 次均在创建前失败；`list_agents` 确认只有主代理运行，最终由主线程完成核验。
-
-## 2026-08-31 — Anatomy Localization v1 `cat-02` 真实资格化失败与停机收口
-
-- 用户明确授权使用 `/Users/mozhicheng/workspace/documents/X光_没问题_全量过滤` 从 `cat-02` 重新开始八格；运行前 exact 回读 Nacos Prompt、Prompt receipt、Localization Config、ModelPool、Connection 和 frozen Config，关键 SHA 均无漂移。
-- 启动唯一 Runtime 拓扑并确认 API health/readiness、单 Relay、单 Worker、consumer=1、Beat/reconcile scheduler=0；随后以 `MS_IMAGE_XRAY_DATA_ROOT` 运行 `engineering-candidate-cat-02`。
-- 本轮创建 Task `c9f0ddb948444be1aa3f28aee0d29e89`、Logical AICall `4836bebc9a3f42f49587220308c59f4c` 和 Physical Attempt `7a3053aedc484bc191cb3106703dbc09`；2 个 StageCheckpoint、1 provider Stage、1 primary lane、1 Attempt，requested/sent/receipt 均为 2。
-- Provider `POST /api/v1/chat/completions` 返回 HTTP 200；通用 JSON Schema 通过后，Localization 技术 validator 以 `anatomy_localization_image_lineage_mismatch` fail-closed。Task、AICall、Attempt 和 Localization Stage 均 failed，winner 为空；Task 保持 `ai_medical_status=not_produced`、`current_report_id=null`。
-- 查询 `/anatomy-localizations` 返回 409；Report current 为 null、history 为空。当前失败路径未持久化 rejected parsed payload、Provider request ID 或 response SHA，因此未猜测具体 lineage 漂移字段，也未修改 Prompt、Schema、Config 或 validator。
-- 严格执行 stop gate：未重试 `cat-02`，未运行其余七格。保存仓库外脱敏 evidence `/tmp/ms-image-anatomy-localization-r4-20260831.OgbG1e/cat-02-failure-20260831T123942Z.json`，SHA256 `1fa6698e3441c296c504912ec9f85d126a9c44198ac22dd935122722004985a4`。
-- 正常停止唯一 launcher；8002/8010、Runtime/Relay/Worker、launcher lock 均清理，RabbitMQ 主队列和 DLQ 为 0 ready/0 unacked/0 consumers。既有 aiomysql teardown warning 继续留在独立 backlog。
-- 本轮真实矩阵结论为 `XRAY_ANATOMY_LOCALIZATION_2TO5_RUNTIME_QUALIFICATION_FAILED`；单个失败病例满足单 Call/Attempt 拓扑，但成功八格矩阵未完成，不能记录 `ANATOMY_LOCALIZATION_SINGLE_LOGICAL_CALL_CONFIRMED`。
-
-## 2026-08-31 — `cat-02` lineage 失败现有证据穷尽审计
-
-- 从 online DB 只读回读 Attempt 的 request ID、trace ID、provider idempotency key、sent manifest SHA 和 image count；`provider_request_id`、`response_sha256` 均为空。查询后显式 dispose online/evaluation engines，未写数据库。
-- 复核 `AIRequestService` 与 `GatewayClient`：上述关联键随 payload metadata 和 `Idempotency-Key` / `X-Request-ID` / `X-Trace-ID` 发给下游，因此若存在非公开远端审计，可由运维方按这些键检索。
-- 使用 Task/Call/Attempt、request/trace/idempotency key、错误码和 `2026-08-31T12:39:42Z` 附近时间窗搜索 `/tmp`、`/var/tmp`、用户与系统日志、仓库、`ms-ai-fast/logs` 和 macOS unified log，均无本轮请求/响应命中；本机 `ms-ai-fast` 日志修改时间早于本轮调用。
-- 只读检查当前 AI Platform `/openapi.json`：公开接口没有 request/audit/trace/log 查询能力；没有调用 completion 或 Provider。
-- 源码审计确认 definite validator rejection 只把错误码、receipt、sent manifest SHA 和 image count 传到失败落库；Provider request ID、response SHA、usage、被拒绝 parsed result 和字段 diff 在此路径丢失。
-- expected receipt 的两张图 lineage 完整，Localization safe context 的 rendered messages 中对应 image ID、series ID、manifest SHA 和 `UNKNOWN` projection 均按预期出现；只能确认 Provider 返回至少一个 lineage 值不一致，无法诚实确认具体图片或字段。
-- 本轮未修改业务代码、Prompt、Schema、Config、数据库或运行环境，未重发 `cat-02`，未运行其余七格。下一步改为等待用户审核最小失败可观测性改动。
-- 继续只读检查 ORM 与 failure finalizer：AICall/Attempt 已有 provider request ID、response SHA、actual model 字段，Attempt 已有 usage JSON；因此 Provider 摘要落库不需要新字段或 migration。
-- 评估不保存原始值的字段级定位方案：将 2–5 图 ordinal 与 5 个 lineage 字段组合为有限稳定错误码，最长 60 字符，可直接使用现有 `error_code VARCHAR(80)`。这避免挪用 parsed result、usage 或 object-ref JSON 字段。
-- 建议的审核 write set 收紧为 Localization validator、Gateway definite-response exception、AIRequestService failure finalizer、Worker 传递和既有 gateway contract 测试；仍未实施代码。
-
-## 2026-08-31 — Anatomy Localization 最小失败可观测性实施与静态收口
-
-- 经用户明确授权，在既有 Localization 实现上完成无 migration 的最小失败可观测性；未调用 Provider、未启动 E2E/Runtime、未写 Nacos/Config、未执行 Docker、未 commit/push。
-- 将 Localization 逐图 lineage 联合错误拆为 `anatomy_localization_image_<ordinal>_<field>_mismatch`，字段仅限 `image_id/series_id/sequence_no/projection/series_manifest_sha256`；receipt 自身非法继续 fail-closed 为 `anatomy_localization_source_receipt_invalid`，不保存 expected/actual 原值。
-- 扩展 `GatewayDefiniteResponseError` 传递已取得的 provider request ID、actual model、usage 和 response SHA；`AIRequestService` 只在三项核心摘要齐全时附加，HTTP rejection、Gateway parse failure 和 unknown delivery 不伪造摘要。
-- `finalize_attempt_failure()` 对摘要做长度、lowercase SHA、Mapping 和 definite/unknown 一致性校验；Attempt 写入四项既有审计列，无 winner 的 AICall 写入 request ID/model/response SHA。未写 rejected `parsed_result_json`，未改变 failed/winner/race/reconcile 语义。
-- Worker 只把 definite-response exception 的摘要转交现有 finalizer；没有新增服务、Gateway、表、字段或 migration。
-- 补齐字段级错误、Worker 传递、finalizer 持久化/负例以及 Localization 技术校验拒绝仍保留 Provider 摘要的测试。初次从 `apps/backend` 运行 pytest 因缺少根路径而收集失败，随后按仓库既有 `PYTHONPATH=.` 入口重跑通过；未为命令环境问题修改代码。
-- 验证结果：12 focused passed、相关合同文件 256 passed、后端全量 328 passed；Ruff、compileall、`git diff --check` 全部通过。
-- 最终意义审查确认改动只提升未来失败可观测性，不修复或重新解释旧 `cat-02`；旧响应具体漂移字段仍为 UNKNOWN，新的 Provider 尝试继续等待用户明确授权。
-
-## 2026-08-31 — 启用最小可观测性后的新 `cat-02` 单次资格化
-
-- 按用户授权重新从 `cat-02` 开始，但严格只运行一次；运行前 exact 回读 Nacos Prompt、冻结 Config、Schema、Label、ModelPool、Connection、Pipeline 和预算，未发现漂移。
-- 使用现有唯一 launcher 启动 1 Runtime API、1 Relay、1 Worker、concurrency=1、consumer=1、Beat/reconcile=0；Runtime health/readiness 均为 200，RabbitMQ 主队列/DLQ 初始为空。
-- 新 Task `917f9c5498bc4fdea26bb6f2993875f` 创建 2 个 StageCheckpoint：`study_preparation:v1` completed，`anatomy_localization:v1` failed；只创建 Logical AICall `69233e53112c4c4da69319d0d7365aab` 和 Attempt `06f242e1d3a4417a97b28a08d9a67db3`，`attempt_no=1`、`reconcile_count=0`。
-- requested/sent/receipt 均为 2；Provider HTTP 200，request ID `chatcmpl-1788192611`，actual model `gemini-3.5-flash`，response SHA `4664c380cd38352a017f085538fbbe80c2afb90978151fcad0edd4dc82e851fb`；Provider 未返回 usage。
-- 通用 JSON Schema 通过后，冻结 Localization validator 精确拒绝 `anatomy_localization_image_1_projection_mismatch`。AICall/Attempt/Localization Stage/Task 全部 failed，winner 和 accepted parsed result 均为空；未保存 Provider body 或 rejected parsed result。
-- Task 保持 `report_required=false`、`ai_medical_status=not_produced`、`current_report_id=null`，Report count=0。
-- 遵守失败即停：未重试 `cat-02`，未运行 `cat-03/04/05` 或 `dog-02/03/04/05`，未增加 Attempt、修改预算或放宽 validator。
-- 正常停止 launcher；8002/8010、Runtime/Relay/Worker、lock、主队列和 DLQ 均清理。仓库外日志 `/tmp/ms-image-anatomy-localization-rerun-20260831.Vq066r/local-chain.log`，SHA256 `e5cb94820161df8bf7a067b6a25683cd9f178cd6605d359091984ab4646738b5`。
-- 本轮没有修改业务代码、Prompt、Schema、Config、数据库结构或迁移；完整八格未完成，结论保持 Runtime qualification failed。
-
-## 2026-09-01 — 项目级防偏移规则启用
-
-- 根据用户确认，将 `docs/ms-image-current-development-contract.md` 的完成度复核、单一 active objective、write set、外部权限、完成门和停止门要求加入本项目 `AGENTS.md`，并同步项目文档中心和 `AGENT_SESSION_PROMPTS.md` 的当前入口。
-- 具体 active objective 不写死在 `AGENTS.md`，仍由 `.agent-handoff/snapshot.md` 和用户本轮授权动态决定。
-- 未修改业务代码、Prompt/Schema/Config、数据库、迁移、Runtime 或 Provider。
-- 复核后补齐 `AGENT_HANDOFF.md` 当前入口指针，并在 `snapshot.md` 明确写出 `Active development objective`；新会话 Prompt 遇到缺失目标时必须停止，不得猜测。
-- 统一 `AGENT_HANDOFF.md` 与 `snapshot.md` 的最后更新时间为 2026-09-01，消除新会话恢复时的时间歧义。
-
-## 2026-09-01 — 非分割 X-Ray 全接口与独立 Prompt 架构审计
-
-- 按用户修正后的目标，只读审核 `vet-platform-system` 指定提交 `6d1dd28bfb74143fb903503cdd08ced1f06a4d91`；未把目标仓库当前脏工作树当作历史事实。
-- 覆盖截图中的 Token、session-start、submit-chief-complaint、重复上传、batch quality check、gen report 和 medical record 查询；明确排除器官分割提交/状态接口及 mask/bbox/crop/overlay 实现。
-- 逐源码追踪旧链逐图 body-part/projection AI、图内 AI+本地 QC 并发、跨图 scheduler、full/system/organ 分析任务、A/B/C Prompt 并发、错误隔离和结果汇合；确认旧报告入口对已完成 segmentation task 有硬依赖。
-- 完整阅读旧部位识别、Fusion A/B/C 猫犬 Prompt，确认猫犬输出骨架同构但正常变异、阈值、急症、鉴别和风险说明存在实质差异；未将文件存在误报为 DB Runtime 已绑定。
-- 对照当前 `ms-image` Session/Study/Image/Task/Report 接口、Pipeline、Prompt command、Nacos mapping、Config compiler、AIRequestService 和 Prompt 资产；确认当前缺独立 Quality、StudyScreening、SystemAnalysis、ReportGeneration Stage，且 Primary/Targeted 共用同物种 v4 双模式正文。
-- 新增 `docs/refactor/31-xray-non-segmentation-ai-stage-prompt-and-interface-audit.md`：提出 Cat/Dog 各 6 个独立 Prompt、逐图 Quality fan-out、A/B 并发、Primary/Targeted/Report 串行汇合、Stage Config binding 和 image subset 合同。
-- 文档明确调用代价：Primary-only=`N+4`、Targeted=`N+5`，2–5 图为 6–10 Call；阶段拆分不证明准确率提升。
-- 本轮未修改业务代码、现有 Prompt/Schema、Nacos/Config、数据库、迁移、Provider、Runtime、Docker、旧对照仓库或受保护 archive/postman。
-
-## 2026-09-01 — 宠物档案与 `pet-info` 迁移
-
-- 只读审计源仓库 `vet-platform` 的宠物档案、归档恢复、历史记录和 `pets_info` 流程，并按用户授权迁入 `ms-image`；源仓库未写入。
-- 新增 `PetProfile`、`PetProfileHistory`、`PetInfo` 模型及对应 Schema、Dal、Service、Runtime endpoint；注册模型、依赖和路由，并复用统一 imaging error rollback/mapping 与现有 `DalBase`。
-- 宠物档案支持创建幂等、owner 隔离、查询/分页、部分更新、`state_version` CAS、归档/恢复和逐字段历史；`pet-info` 仅作为猫狗品种资料目录，支持模糊查询与首字母分组。
-- 新增并执行 `alembic_migrations/versions/20260901_01_add_pet_profile_and_breed_catalog.py`；目标 `ms_image` 当前位于 `20260901_01 (head)`，物理表 `pet_profile`、`pet_profile_history`、`pet_info` 已创建。
-- 三表按目标规则重新创建而非复制旧 DDL：opaque `VARCHAR(64)` 单列主键、无 foreign key、无 enum、无 `tenant_id`、所有列有类型/中文 comment，资源 ID 不进入路径。
-- 通过临时、非仓库导入工具和现有三个 DAL 迁入 `pet_profile=5091`、`pet_info=152`、`pet_profile_history=0`；源历史表为 0。确定性 UUID5、source identity、request ID 和导入前过滤保证第二次执行新增 0。
-- 已核对 owner 语义；严格转换 64 个 `数字kg` 体重和 27 个已验证旧 OSS host 头像 object key。874 个第三方品种图片 URL 和 152 个区间参考体重未做不可靠转换。
-- 跨 schema 核对确认档案/目录 missing、extra、owner、species、status、weight mismatch 均为 0；三表无 FK/enum/tenant/空 comment，主键均仅 `id`。
-- 相关 Ruff、compileall、diff check 通过；完整测试使用 `PYTHONPATH=<repo> uv run pytest apps/backend/tests -q` 得到 `328 passed, 45 warnings`。指定 conda 环境缺少 `jinja2` 的首次收集失败属于环境依赖问题。
-- `alembic check` 唯一报告本轮前已存在的 `ai_api_connection.secret_ref` comment drift，未混入宠物 migration。未运行真实 HTTP API CRUD/CAS/history 并发 E2E，未调用 Nacos/OSS/Provider，未 commit/push。
-
-## 2026-09-01 — Quality Prompt 发布回读与 Cat/Dog 资格边界收口
-
-- Cat/Dog Quality Prompt 已按 exact-version 发布到 Nacos，未覆盖不可变版本；本轮再次只读回读 `1.0.0`，规范化正文 SHA 与仓库冻结 Markdown 完全一致。
-- 现有数据库 Prompt `xray_cat_image_quality@1.0.1`、`xray_dog_image_quality@1.0.1` 均为 `validated`；`xray_image_quality_cat/dog@1.0.0` Config 均为 `active` 且绑定 `xray_image_quality_v1`。
-- 只读回读 Cat Task `c1cea89ec55d468fa86f1708360d881f`：Task/两个 Stage completed，1 Logical Call succeeded/accepted，1 Attempt succeeded，2 图 sent，Report count 0；GET Quality DTO 经服务端 lineage 重验成功。
-- 只读回读 Dog Study `89573c3f3a5e440784deeb7458232665`：当前 `ready`、revision `610b222e9f034b2a9bde4898b32a055a`、Task count 0；首次 Quality POST 的 HTTP 409 发生在 Task 创建前，未调用 Dog Provider。
-- 本轮没有业务代码、Prompt、Schema、Config、validator 或 migration 修改，没有 Provider 调用，没有启动 Runtime/Relay/Worker/Docker。
-
-## 2026-09-01 — 目标诊断链缺失 Prompt 发布到 Nacos
-
-- 按目标阶段级设计盘点 12 个 Cat/Dog Prompt identity；已有 BatchImageQualityReview 2 个，本轮缺失并补齐 StudyScreening、SystemAnalysis、PrimaryCaseAdjudication、TargetedReview、ReportGeneration 共 10 个本地不可变 Markdown 资产。
-- 10 个资产通过 UTF-8/换行规范化、Jinja 解析、required variables 精确匹配、Strict renderer 完整渲染、Cat/Dog 固定身份与未声明变量检查。
-- 只读确认当前部署真实写入口为 Nacos Admin `/v3/admin/ai/prompt/draft|submit|publish`；此前 `/v3/console/ai/prompt/draft` 的 404 是路由选择错误，不是 Prompt Management 不可用。
-- 发布前逐个通过 Client exact GET 与 Admin governance 双重预检，确认 10 个 Prompt key/version 均无 online、draft、reviewing 或其他 metadata。
-- 在 namespace `c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9` 逐项创建 `1.0.0` draft 并 submit；当前部署无 Prompt publish pipeline，submit 自动进入 online，未调用 force publish、未覆盖同版本。
-- 每项发布后立即 exact GET + governance 回读，status=`online`、latest=`1.0.0`，规范化正文 SHA256 与本地冻结资产全部一致。
-- 未执行数据库 Prompt import/validate、Config 创建/激活、Provider、Runtime E2E、Docker；未修改 Pipeline、Handler、Schema、Prompt Source mapping 或业务代码。
-- Durable handoff maintenance 使用已安装脚本执行 `--compact-if-needed`：`changed=2 / warnings=1 / unresolved=0`，按合同轮转 1 个旧 work-log 日期段并更新 archive index。
-
-
-## 2026-09-01 — Quality commit-before-response 真实 HTTP 回归
-
-- 将 Runtime Session/Study/Task/Quality 写 endpoint 切换为 `get_explicit_transaction_session`，并用 endpoint-owned `async with db.begin()` 确保 commit-before-response；未修改 Service 业务编排、Prompt、Schema、Config、validator、Nacos 或表结构。
-- 静态验证：4 个 endpoint compileall、Ruff、`git diff --check` 均 PASS；`PYTHONPATH=. pytest -q apps/backend/tests/test_ai_gateway_attempt_contracts.py` 为 `256 passed, 45 warnings`。
-- 仅启动 Runtime API；对 ready Dog Study `89573c...` 创建请求，POST HTTP 201 得到 Task `8c854ca7d4f64de2943928accb5dedbb`，POST 返回后无 sleep 的第一次 GET 直接 HTTP 200。
-- 取消请求 HTTP 200，紧接 GET HTTP 200 且 `cancel_requested_at` 已持久化；相同 request_id 重放返回同一 Task，证明接口不是只能调用一次。
-- DAL 只读核验：Task queued/cancel_requested；Stage 1 queued；Outbox 1 pending；AICall/Attempt/Report 均 0。本轮未启动 Relay/Worker，未调用 Provider。
-- Runtime 已正常停止，端口 8002 未监听；关闭时出现既有 aiomysql event-loop teardown warning，作为独立 backlog 保留。
-- 归属结论：历史首次 409 属于 ms-image Runtime Task 创建边界，不是 Provider 429；response-before-commit 是有证据支持的推断，历史精确冲突子类型仍 UNKNOWN。
-
-
-## 2026-09-01 — Quality commit-before-response 追加五次稳定性回归
-
-- 按用户要求在同一 ready Dog Study/Revision 上使用 5 个全新 request_id 连续测试；仅启动 Runtime API，没有启动 Relay、Worker、Docker，没有调用 Provider或写 Nacos。
-- 5/5 均为 POST HTTP 201、无等待第一次 GET HTTP 200、cancel HTTP 200、取消后无等待 GET HTTP 200；相同 request_id 幂等重放均 HTTP 201 并返回同一 Task。
-- POST 耗时范围 14.28–68.36 ms；立即 GET 耗时范围 4.86–6.83 ms；未出现 409、404、429 或 5xx。
-- 5 个 Task：`eddb0a...`、`76b9f1...`、`aad827...`、`53a5ee...`、`066205...`。DAL 逐项核验均为 queued/cancel_requested、1 Stage queued、1 Outbox pending、AICall/Attempt/Report 0。
-- 累计初次回归与本轮追加测试为 6/6 PASS；按用户指示，该 Runtime 事务可见性问题关闭。
-- Runtime 已停止，8002 未监听；关闭时仍出现既有 aiomysql event-loop teardown warning。
-
-## 2026-09-01 — StudyScreening 代码闭环与静态门完成
-
-- 用户将逐个跑通顺序固定为 StudyScreening → SystemAnalysis → PrimaryCaseAdjudication → TargetedReview → ReportGeneration；当前只处理 StudyScreening。
-- 完成 `study_screening:v1` Stage/Profile、Cat/Dog exact Prompt Source、Schema/技术 validator、Quality Task 显式引用和安全冻结、Stage-specific Config binding 与 AIRequestService 解析/冻结校验。
-- 专项测试暴露 `build_study_screening_ai_request_command()` 调用 `_base_context(prompt_mode="study_screening")` 时必然触发 `prompt_mode_invalid`；已将该 mode 加入允许集合。
-- 新增测试覆盖 Cat/Dog exact mapping、跨物种拒绝、Prompt变量与message context顺序、Stage/Root Profile、Config binding、Quality安全冻结、accepted Call消费和lineage漂移拒绝。
-- Focused tests `326 passed, 45 warnings`；Backend全量 `335 passed, 45 warnings`；Ruff、compileall、`git diff --check`通过。
-- 复核历史记录发现 Cat/Dog StudyScreening Nacos `1.0.0` 已在“10个目标诊断链Prompt”轮次 online并exact回读；纠正 checkpoint 中“尚未写Nacos”的陈旧描述，后续禁止重复发布。
-- 本轮只同步合同与handoff，未写Nacos/数据库，未调用Provider，未启动Runtime/Relay/Worker/Docker，未进入SystemAnalysis。
-
-
-## 2026-09-01 — StudyScreening Cat Prompt Import 422 精确诊断
-
-- 承接逐个跑通顺序，本轮唯一目标仍为 StudyScreening；先报告完成能力账本，业务代码 write set 为空，Nacos 只读、DB 只读/rollback、Provider/Runtime 禁止。
-- 对与公共请求完全相同的 `PromptImportRequest` 做无持久化分步诊断：Schema PASS；exact Data ID 为 `ms-image.x-ray.study-screening.cat.zh-CN`；Nacos fetch FOUND；version=`1.0.0`；content SHA=`a3cede45fbda09f07de16bf0289c9b8604a045499b6c6f369103dfc7634e88a8`。
-- `normalize_imported_prompt` 推断 required variables 精确为 `OUTPUT_SCHEMA_JSON`、`QUALITY_RESULTS_JSON`、`SAFE_STUDY_CONTEXT_JSON`；变量 resolution PASS。
-- 精确失败为 `PromptImportService._normalize_message_contract()` → `AIControlValidationError(prompt_message_contract_invalid)`。源码 allowlist 只接受 `SAFE_STUDY_CONTEXT_JSON` 与 `PRIMARY_RESULT_JSON`，不接受 StudyScreening 的 `QUALITY_RESULTS_JSON`。
-- 只读 DB 回查确认失败 request_id 无 Audit，`xray_cat_study_screening@1.0.0` 仍 absent；Dog Prompt、Stage/Root Config、Runtime、Provider 均未执行。
-- 按停止门未修改代码、Prompt、Schema、validator 或配置，未重试写接口，未进入 SystemAnalysis。
-
-
-## 2026-09-01 — StudyScreening 控制面资格化与首次 Cat Runtime 失败关闭
-
-- 承接已完成的 message-contract 最小修复：只在 `prompt-message-contract.v1` 合法 context key 中加入 `QUALITY_RESULTS_JSON`，并补 safe+quality、缺 safe、重复 key、unknown key 精确回归；Backend 全量 `336 passed, 45 warnings`，Ruff、compileall、diff-check PASS。
-- 通过公共 AI Control API 完成 Cat/Dog StudyScreening Prompt import/validate；四个 Cat/Dog Stage/Root Config compile-preview、create/validate/activate，且 Runtime 同源 frozen verify 全部 PASS。Nacos 已发布 `1.0.0` 未重复写入或覆盖。
-- Runtime 前调用既有 `TaskService._load_verified_xray_quality_review` 重新验证 Cat Quality Task `c1cea89ec55d468fa86f1708360d881f`；Study/Revision/Manifest/Stage/Call/output SHA 全部与冻结预期一致，2 图、complete。
-- 启动唯一 `scripts/dev/run_local_chain.sh` owner，确认 Runtime health/readiness、单 Relay、单 Worker、consumer=1、Beat disabled；仅 POST 一次 Cat diagnose Task `e004c8790df349c28342a98a36a1d856`。
-- StudyPreparation completed；StudyScreening 唯一 Logical Call `e3e38850270046d789729521f55cf4e4`、唯一 Attempt `7ec8b073bae44dd09c23f728e5d0d0ed` 向 Provider 发送 2 图，HTTP 200，actual model `gemini-3.5-flash`。
-- Provider 响应在 StudyScreening lineage validator 处以 `study_screening_source_projection_mismatch` fail-closed；Task/Call/Attempt/Stage failed，winner 为空，Report count=0，未创建第二 Attempt、未重试。
-- 只读核对确认 Safe Context 的 `projection` 与 Quality Result 的 `declared_projection` 均为两项 `UNKNOWN`；validator 要求 Provider source_refs projection 逐字相等。被拒绝 parsed result 未持久化，实际 Provider projection 值保持 UNKNOWN。
-- 严格执行停止门：未修改 Prompt/Schema/validator、未提高预算、未进入 SystemAnalysis；Runtime/Relay/Worker 与 launcher lock 已清理。关闭时出现既有 aiomysql event-loop teardown warning。
-
-
-## 2026-09-01 — StudyScreening projection mismatch 无 Provider 深审
-
-- 按 continuation guard 继续唯一目标 StudyScreening；完成能力账本核对，业务代码 write set 为空，未启动 Runtime/Relay/Worker、未访问 Nacos/DB、未调用 Provider。
-- 逐行复核 Cat/Dog StudyScreening `1.0.0` Prompt、`study_screening.v1.schema.json`、safe-context builder、image receipt、lineage validator、Gateway definite failure finalizer 和相关测试。
-- 确认 Prompt 未要求 `image_id/sequence_no/series_id/series_manifest_sha256/projection` 从冻结引用逐字复制，也未说明 caller-declared `UNKNOWN` 不得改成 null、归一化值或像素推断值。
-- 确认 Schema 允许 `source_refs[].projection` 为 null，但 frozen receipt projection 必为非空 string，后置 validator 严格相等；这是合同漂移，不等于已确认本次 Provider 返回 null。
-- 确认 Prompt 未明确要求 source_refs 覆盖全部发送图，validator 则要求 image 集完全相等；这是 projection 修订后可能暴露的第二技术拒绝点。
-- 确认 definite technical rejection 不持久化被拒绝 parsed result 或原始响应 ObjectRef，只保留 error code、provider request ID、actual model、usage 和 response SHA；因此首次实际 projection 值继续保持 UNKNOWN。
-- 现有测试覆盖 validator 的 `VD → DV` projection drift，但未覆盖 `UNKNOWN + caller_declared`、Schema null 对齐、Prompt 逐字复制与全图 coverage 组合。
-- 未修改 Prompt/Schema/validator 或业务代码，未重试 Cat Task，未进入 SystemAnalysis。
-- 补充确认 StudyScreening projection mismatch 使用聚合错误码，不含图片 ordinal/字段路径；两图输入无法从已持久化证据定位具体 source_ref。
-
-## 2026-09-02 — StudyScreening 合同冲突联合分析
-
-- 读取启动合同、handoff 当前态和 StudyScreening 相关架构文档，点验 Prompt、Schema、validator、Snapshot→Prompt→receipt→AICall→Stage→下游 Profile 的实际源码链。
-- 确认四层合同漂移：冻结输入 projection=`UNKNOWN`、Prompt 未要求精确复制、Schema 允许 string/null、validator 要求与 receipt 严格逐值相等；同时确认 source_refs 全图 coverage 是潜在第二阻断。
-- 核验 canonicalization 边界：`AIRequestService` 在持久化前有 receipt，但 `_structured_call_response()` 未向 Stage 暴露 receipt；Stage 当前直接把 `parsed_result_json` 作为 `study_screening_result`。
-- 裁决采用 v2 provider/canonical 双边界：AICall 保留最小 schema-valid Provider 输出，Stage 使用 receipt 生成完整 canonical lineage；不改写任何医学字段，不新增表/字段/migration。
-- 发现并记录独立下游缺口：`xray_diagnose_study_screening_v1` 只保证执行顺序，`build_primary_ai_request_command()` 未消费 `previous_output.study_screening_result`，完整诊断链尚未语义汇合。
-- 本轮未修改业务代码、Prompt、Schema 或配置；未写 Nacos/数据库，未调用 Provider，未运行 Runtime/Relay/Worker/Docker。
-- 完成 handoff 收口：归档最早三个 validation section，清理 EOF 多余空行；maintenance compact/check 与 `git diff --check -- .agent-handoff/` 均通过。
-
-
-## 2026-09-02 — StudyScreening 解决方案收敛
-
-- 在不修改业务代码和外部状态的前提下，复核 v1 validator 全部动态检查、receipt 构造、Prompt safe context 与文档 SourceRef 约束。
-- 收敛正式方案为 v2 provider/canonical 双边界：Provider 只承担医学输出与最小 anchor，Stage 从 receipt 生成完整 lineage；AICall 保留 raw，Stage 保存 canonical。
-- 明确 Provider anchor 与 canonical 结果不能使用含义不一致的同一合同身份；先独立 Screening Profile 验收，再处理 diagnose Root/Primary 消费。
-- 本轮未访问 Nacos/数据库/Provider，未启动 Runtime/Relay/Worker/Docker。
-
-## 2026-09-02 — StudyScreening v2 Cat 真实资格化收尾
-
-- Cat Nacos `2.0.0`、DB Prompt 和独立 Config 已完成 exact/readback/frozen verify。
-- 唯一 Task `2c48ad93315145d19faa1f89b47b0d50` completed；1 Call、1 Attempt、Provider 200、accepted、2/2/2、Report 0。
-- Provider raw 与 Stage canonical 双边界通过，Provider raw 未被 canonicalizer 原地改写。
-- 未运行 Dog、SystemAnalysis 或其他下游；未创建第二 Task/Attempt。
-- 清理 AI Control、Runtime、Relay、Worker；仅更新合同和 handoff 状态。
-
-## 2026-09-02 — 假设 StudyScreening 通过后完成 Primary 下游单次验证
-
-- 用户明确要求不再等待 StudyScreening；本轮将其限定为 `ASSUMED_PASS`，使用既有 `experiment/full-chain-local-v1` Config 跳过 Screening，没有修改 Nacos、Prompt、Schema、Config 或业务代码。
-- 启动唯一 `run_local_chain.sh` owner；readiness 在 Worker 注册后由初始 503 转为 200，并确认只有一个 imaging consumer、reconcile scheduler disabled。
-- 仅执行一次 `engineering-candidate-cat-02` E2E；Task `5c6c5612609a4e438c06e39cc6e2848b` completed，Report `fde7e262df494b559eb27a0c77511bbc` final。
-- `joint_primary_reader:v2` 创建 AICall `e4862fdb9ec34e569b7bee94ac0660ca` 与 Attempt `617c327e6ed34e2890ef514313a86fab`；Provider HTTP 200，succeeded/accepted，1 Call/1 Attempt，requested/sent/receipt=2/2/2。
-- 两个 Provider source_ref 对 Receipt 的 image_id/series_id/projection/manifest_sha256 全部匹配，Receipt 也与冻结 Snapshot 全匹配；本次未发生后置 lineage rejection。
-- 下游 `family_routing:v2` route=`primary_final`；没有 targeted candidate，因此未创建 `targeted_review` Stage；`decision_finalization:v2` completed，owner=`primary`。
-- Report 的 source Stage/Call、Task current_report_id 和 final content lineage 一致。Stage `produced` 到 Report/Task `normal` 的差异经源码与 2 个定向测试确认是预期持久化投影。
-- 本次 Profile 不含 SystemAnalysis 或独立 ReportGeneration AI；不能把它们记为通过。
-- 关闭唯一 launcher owner并核验 8002/8010 空闲、lock absent；没有重试或第二 Task。
-- Closeout 时安装版 handoff maintenance 首次报告 validation 超限；随后将最早的完整 2026-08-28 validation sections 原样归档为 `archive/validation-20260902T043031Z.md`，最终 check `warnings=0 / unresolved=0`，diff-check 通过。
-
-## 2026-09-02 — Cat SystemAnalysis 控制面与单次真实资格收尾
-
-- 扩展既有 exact-source Prompt Import 资格集合，纳入 `xray_cat_system_analysis` / `xray_dog_system_analysis`；要求显式 namespace/release/version 并核对回读版本一致性。
-- 新增 SystemAnalysis Cat/Dog Prompt Import 合同测试；既有相关后端全量验证 `353 passed, 45 warnings`，Ruff、compileall、diff-check 均通过。
-- 完成 Cat Prompt `xray_cat_system_analysis@1.0.0` exact import/validate/readback；创建并激活 Config `bbdd49c799044343a1cc60c5ab9afd4a`，frozen integrity PASS。
-- 复用冻结 Quality Task `c1cea89ec55d468fa86f1708360d881f` 与 2 图 Manifest，创建唯一 Runtime Task `4e1165980fde4facae1793e637d77cc7`。
-- Provider 单次 HTTP 200；唯一 Call/Attempt succeeded/accepted；Task 与 `study_preparation:v1 → system_analysis:v1` completed。
-- 完成门脚本最初错误要求可空 `response_object_ref_json` 与 `accepted_call_id` 必须存在。核对模型与 Handler 后，仅删除 `/tmp` 审计脚本中的额外假设；未修改 Runtime、Prompt、Schema 或 validator。
-- 最终完成门 PASS：1 Call、1 Attempt、2/2/2、Schema/合同校验、Stage `source_call_id + system_analysis_result + output_sha256` 持久化、Report 0 全部成立。
-- 关闭 Runtime launcher、Relay、Worker 与 AI Control；8002/8010、launcher lock 和进程残留核验通过。关闭时仍观察到既有 aiomysql event-loop-close 析构告警。
-
-## 2026-09-02 — 诊断链接口与 Stage 中文注释补齐
-
-- 按完成能力总账限定唯一目标：只补充中文注释、docstring 与 FastAPI OpenAPI `summary`，不修改路由、Schema、Prompt、配置、状态机、请求响应或业务逻辑。
-- 为 Session、Study、Series、Image 上传准备/确认/查询、Task 创建/查询、Report current/history 的目标 HTTP 路由补充业务目的、前置条件、归属、幂等/CAS、状态推进、失败关闭和非职责边界。
-- 明确外部 `PUT signed OSS URL` 不经过 Runtime；`complete-upload` 只推进 validating 并投递校验；Task HTTP 201 不代表 Worker/Provider/Report 完成；Report current 允许 `data=null`。
-- 为 StudyPreparation、BatchImageQualityReview、StudyScreening、SystemAnalysis、Primary、FamilyRouting、TargetedReview、DecisionFinalization 和 ReportService 补充 Provider/lineage/canonicalization/条件执行边界。
-- 明确当前不存在独立 `ReportGeneration AI` Stage；报告由 `DecisionFinalization → ReportService.finalize` 确定性持久化，ReportService 不构造 Prompt、不调用 Provider、不重写医学内容。
-- 微调 FamilyRouting v1 注释，兼容历史 `provider_disabled → not_produced`：转发的是已有 Primary 状态、医学结果（若存在）和来源 Call，而非假定一定存在 accepted 医学结果。
-- 未访问 Nacos、数据库或 Provider；未启动 Runtime、Relay、Worker、Docker；未新增文档、测试脚本或迁移脚本。
-- 静态与定向合同验证全部通过：compileall PASS、Ruff PASS、diff-check PASS、pytest `14 passed, 269 deselected, 3 warnings`；告警均为既有弃用告警。
-
-## 2026-09-02 — TargetedReview 本地合同收口
-
-- 按当前唯一候选处理 `TargetedReview`；未调用 Provider、未启动 Runtime/Relay/Worker/Docker，未写 Nacos、数据库、OSS、Broker。
-- 补齐 Cat/Dog exact Prompt Source/import、独立七变量 message contract、Targeted stage config binding，以及 Route/StudyScreening/SystemAnalysis 上游结果冻结传递。
-- 独立 Targeted accepted 结果若再次返回 `targeted_candidate`，以 `targeted_review_recursive_candidate_forbidden` 失败关闭，避免递归路由；历史双模式 Prompt 保持兼容。
-- 新增递归候选拒绝合同测试；定向 Targeted 测试 `12 passed, 1 warning`，两份合同测试全量 `356 passed, 45 warnings`，Backend 全量 `365 passed, 45 warnings`。
-- Ruff、compileall、`git diff --check` 全部 PASS；警告为既有 Pydantic/`datetime.utcnow()` 弃用提示。
-- 本轮只达到本地工程合同完成，未产生 Targeted Runtime PASS；仍需用户单独授权合法 candidate、真实 Provider 资格化及后续同 Task 汇合审验。
-
-## 2026-09-02 — Anatomy Localization 主链关联接口设计审计
-
-- 用户补充硬约束：Localization 展示链必须与 `diagnose` 主链显式关联，并可由主链 Task 查询。
-- 只读核验 Task model/schema/DAL/service、Localization endpoint/result schema 和 pipeline；确认当前没有直接 task-to-task 字段，现有结果查询只能从 Localization Task ID 发起。
-- 确认 `quality_review_task_id` 仅为质量审核上游，`study_id + study_revision_id` 只能做一致性校验，均不能替代主链关系。
-- 整理推荐方案：公共 `POST /tasks` 创建 Localization 时增加 `source_task_id`；主链查询返回关联摘要；完整 bbox 结果继续复用现有专用结果查询；后续独立补短 TTL 图片展示票据。
-- 本轮未修改业务代码、模型或 migration；未运行测试、Runtime、Provider、Nacos、DB、OSS、Broker。
-
-## 2026-09-03 — TargetedReview、ReportGeneration 与同 Task 主链证据收口
-
-- 按用户要求先审计两个单 Stage，再审计同一 Task 全链；没有新增公共 Targeted/ReportGeneration API，也没有新增 Provider 调用。
-- 只读交叉核验数据库与 E2E evidence：Task `ae3c77dd32a34a938eaee6f167d438d6` completed；8 Stage、5 AI Call、5 winner Attempt、Report `a65a33292e354c36baffb71e4c4b571c` final。
-- TargetedReview：合法 `thoracic/lung_pattern` 路由，Stage/Call/Attempt completed/succeeded/accepted，3/3/3 image receipt，Prompt/Config/Model/response SHA 与下游 lineage 通过。
-- ReportGeneration：独立零图片 AI Stage，Stage/Call/Attempt completed/succeeded/accepted，0/0/0 image receipt，DecisionFinalization 冻结医学结果保持一致，Report source Stage/Call 血缘通过。
-- 主线程运行 evidence 断言，输出 `TARGETED_REVIEW_SINGLE_STAGE_AUDIT=PASS`、`REPORT_GENERATION_SINGLE_STAGE_AUDIT=PASS`、`SAME_TASK_FULL_CHAIN_EVIDENCE_AUDIT=PASS`。
-- 发现先前 launcher 已停止，`127.0.0.1:8010` 当前不监听；没有因此重跑 Provider，已完成 Task 的持久化证据仍有效。
-- 将已完成的 2026-08-29 Prompt/Nacos 验证章节移入 `archive/validation-20260903T-full-chain-closeout.md`，并把活动验证总账顶部资格状态更新为当前三项工程 PASS。
-- 本轮只修正 `AGENT_HANDOFF.md` 与 `.agent-handoff/` 过期状态；业务代码、Prompt、Schema、Config、数据库、Nacos、OSS、Broker 均未写入。
-
 ## 2026-09-03 — 当前工作区 Git 收口
 
 - 按用户明确授权开始提交和推送当前有用代码；提交前复核合同第 3 节能力总账，限定为 Git 外部写，不运行 Runtime/Provider/Nacos/DB。
@@ -305,3 +33,276 @@
 - 创建业务提交 `13f674c refactor: use code-owned AI prompt and model routes`，27 files，1529 insertions，695 deletions。
 - 普通推送到 `origin/codex/per-flow-model-routing` 成功；本地 HEAD 与 upstream 均为 `13f674cf82b0dd2fe58b2b7ebe8e959ca73b4ef9`，未使用 force push。
 - 推送后工作树干净；真实外部 Prompt Runtime/ms-ai-platform/Provider E2E 仍因环境缺失保持 `ENVIRONMENT_BLOCKED`。
+
+## 2026-09-03 — 当前代码猫狗完整主链重测（Prompt Runtime 环境阻断）
+
+- 按用户验收口径执行当前 `diagnose_full_chain`：猫、狗各一次，要求生成唯一 `final Report` 并通过 task/current/history 三个接口查回；医学准确率不在本轮范围。
+- 全量后端测试复跑为 `381 passed, 48 warnings`；唯一 launcher 的 Runtime、Relay、Worker、readiness 与 exactly-one consumer 均启动通过。
+- 猫 fresh 2 图（Lateral + VD）完成影像创建、OSS 上传/验证、Study finalize、Quality Task 创建和 preparation Stage；Quality Task 为 `cceffba662d542a0981f3ebd022d1443`。
+- Quality AI Stage 调用 `PromptRuntimeClient.render()` 时发生 `httpx.ConnectError: All connection attempts failed`；配置指向 `127.0.0.1:8100`，该端口无 Prompt Runtime 监听。
+- 失败发生在 Prompt Render 之前，因此未进入 Gateway/Provider、未创建 Diagnose Task、未生成 Report；按 stop gate 未跑狗，结论为 `ENVIRONMENT_BLOCKED`，不是代码链路或医学结果 PASS/FAIL。
+- 中止 E2E 后完成 launcher 温关闭；8010 与 launcher lock 均清理，无遗留 ms-image imaging consumer。
+- 只读历史核验确认：`13f674c` 已把 XRay Stage 路由固定为 `gpt-5.6-sol/race`，但 `xhigh/reasoning_effort` 明确未实现；`ms-ai-platform` 当前请求 Schema 也无该字段，且 Provider 请求 model 最终来自平台 Endpoint 配置。
+- 当前共享工作树出现未提交 `scripts/dev/run_local_chain.sh` diff：增加 Prompt Runtime 环境变量读取/导出和缺失 fail-fast；该修改不能代替启动 `ms-prompt-service`，本会话未回退或提交它。
+
+## 2026-09-03 — direct-Nacos / AI Platform 猫全链 fresh 复测
+
+- 只读逐行对比 `ms-ai-fast` 与当前 `ms-image`：Nacos Client latest 读取、Jinja2 `StrictUndefined`/`tojson`/`$VARIABLE`、Chat Completions URL/headers/payload、HTTP 500 无自动 retry 和 JSON 提取语义均已对齐；XRay 仅额外保留 species exact-only 与可靠执行审计外壳。
+- 将既有 `scripts/dev/run_e2e_local.py` 的 full-chain receipt 审计从旧 Gemini/DB Config 身份改为 code-owned Nacos Prompt identity、`gpt-5.6-sol/race`、AI Platform route、冻结 Schema/messages、Call/Attempt/receipt 审计；补齐 Dog Prompt key 映射，未新建测试脚本。
+- harness `py_compile`、Ruff、diff check PASS；用真实 Quality Call 单独执行新的 code-owned 审计 helper PASS。
+- fresh 猫 Quality Task `ddaf9f23d79f4e3fafb3151e2fc44075` completed：`xray_cat_image_quality@1.1.3`、HTTP 200、`gpt-5.6-sol`、3/3/3、1 Call/1 Attempt、Report 0。
+- Diagnose Task `6574961802f34cea80930c5ce04e51cc` 的 StudyScreening completed：`xray_cat_study_screening@2.0.2`、HTTP 200、3/3/3、1 Call/1 Attempt。
+- SystemAnalysis 动态读取并渲染 `xray_cat_system_analysis@1.0.2` 后，AI Platform 对单次 `/chat/completions` 返回 HTTP 500；Call/Attempt/Stage/Task 均以 `provider_http_500_internal_error` failed，未重试、无 Provider request ID/response SHA。
+- 脱敏结构对比确认 `1.0.1` 历史 HTTP 200 请求与本次 `1.0.2` 的 model/route/temperature/Schema SHA/合同版本相同；当前没有证据将 500 归因为 Prompt 或 Schema，未修改 Nacos Prompt。
+- Primary、Targeted、ReportGeneration 未执行，Report 0；public task/current/history 一致。按猫失败即停规则未跑狗。
+- 温关闭唯一 launcher；8010、Runtime/Relay/Worker/lock 清理通过。临时 manifest 与空 evidence 目录已删除；关闭时仍出现既有 aiomysql event-loop-close 析构告警。
+
+## 2026-09-03 — ms-ai-fast 对齐复核与 fresh 猫二次复测
+
+- 按用户要求将范围严格收敛到 `ms-ai-fast` 的 Prompt 获取、模板渲染和 AI 请求；只读逐项核对双方源码，没有新增 AI 抽象、fallback、自动重试或医学修正。
+- 现有定向合同测试 `22 passed, 372 deselected`；首次未设置 `PYTHONPATH=.` 的收集错误已按工具调用问题记录。
+- 启动唯一 Runtime/Relay/Worker owner，固定 namespace `c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9` 和 AI Platform `http://8.149.245.40:8060/api/v1`，建立新的 Cat `cat-03` 资格序列。
+- Quality Task `afcedfac...` completed：exact Prompt `xray_cat_image_quality@1.1.3`、无 fallback、Provider 200、actual model `gpt-5.6-sol`、3/3/3、1 Call/1 Attempt、Report 0。
+- Diagnose Task `9baeafdd...` 的 StudyScreening completed：exact Prompt `xray_cat_study_screening@2.0.2`、无 fallback、Provider 200、actual model `gpt-5.6-sol`、3/3/3、1 Call/1 Attempt。
+- SystemAnalysis exact Prompt `xray_cat_system_analysis@1.0.2` 已动态读取和渲染；唯一请求约 64 秒后由 AI Platform 返回 HTTP 500，Call/Attempt/Stage/Task 以 `provider_http_500_internal_error` 失败，无 retry、无 Provider request ID/response SHA。
+- 按停止门未执行 Primary/Targeted/ReportGeneration 和 Dog；Task/current/history 一致为无 Report。
+- 未修改业务 AI/Prompt、Schema、Gateway 或 Stage；温关闭 launcher 并清理临时文件，8010/进程/lock 均无残留；既有 aiomysql event-loop-close warning 仍存在。
+
+## 2026-09-03 — 2 图 Cat 继续运行与 Platform timeout 根因定位
+
+- 只读检查远端 Platform：health 200、模型列表含 `gpt-5.6-sol`、OpenAPI 暴露 Chat Completions 但无 audit/log 查询接口。
+- 比较持久化请求事实后发现前两次 500 均为 3 图 SystemAnalysis，而历史 2 图请求曾 200；从已完成历史 Task 冻结事实取得 `cat-02` 两张图均为 `ventrodorsal`，建立新的合法 2 图序列。
+- Quality Task `3df2e3a8...` completed；Diagnose Task `2281f037...` 的 StudyScreening、SystemAnalysis、Primary、FamilyRouting、DecisionFinalization 全部 completed，其中三个 AI Stage 均 direct Nacos、Provider 200、actual model `gpt-5.6-sol`。
+- 本病例未产生 TargetedReview candidate；零图 ReportGeneration 单次调用约 61 秒后由 Platform 返回 HTTP 500 `internal_error`，Task failed、Report 0、无重试。
+- 只读核验本机对应 Platform 源码：Endpoint timeout 默认 60 秒并直接传入 `AsyncOpenAI`；非流式 endpoint 将所有异常统一映射为 500 `internal_error`。结合三次失败耗时与 54 秒成功请求，根因高置信锁定为 Platform 上游 60 秒 timeout。
+- 未修改 ms-image Prompt、Schema、Gateway、Stage，也未修改 AI Platform；按用户既定范围保留外部配置阻断。launcher 和临时文件已清理。
+
+## 2026-09-03 — 切换 Gemini 3.5 Flash 并完成猫狗主链
+
+- 将诊断链 ImageQuality、StudyScreening、SystemAnalysis、JointPrimaryReader、TargetedReview、ReportGeneration 的代码路由精确切换为 `gemini-3.5-flash/race`；Anatomy Localization 独立展示链保持 `gpt-5.6-sol`。
+- 同步现有 full-chain harness 和直接相关模型路由合同测试；通用 Gateway 夹具中的 `gpt-5.6-sol` 保持不变，避免把业务配置误混入传输合同。
+- 首次 2 图 Cat：6 次 Gemini 请求全部 Platform HTTP 200；ReportGeneration 因 Nacos `1.0.1` 未要求完整深拷贝冻结医学对象，被 truth-preserving validator 以 `report_generation_medical_result_rewritten` 正确拒绝。Task `780b6d97...` failed、Report 0、无 retry。
+- 新增 Cat/Dog ReportGeneration `1.0.2` Prompt 资产；发布前确认版本不存在，经 Nacos `draft → submit` 自动 online，latest exact 回读模板 SHA 与本地一致，未 force publish、未覆盖旧版本、未修改 Schema/validator。
+- Fresh Cat `cat-02` 使用历史冻结的两张 `ventrodorsal` 投照位：Quality Task `20fceba6...`、Diagnose Task `00deb1ff...` completed；8 Stage、5 Call、5 Attempt、TargetedReview 触发；Report `081e9443...` final；所有 requested/actual model 均为 Gemini。
+- Fresh Dog `dog-03` 使用已完成 Quality Task `d52f24a2...` 冻结的 3 张 caller-declared `ventrodorsal`：Quality Task `a1369670...`、Diagnose Task `7ec955a6...` completed；FamilyRouting=`primary_final`，7 Stage、4 Call、4 Attempt；Report `646cd3e6...` final；所有 requested/actual model 均为 Gemini。
+- 修正既有 harness 对条件 TargetedReview 的错误固定断言：现在分别严格验证 targeted 8/5 与 primary-final 7/4 两种合法拓扑。对已完成 Dog Task 做只读 receipt 复验 PASS，没有再次调用 Provider。
+- Backend 全量 `403 passed, 48 warnings`；目标 Ruff、py_compile、diff check 均 PASS。唯一 launcher 已温关闭，8010/Runtime/Relay/Worker/lock 无残留；既有 aiomysql event-loop-close warning 仍保留。
+
+## 2026-09-03 — Gemini 猫狗全链最终收口
+
+- 复核诊断主链 6 个 AI Stage 均为 `gemini-3.5-flash/race`，Anatomy Localization 独立展示链仍为 `gpt-5.6-sol/race`；未修改业务代码或再次调用 Provider。
+- 修正 `AGENT_HANDOFF.md` 中已经过期的“真实 E2E 环境阻断”状态与下一动作，使根入口与当前 snapshot、validation 证据一致。
+- 将本轮临时运行目录 `/tmp/ms-image-gemini-e2e.WYqqsl` 移入 macOS 废纸篓；该操作可恢复，未触碰其他临时目录。
+- 最终收尾检查确认 handoff maintenance 无 warning/unresolved，`git diff --check` 通过，8010 无监听，ms-image Runtime/Relay/Worker 和 `/tmp/ms-image-local-chain-8010.lock` 均无残留。
+
+## 2026-09-04 — Dog ReportGeneration 1.0.4 精确字段差异复现
+
+- 只读回查历史 Dog Task `e4b3d9ab...`，确认 ReportGeneration 的完整冻结输入可恢复，但旧 Provider 失败正文未持久化：Call/Attempt `parsed_result_json` 与 `response_object_ref_json` 均为空。
+- 按用户授权执行一次诊断复现：动态读取 namespace `c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9` 的 exact Dog Prompt `1.0.4`，无 fallback；通过现有 Gateway 请求 `gemini-3.5-flash`，未写 Task/Report 数据库。
+- Provider request `chatcmpl-1788487790` 返回 Schema-valid `xray-final-report.v1`；顶层 source SHA、medical status、contract version 全部正确。
+- 递归深度比较确认只有 `$.final_medical_result.coverage.missing_or_limited_views[0]` 一处不同：模型把“对位和稳定性”改为“对位 and 稳定性”。
+- 该事实排除 Nacos envelope、输出 Schema 和 JSON parse 作为本次根因；失败归属于让生成模型精确复制复杂冻结医学对象的职责设计。
+- 未修改 Prompt/Schema/validator/业务代码/Nacos；未重试。温关闭唯一 launcher，8010、Runtime/Relay/Worker/lock 清理通过；临时目录移入废纸篓，关闭仍有既有 aiomysql event-loop warning。
+
+## 2026-09-04 — Gemini 3.7 Flash 同输入对照
+
+- 按用户要求仅对 Dog ReportGeneration 做模型对照，不修改六个诊断 Stage 的代码路由。
+- AI Platform `/models` 只读探测返回 404，随后按停止合同直接发起恰好一次 `gemini-3.7-flash` Chat Completions；未重试或回退。
+- 动态 Prompt 仍为 namespace `c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9`、Dog `1.0.4`、无 fallback；输入与 3.5 差异诊断相同。
+- Provider request `chatcmpl-1788488881` 成功，requested/actual model 均为 `gemini-3.7-flash`；Schema、顶层 source SHA/status/version 和完整医学对象深度相等均通过，递归差异数 0。
+- 当前只能声明单次 3.7 复制 PASS，不能声明稳定性或医学准确率；业务代码、Prompt、Schema、validator、Nacos、数据库均未修改。
+
+## 2026-09-04 — Gemini 3.8 X-Ray 全 Stage 路由与真实猫狗主链回归
+
+- 按用户授权将 ImageQuality、StudyScreening、SystemAnalysis、JointPrimaryReader、TargetedReview、ReportGeneration、AnatomyLocalization 共 7 个 Provider Stage 统一声明为 `gemini-3.8-flash/race`；现有 E2E harness 与 X-Ray 路由合同断言同步为 3.8，通用 Gateway 的其他模型 fixture 保留。
+- 切换后的定向静态验证为 `15 passed, 305 deselected`，相关 Ruff、`py_compile` 与 `git diff --check` 均 PASS。
+- 使用 `/Users/mozhicheng/workspace/documents/X光_没问题_全量过滤` 的真实 Cat 2 图和 Dog 3 图 manifest；运行前逐图核验路径、size、SHA-256，全部一致。
+- 唯一 launcher 注入 AI Platform `http://8.149.245.40:8060/api/v1` 与 Nacos namespace `c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9`，只动态读取 exact Prompt；未发布/覆盖 Prompt，未增加 retry/fallback。
+- Cat：Quality Task `10e0f9ed...`、Diagnose Task `7d53e0d6...` completed，Report `1642f558...` final；Diagnose 7 Stage/4 Call/4 Attempt，另有 Quality 1 Call/1 Attempt，全部 requested/actual model=3.8、单 Attempt、receipt/Prompt/Report 深度门 PASS。
+- Dog：Quality Task `38920614...`、Diagnose Task `b6f130ee...` completed，Report `6d1c99c1...` final；Diagnose 7 Stage/4 Call/4 Attempt，另有 Quality 1 Call/1 Attempt，全部 requested/actual model=3.8、单 Attempt、receipt/Prompt/Report 深度门 PASS。
+- 两个病例均合法走 `primary_final`，没有物化 TargetedReview；因此本轮证明 Cat/Dog 主链 E2E，但不证明 TargetedReview 条件分支已在 3.8 下真实执行。
+- Evidence 已移入废纸篓的两个可恢复目录；launcher 温关闭后 8010、Runtime/Relay/Worker/lock 无残留。既有 aiomysql event-loop-close warning 仍出现，未影响 PASS。
+
+## 2026-09-04 — Gemini 3.8 Pilot Case 1 / Cat Primary 1.0.3 资格回归启动
+
+- 历史目标失败：冻结 Case 1 在 Cat Primary `1.0.1` Provider HTTP 200 后因 `provider_result_source_projection_mismatch` fail-closed；冻结 caller projection=`lateral_indeterminate`，Quality observed projection=`ventrodorsal`/inconsistent。
+- 固定病例：仅 `acc-pilot-20260904-01-abn-cat-thorax`，因为它是原冻结 10 例的第一个失败病例；未排除、替换或重抽任何病例。
+- Prompt/模型变化：仅新增 Cat Primary 不可变 `1.0.3`，正文 SHA `9f26c46e8f171c8b8cb8dafb163edfdbf80c23f8ff9f7b6e7a0987bd37d72b7e`；Schema SHA 保持 `1ac0ad547e48a88040bbeb93ce7be0abf76e956ec8362452697e4cdfe6a4dc68`；所有诊断节点继续 `gemini-3.8-flash`。
+- Nacos 资格：指定 namespace exact/latest `1.0.3` online，output=`json_schema`，变量合同不变；`1.0.2` 保持 offline，未覆盖旧版本，未 force publish。
+- Race/调用合同：沿用既有单模型 route 字段；每个 Logical Call 最多一个 Attempt，Provider 失败不重试。
+- 预期改善：仅要求消除技术 source projection lineage mismatch；本次不预设医学状态，不把工程通过解释为临床准确率改善。
+- 可能回归：模型仍可能在其他 frozen source_ref 字段、Schema、Provider 或后续 Stage 失败；任一首次失败立即停止。
+- 下一步判定：若 Case 1 仍在 projection lineage 失败，则继续 Prompt/model 输出归因；若转为其他 Schema/工程失败，按对应层归因；只有 Case 1 全链完成后才启动原冻结 10 例资格序列。
+- `xray-v2-accuracy-governor` 指定的 `documents/X光V2重构专题/02-V2重构定稿/10-重构执行日志.md` 在当前工作区及 `/Users/mozhicheng/workspace/documents` 中不存在；依据项目“不自行创建文档”规则，本轮不新建该文档，事实写入既有 handoff 日志与验证账本。
+
+## 2026-09-04 — Anatomy Localization 独立展示接口收口
+
+- 按用户明确授权完成三个展示入口：保留既有 `GET /anatomy-localizations?task_id=`，新增 `POST /anatomy-localizations/prepare-view` 与 `GET /anatomy-localizations/legend`。
+- `prepare-view` 复用既有结果 lineage 校验，在短事务内验证 owner、Task v3 冻结 manifest、Image 行精确身份与版本；数据库事务结束后才创建 OSS gateway 并签发短 TTL HTTPS URL。
+- Image ID 可省略或选择 1–5 个；请求值规范化、拒绝空值/重复/非冻结图片，响应始终保持冻结 manifest 全局顺序。
+- OSS 下载签名新增向后兼容的可选 `object_version_id`；无版本号时保持旧 SDK 调用形态，有版本号时绑定 `versionId`。
+- 图例动态读取 `xray-anatomy-labels.v1` 唯一事实源，并 fail-closed 检查 6 系统、38 标签的中文展示映射完整性。
+- 展示侧业务写入严格限制在 5 个文件；未修改主链 Stage、Prompt、模型路由、Task/Report 状态、数据库模型、migration 或用户并行修改的测试文件。
+- 未调用 Provider/Nacos、真实数据库、真实 OSS 或 Runtime；只执行现有合同测试、静态检查和 fake 边界验证。
+
+## 2026-09-04 — Gemini 3.8 十例资格批次停在 Case 2 Cat Quality
+
+- 复核唯一 Runtime owner/readiness 后按冻结顺序启动批次；首个命令因误传 API root 导致 POST /sessions 404，未进入链路，保留为操作审计并以新 identity 重启。
+- 有效批次 Case 1 全链 PASS，医学状态 `review_required`；全部 Quality/Diagnose AI Call 为 `gemini-3.8-flash`、1 Attempt、无 reconcile，Cat Primary 动态命中 `1.0.3`。
+- Case 2 在独立 Quality Task 首个 AI Call 后 fail-closed：`xray_image_quality_image_1_projection_consistency_invalid`；Provider 已返回（response SHA 存在），2/2 图、1 Attempt，不是 HTTP/timeout/JSON 体积问题。
+- 冻结输入两图 declared projection 均为 canonical `lateral_indeterminate`；当前 Prompt 只定义原始别名 `Lateral` 的 family 规则，未显式定义 canonical 值与 right/left lateral 的 validator 语义。归因为 Prompt/validator 输出合同缺口；未放宽 validator、未加 Python 修正、未跳过病例。
+- Case 3–10 未运行；总体准确率未计算。
+
+
+## 2026-09-04 — 有用代码提交与展示主链关联审计
+
+- 重新核对完成度总账、共享工作树和现有提交边界；未使用 `git add -A`，未 reset/clean/restore。
+- 定向验证 Anatomy 展示合同 `69 passed, 251 deselected`；Prompt/AI 路由定向合同 `36 passed, 358 deselected`；两份合同测试全量 `394 passed, 48 warnings`。
+- 提交 `4aa46f1`：Prompt source 从 AI Control 迁至 neutral core 并保留兼容导出，Runtime direct Nacos，猫狗 exact variant，全 X-Ray AI Stage `gemini-3.8-flash`，Localization `prepare-view`/`legend` 与冻结 lineage 校验。
+- 对开发 E2E 运行 Ruff、py_compile、`--help`、`bash -n`、diff-check；提交 `df1a11e`，改为 code-owned Runtime/Prompt/model receipt 核验。
+- 本地未跟踪 Prompt `1.0.2`–`1.0.4` 属准确率/外部发布历史，不是 Runtime 文件依赖，本轮未提交。
+- 审计确认剩余主链关联不能用 owner + Study + revision 推断；现有 durable decision 要求 `task_record.source_task_id` 与 migration。本轮未获迁移脚本授权，因此未写不完整 ORM/API 半成品。
+
+## 2026-09-04 — 展示主链显式关联完成并提交
+
+- 用户后续明确要求主链和展示链均完成并允许添加代码；按原子范围新增 `task_record.source_task_id`、普通索引 Alembic migration（无 foreign key）、Schema/DAL/Service/API 关联能力。
+- 新建 `anatomy_localization` 强制 `source_task_id`，并校验 owner、source 类型、Study、Revision、species、冻结 manifest 与图片集合；数据库列 nullable 仅为历史任务兼容。
+- 冻结同 source 最多一个非终态 Localization；主链 Task 返回关联摘要，Localization result/current/history 返回 source ID，完整 bbox 仍不复制进通用 Task 响应。
+- 修复 Prompt render 失败收敛边界，保证缺 Output Schema 等渲染错误在创建 AI Call 前失败；补齐合同测试。
+- 验证结果：定向 `72 passed`；Gateway 合同 `323 passed`；后端全量 `406 passed`；Ruff、compileall、diff-check、Alembic head/current 全部通过。
+- 真实只读接口验证：Task/current/history/legend 均 HTTP 200；diagnose `a042104cf0d84a4a8bede2bbac4a7036` 精确关联 Localization `9107bd3b102f493996a14b7d7d715f30`。
+- 发现独立既有问题：`GET /api/v1/tasks/page` 返回 422；Localization 新 bbox 生成仍被 Nacos `1.0.0` Prompt 缺少 Output Schema 阻断。本轮无 Nacos 写授权，未调用 Provider。
+- 精确暂存 10 个功能文件并提交 `5c2e1ec feat(xray): link anatomy display to diagnosis`；未使用 `git add -A`，未纳入其他会话 Prompt/handoff 改动。
+- 完成后温和停止本轮 Launcher/Runtime/Relay/Worker，确认 `127.0.0.1:8010` 已释放。
+
+## 2026-09-04 — X-Ray 前端宿主只读探索
+
+- 完整读取根 `AGENTS.md` 要求的 handoff 启动集、当前开发合同，以及新增 X-Ray 前端指南和包含 52 个请求的 Postman Collection。
+- 使用一个只读默认子代理做跨目录宿主定位，主线程按 `file:line` 线索抽查；确认仓库没有现成前端技术栈、路由、状态管理、API client、组件库或设计系统。
+- 现有应用入口是 FastAPI Runtime/Admin；前端唯一可复用输入是 Postman 接口合同，不构成页面宿主。
+- 按用户停止条件未创建 React/Vue 等框架，也未修改任何业务源码、后端接口、数据库、Prompt、模型配置或准确率链；等待用户明确选型或提供外部前端仓库。
+
+## 2026-09-04 — X-Ray 前端实现与 Basic Auth 收口
+
+- 用户授权在 `apps/frontend/` 新建 React 19 + TypeScript + Vite 6 前端；实现上传冻结、三类 Task、报告、Localization bbox viewer 和响应式交互。
+- 按最新要求把 Runtime 鉴权从 Bearer Token 表单改为用户名/密码 Basic Auth；UTF-8 凭证编码后仅用于 Runtime API，请求 OSS signed URL 时不附带该 header。
+- 连接检查增加受保护只读 Task 探针，避免公共 readiness 让无效凭证被误判为已连接。
+- 将 workflow localStorage 改为显式字段白名单，排除临床自由文本、医学正文、完整报告、signed URL、`request_snapshot_json` 和未知服务端字段。
+- 新增持久化 `studyStatus`，Quality 仅在 finalize 明确成功并返回 `ready` 后启用。
+- 未修改后端、Prompt、数据库、迁移、模型或准确率链；未调用真实 Provider、Nacos、数据库或 OSS。
+
+## 2026-09-04 — Basic Auth 浏览器全链验收
+
+- 启动单实例 Runtime/Relay/Worker 与 Vite，真实验证 health/readiness 均 HTTP 200，DB/Redis/Broker ready；readiness 为 `medical_provider_ready=false`。
+- 浏览器确实发送 Basic Header；真实 `GET /tasks?id=basic-auth-e2e-probe` 返回 HTTP 401 `Missing bearer token`，确认当前 FastAPI `HTTPBearer` 边界尚不接受 Basic Auth，UI 错误提示正确。
+- 在隔离 Playwright mock 中完成连接、Session、Study、Series、2 图 prepare-upload/OSS PUT/complete-upload、finalize、Quality、Diagnose、Report、Localization 全链；报告 Revision 1、两张 signed view 图片与每图一个 bbox 均正确显示。
+- 审计 32 个 Runtime 非 OPTIONS 请求，Basic Header 缺失/错误为 0；4 个 OSS PUT/GET 请求 Authorization 泄漏为 0。
+- `sessionStorage` 为空；`localStorage` 仅包含 workflow 白名单，没有用户名、密码、Basic Header、signed URL 或完整报告正文。
+- `npm run lint`、`npm run build`、`git diff --check -- apps/frontend` 均 PASS；仅有 Node 18.20.8 与 npm 11.5.2 的官方支持范围警告。
+- 未修改业务源码、后端认证、登录模块、Prompt 或数据库；未创建真实业务数据、未调用 Provider，不能形成医学准确率证据。
+- 已关闭 Playwright/Vite/Runtime 并清除本轮临时 symlink、测试密钥、浏览器产物和响应文件；端口 8010/5174 无监听，lock 文件已移除。
+
+## 2026-09-04 — 前端诊断主链与展示链并行编排
+
+- 用户纠正原前端串行语义，要求 Diagnose→Report 主链与 Anatomy Localization→prepare-view→bbox 展示链并行执行。
+- 复核后端 `TaskService` 合同：Localization 创建仅要求同 owner 的 Diagnose `source_task_id`，不要求 source Diagnose 已 completed；两个创建 POST 因 ID 依赖必须先后发出，但 Task 执行阶段允许并行。
+- 修改 `XrayWorkspacePage.tsx`：Diagnose 创建返回后立即创建 Localization，不等待 Diagnose completed；展示链创建失败时保留已启动的 Diagnose 并给出分链错误；手动重试只要求 Diagnose 已创建。
+- 修改 `TaskBoard.tsx`：Localization 启用条件改为 Diagnose 已创建；主 CTA 与说明明确“并行启动诊断与定位”和两条链独立执行。
+- 隔离 Mock + Playwright 证据：Diagnose 创建后 15ms 创建 Localization；二者同时处于 running；Localization 约 6.05 秒完成时 Diagnose 仍 running，Diagnose 约 10.07 秒完成。
+- 最终 UI：两 Task 均 completed；Report Revision 1 显示“并行主链报告已生成”；Localization 历史 1 条、两张影像各 1 个“肺”框，图例“呼吸系统”。
+- Diagnose/Localization 请求体分别正确携带 `quality_review_task_id` 与 `source_task_id=diagnose-parallel`；抽查 Task 创建及 prepare-view 请求均携带 Basic Auth。
+- `npm run lint`、`npm run build`、`git diff --check -- apps/frontend` 均 PASS；Node 18.20.8/npm 11.5.2 支持范围警告仍存在但未影响结果。
+- 未修改后端认证、登录模块、Prompt、数据库或 migration；未调用真实 Provider/OSS，本轮并行 E2E 仅为隔离工程证据。
+- 已关闭 Playwright `ms-image-parallel-e2e`、Vite 与 Mock Runtime；`.playwright-cli` 已可恢复地移动到废纸篓；端口 5174/8901 均无监听。
+
+## 2026-09-05 — 可见浏览器现场演示
+
+- 按用户“演示给我看看”要求，在 Codex 可见浏览器重跑前端完整展示，不修改业务源码。
+- 使用本机隔离 mock Basic Auth `demo-user/demo-pass`、虚拟病例 `CASE-PARALLEL-DEMO` 和两张无敏感合成 PNG；上传目标仅为 `127.0.0.1:8901`。
+- 页面完成 Session/Study/Series、两图上传与冻结、Quality Review；Quality 结果显示两图均 acceptable。
+- 点击“并行启动诊断与定位”后，Diagnose 与 Anatomy Localization 同时可见为“处理中”，分别使用 `diagnose-demo` 与 `localization-demo`。
+- 定位链先完成时诊断主链仍保持处理中；定位页面成功显示 lateral 与 ventrodorsal 两图，每图各 2 个 bbox，并显示呼吸系统/心血管系统图例。
+- 随后诊断主链完成；报告页显示 Revision 1/current、摘要、影像所见、影像印象、建议和技术质量摘要。
+- 当前为便于用户继续查看，Vite、mock 和可见浏览器均保留运行；本轮证据仅为隔离 UI/编排演示，不是实际 Runtime、Provider、OSS 或医学准确率证据。
+
+## 2026-09-04 — 真实数据集并行报告页演示（UTC）
+
+- 按用户要求改用 `/Users/mozhicheng/workspace/documents/X光_没问题_全量过滤` 的真实数据，选择同一只猫同一次胸腔检查的 `...0093.jpg/.json` 与 `...0094.jpg/.json`；逐文件复核 SHA-256 与既有冻结值一致。
+- 复用前端实际编排：Study/Quality 完成后先创建 Diagnose，拿到 Diagnose ID 后立即以 `source_task_id` 创建 Localization；两个 Task 独立轮询。
+- 第二轮浏览器观察到 Diagnose 与 Localization 同时进入 processing；约 15 秒后报告页为“诊断主链处理中 / 展示链已完成”，左侧已经显示两张真实 X-Ray、Lateral/VD 切换和每张 1 个真实数据集 Bounding Box，右侧仍为“最终报告生成中”。
+- Diagnose 后续完成并生成 Report R1；最终页同屏展示影像、bbox、技术质量、数据集事实 findings、Impression、Recommendations、Limitations 与审计入口。
+- 点击报告 findings 中 `VD` 证据按钮后，左侧切换为影像 #2，DOM alt 为 `X-Ray 影像 2，投照位 ventrodorsal`，证明报告证据与影像联动。
+- 页面文案根据 legend 显示“数据集标注框 / 数据集矩形标注 / 原始标注区域”，并明确 bbox 不是像素级 mask；报告不擅译 `Ch07`，明确没有权威代码字典和自然语言放射学报告。
+- 生成截图：`output/playwright/xray-real-dataset-localization-first.png`、`xray-real-dataset-final.png`、`xray-real-dataset-evidence-vd.png`。Vite、Mock Runtime 和 Playwright 会话为用户现场查看继续保留。
+- 该轮业务源码未修改；只更新演示证据与 handoff。真实 Runtime Basic Auth、真实 Provider/OSS 和医学准确率边界保持不变。
+
+## 2026-09-05 — 报告页视觉收口与真实数据集并行重跑
+
+- 修改 `apps/frontend/src/components/ReportPanel.tsx`：新增诊断主链与定位展示链双泳道、独立状态/Task ID/`source_task_id`/创建开始完成时间，并在最终报告上方明确汇合关系与证据边界。
+- 修改 `apps/frontend/src/components/ReportImagingPanel.tsx`：明确“矩形 bbox、非像素 mask”，增加报告证据定位提示，并让报告 source ref 切换对应影像与增强所选 bbox。
+- 修改 `apps/frontend/src/styles.css`：将视觉系统收敛为深青黑阅片区、冷灰白报告纸张、青色主操作、绿色完成、黄色风险；桌面双栏等高独立滚动，1100px 以下顺序阅读，并补齐移动端/横屏/reduced-motion 行为。
+- 以病例 `CASE-DATASET-CH07-PARALLEL` 重新跑通真实数据集浏览器链：Diagnose 与 Localization 同时 processing，Localization 先完成时 Diagnose 仍 running，最终 R1 与两张真实影像/每图一个数据集 bbox 汇合。
+- 点击报告 `VD` 证据后，左侧切换到影像 #2，显示“报告证据已定位”，对应 bbox 视觉增强。
+- 完成 Basic/OSS Header、浏览器存储、Cookie、桌面独立滚动、375×812、844×390 与 reduced-motion 检查；唯一 console error 是预期 Mock 鉴权探针 404。
+- Bundled Node 24 下 `npm run lint`、`npm run build`、`git diff --check` 均 PASS；39 modules transformed。
+- Vite、Mock Runtime 与 Playwright 现场继续保留供用户查看；真实 Runtime Basic Auth 仍 401，未调用 Provider/Nacos/数据库/Docker，医学状态保持 UNKNOWN/NO-GO。
+
+## 2026-09-07 — 真实数据集前端全链重新回归
+
+- 按用户“全链路测试一下”要求，只做已有能力浏览器回归，不修改前后端业务源码。
+- 恢复本机 Vite `127.0.0.1:5174` 与数据集 Mock Runtime/OSS `127.0.0.1:8901`，新建无缓存 Playwright 会话 `xray-fullchain-20260907`。
+- 使用病例 `CASE-DATASET-CH07-E2E-20260907` 上传用户数据集的 `...0093.jpg` 与 `...0094.jpg`，完成 Session/Study/Series、prepare-upload/PUT/complete-upload、Study finalize 和 Quality Review。
+- Diagnose 与 Localization 创建请求保持必要因果顺序；Localization body 带 `source_task_id=diagnose-demo`。二者开始时间相差约 15ms，浏览器捕获双方同时 processing。
+- Localization 于 `01:39:18.813Z` 完成时 Diagnose 仍 processing；Diagnose 于 `01:39:32.856Z` 完成，生成 Report R1。
+- 报告页显示两张真实 X-Ray、每图 1 个原始矩形 bbox；点击 `VD` 证据后切换到影像 #2 / ventrodorsal 并显示“报告证据已定位”。独立器官定位页也通过。
+- 请求审计确认 Runtime API 携带 Basic Authorization；两次 signed upload PUT 与两次 signed image GET 均无 Authorization。localStorage 仅有白名单 workflow，sessionStorage 为空，Cookie 为 0。
+- 唯一 console error 是预期的 Mock Basic 鉴权探针 404；无业务请求、图片加载或渲染错误。
+- Bundled Node v24.19.0 下 lint/build PASS，39 modules transformed；`git diff --check` PASS。
+- 新增 `output/playwright/xray-e2e-20260907-*.png` 验收截图；Vite、Mock 与 Playwright 报告页现场继续保留供用户查看。
+- 本轮未启动真实 Runtime、未调用 Provider、未写 Nacos/数据库、未启动 Docker；真实 Runtime Basic Auth 与医学准确率边界不变。
+- 完成 handoff 维护复核：`changed=0 warnings=0 unresolved=0`，当前文档状态无需继续轮转或修复。
+
+## 2026-09-07 — Basic Auth 真实 AI 与 Localization 渲染阻断定位
+
+- Runtime Basic Auth 已完成并真实验证：无凭证 401、错误 Basic 401、正确 Basic 越过鉴权进入业务层；Admin 保持 Bearer-only。
+- 使用用户真实数据集 Cat Lateral/VD 两张影像，经 Basic Auth 跑通 Quality 与 Diagnose 真实 AI 全链；Diagnose 4 Call/4 Attempt、Provider 全部 HTTP 200、Report final。
+- 在同一 Study 上通过公共 API 创建带真实 `source_task_id` 的 Localization Task；HTTP 201，Task/Outbox/Relay/Worker 均已到达，但在 Provider 调用前以 `stage_prompt_render_failed` 失败。
+- 只读调用与 Worker 相同的 `PromptRuntimeClient.render()` 坐标，精确复现 `Nacos Prompt 缺少 output schema: ms-image.x-ray.anatomy-localization.cat.zh-CN`。
+- 只读回读 Nacos metadata：Cat Prompt version `1.0.0`、存在 content hash、`has_output_schema=false`；未输出 Prompt 正文、凭证或 Secret。
+- 复核仓库已有完整 Localization Schema/validator，裁决不通过 Runtime 代码绕过；需用户单独授权创建新不可变 Nacos Prompt 版本，不得覆盖 `1.0.0`。
+- 本轮未修改业务源码、Prompt、Nacos、数据库、migration 或 Docker；单一 Runtime/Relay/Worker 继续保留供授权后续跑。
+
+## 2026-09-07 — Basic Auth 真实并行全链与报告页最终验收
+
+- 复用用户指定数据集真实猫 X-Ray `...0093.jpg`、`...0094.jpg`，通过浏览器完成真实 OSS 上传、Study/Revision 冻结、Quality、Diagnose、Localization 和 final Report。
+- Diagnose Task `39e55ec4dd7942e7b68414e8432d8f1a` 与 Localization Task `4f28c44a76524d73ae962b565be6c2c7` 执行区间重叠约 48.47 秒；Localization 保持 `source_task_id` 关联且不等待 Diagnose 完成。
+- Localization 为 1 Logical Call / 1 Physical Attempt，2 张图各 9 个 normalized bbox；全部坐标有限、在 `[0,1]` 且顺序有效。
+- 浏览器验证报告与两张真实 X-Ray 同页、影像切换、系统筛选、缩放/复位和 `ventrodorsal` 证据联动；短效链接过期后通过“重新申请”恢复。
+- 修改 `apps/frontend/src/components/ReportPanel.tsx`，把误导性的 `Mock Runtime 演示` 改成 `真实工程链路`。
+- 本轮早先为真实 OSS 浏览器上传增加仅开发环境启用且 origin 严格匹配的 Vite signed PUT 代理，涉及 `apps/frontend/vite.config.ts`、`apps/frontend/src/lib/api.ts`；未新增后端上传 API。
+- 更新 `output/playwright/report-page.png`、`report-evidence-0094.png`；保留完整并行、两图定位截图和 Playwright trace。
+- 未修改医学判断逻辑、validator、数据库、migration 或登录模块；未保存 Basic 密码、Token、signed URL 或 Prompt 正文。
+
+## 2026-09-07 — R3/R4 真实全链复验与实际并发修复
+
+- 恢复已退出的 Runtime/Vite，以进程内 Basic 凭证运行真实数据集同病例两图；R3/R4 均上传、Quality、Diagnose、Localization 和 final Report 完成。
+- R3 发现单 Worker 槽位使 AI Stage 串行，不能仅凭 Task 区间宣称 AI 并发；run_local_chain.sh 增加可校验并发参数，默认 2。R4 验证 Screening/Localization 与 SystemAnalysis/Localization 分别重叠 15.338185 / 16.687040 秒。
+- TaskDal.page_for_owner 补 source_task_id 到 load_only；真实带范围查询由 MissingGreenlet/500 恢复 200，Study/Session/类型筛选均通过。
+- TaskBoard/响应类型读取真实 primary_body_part、declared_projection；展示体位冲突。XrayWorkspacePage 在连接或恢复已完成 Quality 时回读明细；刷新浏览器再登录验证通过。
+- ReportImagingPanel 证据文案区分解剖定位与数据集框，避免误称病灶范围。
+- 本地自动化内核超时后旧 launcher/Vite 生命周期受影响；在任务全部终态后停止本轮旧进程并恢复唯一 owner。旧 Worker 温关闭后残留，仅终止确认属于本轮且无在途任务的 PID，未清理业务数据。
+- 归档旧 risks 原文并语义移除过期 Mock/401/Prompt 阻断；当前风险降至容量限制内。同步开发合同历史状态说明与并发证据门。
+- 医学与部署治理不扩张；未增加测试脚本、迁移、数据库表或 Prompt 写入。
+
+## 2026-09-07 — 未提交改动审查与提交前收口
+
+- 按用户要求审查 staged、unstaged 和 untracked 改动；能力总账限定为 Basic Auth、X-Ray 前端主链/Localization 展示链入口与交付门禁，不重做既有运行能力。
+- 修复 Postman 新入口仍强制 Bearer 的阻断：48 个 Runtime auth block 全部改为 Basic，5 个 OSS PUT 保持 `noauth`，guide 同步移除 Bearer-only 操作说明。
+- 修复 E2E/本地 launcher 未可靠读取仓库 `.env` Basic 凭证的问题：进程环境优先、`.env` fallback、缺失凭证 fail-closed，不打印密码；Worker 默认 concurrency=2 保持两条 AI 链并行执行资格。
+- 复核前端凭证只在 React 内存、OSS PUT 不带 Runtime Authorization；Diagnose 与 Localization 创建存在 `source_task_id` 必要顺序，进入 Worker 后独立运行和独立轮询。
+- 完成 Basic 定向测试、413 个后端全量测试、Ruff、compileall、shell syntax、E2E 凭证优先级、Postman 认证统计、前端 lint/build 和 diff-check；未重跑真实 AI/OSS/Nacos/DB/Runtime。
+- 已 fetch `origin/codex/per-flow-model-routing`；本地 HEAD、本地目标分支与远端均为 `5c2e1ec`，提交前无远端前进。
+- handoff maintenance 无 unresolved；精确暂存 80 个文件，敏感信息扫描通过，排除 `.env`、浏览器证据、依赖和构建产物。
+- staged diff 首次发现 6 个新前端文件 EOF 多余空行，已修正并使 `git diff --cached --check` 通过；该项是本轮最后一个 actionable finding。
+- `git switch codex/per-flow-model-routing` 因该分支被 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 占用而拒绝；只读核对确认其 HEAD 与远端同为 `5c2e1ec` 且存在独立未提交改动，本轮不触碰该工作树。
+- 下一步在当前相同父提交的 detached HEAD 创建提交，使用显式 `HEAD:codex/per-flow-model-routing` 普通 fast-forward push 并确认远端 SHA；禁止 `git add -A` 与 force push。

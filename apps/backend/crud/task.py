@@ -199,6 +199,7 @@ class TaskDal(DalBase):
                 load_only(
                     self.model.id,
                     self.model.study_id,
+                    self.model.source_task_id,
                     self.model.request_id,
                     self.model.task_type,
                     self.model.study_revision_id,

@@ -14,7 +14,7 @@
 #   - Local RabbitMQ on localhost:5672 (guest login, vhost /)
 #   - Local Redis on localhost:6379
 #   - ms-ai-fast/.env contains AI_PLATFORM_API_KEY
-#   - ms-image/.env contains Nacos connection credentials
+#   - ms-image/.env contains Nacos and Runtime Basic Auth credentials
 #   - scripts/dev/keys/public.pem exists (NEVER commit the private key)
 #
 # Secrets are injected into process environments only. They are never printed.
@@ -28,6 +28,7 @@ IMAGE_ENV="$REPO_ROOT/.env"
 KEYS_DIR="$REPO_ROOT/scripts/dev/keys"
 PUB="$KEYS_DIR/public.pem"
 API_PORT="${MS_IMAGE_LOCAL_API_PORT:-8010}"
+WORKER_CONCURRENCY="${MS_IMAGE_LOCAL_WORKER_CONCURRENCY:-2}"
 RECONCILE_SCHEDULE_ENABLED="${AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED:-false}"
 STARTUP_TIMEOUT_SECONDS="${MS_IMAGE_LOCAL_STARTUP_TIMEOUT_SECONDS:-60}"
 SHUTDOWN_TIMEOUT_SECONDS="${MS_IMAGE_LOCAL_SHUTDOWN_TIMEOUT_SECONDS:-130}"
@@ -121,6 +122,7 @@ validate_integer() {
 }
 
 validate_integer "MS_IMAGE_LOCAL_API_PORT" "$API_PORT"
+validate_integer "MS_IMAGE_LOCAL_WORKER_CONCURRENCY" "$WORKER_CONCURRENCY"
 validate_integer "MS_IMAGE_LOCAL_STARTUP_TIMEOUT_SECONDS" "$STARTUP_TIMEOUT_SECONDS"
 validate_integer "MS_IMAGE_LOCAL_SHUTDOWN_TIMEOUT_SECONDS" "$SHUTDOWN_TIMEOUT_SECONDS"
 if (( API_PORT > 65535 )); then
@@ -352,6 +354,22 @@ for key, default in (
     print("" if value is None else value)
 PY
 )"
+RUNTIME_AUTH_VALUES="$("$PYTHON" - "$IMAGE_ENV" <<'PY'
+from dotenv import dotenv_values
+import os
+import sys
+
+values = dotenv_values(sys.argv[1])
+for key, default in (
+    ("BASIC_AUTH_USERNAME", ""),
+    ("BASIC_AUTH_PASSWORD", ""),
+    ("BASIC_AUTH_SUBJECT", "ms-image-basic-user"),
+    ("BASIC_AUTH_SCOPES", "imaging:run"),
+):
+    value = os.environ[key] if key in os.environ else values.get(key, default)
+    print("" if value is None else value)
+PY
+)"
 {
     IFS= read -r NACOS_SERVER_ADDR
     IFS= read -r NACOS_CONTEXT_PATH
@@ -359,11 +377,20 @@ PY
     IFS= read -r NACOS_PASSWORD
     IFS= read -r NACOS_PROMPT_TIMEOUT_SECONDS
 } <<< "$NACOS_VALUES"
+{
+    IFS= read -r BASIC_AUTH_USERNAME
+    IFS= read -r BASIC_AUTH_PASSWORD
+    IFS= read -r BASIC_AUTH_SUBJECT
+    IFS= read -r BASIC_AUTH_SCOPES
+} <<< "$RUNTIME_AUTH_VALUES"
 if [[ -z "$PLATFORM_KEY" ]]; then
     fail "AI_PLATFORM_API_KEY is missing"
 fi
 if [[ -z "$NACOS_SERVER_ADDR" ]]; then
     fail "NACOS_SERVER_ADDR is missing"
+fi
+if [[ -z "$BASIC_AUTH_USERNAME" || -z "$BASIC_AUTH_PASSWORD" ]]; then
+    fail "BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD must be configured for the local Runtime chain"
 fi
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
@@ -380,6 +407,10 @@ export NACOS_USERNAME
 export NACOS_PASSWORD
 export NACOS_PROMPT_NAMESPACE_ID="c0cc9e0e-0fed-4faf-bc57-e9bab46a78a9"
 export NACOS_PROMPT_TIMEOUT_SECONDS
+export BASIC_AUTH_USERNAME
+export BASIC_AUTH_PASSWORD
+export BASIC_AUTH_SUBJECT
+export BASIC_AUTH_SCOPES
 export BROKER_ENABLED=true
 export AI_ATTEMPT_RECONCILE_SCHEDULE_ENABLED=false
 export AI_ATTEMPT_RECONCILE_POLICY_VERSION="${AI_ATTEMPT_RECONCILE_POLICY_VERSION:-ai-attempt-reconcile.v1}"
@@ -402,7 +433,7 @@ OWN_PIDS+=("$RELAY_PID")
 
 echo "Starting imaging celery worker ..."
 "$PYTHON" -m celery -A apps.backend.workers.imaging_worker.celery_app:celery_app \
-    worker --loglevel=INFO --concurrency=1 \
+    worker --loglevel=INFO --concurrency="$WORKER_CONCURRENCY" \
     --queues=imaging.image.validate --hostname='ms-image-local@%h' &
 WORKER_PID=$!
 OWN_PIDS+=("$WORKER_PID")
@@ -412,6 +443,7 @@ wait_for_probe "Runtime readiness with exactly one imaging consumer" probe_readi
 
 echo
 echo "Local Runtime, Relay and Worker are ready under one launcher owner."
+echo "Imaging worker concurrency: $WORKER_CONCURRENCY"
 echo "Reconcile scheduler enabled: false"
 echo "API:      http://127.0.0.1:$API_PORT/api/v1/health"
 echo "E2E run:  $REPO_ROOT/scripts/dev/run_e2e_local.py --help"

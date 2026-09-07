@@ -1,5 +1,44 @@
 # 长期决策日志
 
+## 2026-09-07 — X-Ray 用户入口以 Basic Auth 为默认合同
+
+- Runtime 保留 Basic OR Bearer 兼容，Admin 保持 Bearer-only；面向当前 X-Ray 前端、Postman、E2E 和本地 launcher 的默认入口统一使用 Basic Auth，不再要求先取得 token。
+- Basic username/password 只允许从进程环境或仓库本地 `.env` 注入；进程环境优先，缺失时 fail-closed，禁止在源码、Postman、文档、日志或浏览器持久存储中保存真实凭证。
+- OSS signed URL PUT 是对象存储授权边界，必须保持 `noauth`，不得复用 Runtime Authorization。
+- Diagnose 与 Localization 的 HTTP 创建因 `source_task_id` 有必要因果顺序；“并行链路”定义为 Task 创建后由独立 Worker slot 执行区间重叠、独立状态/轮询/结果读取，而不是伪造两个无血缘的同时创建请求。
+- 本轮提交门只接受离线代码/合同/测试证据；既有真实 Cat 双图 Basic Auth 全链不扩展为猫狗 2–5 图、医学准确率或生产部署资格。
+
+## 2026-09-07 — 前端恢复必须复用既有资源并以远端状态为准
+
+- Session 创建的 `started_at` 是幂等输入的一部分；前端首次尝试即持久化 `sessionStartedAt`，后续重试不得生成新时间或用新资源掩盖中断。
+- 已获得 Session/Study/Series ID 后必须复用同一资源；恢复先查询 Series 远端当前影像，而不是只相信可能过期的 localStorage 状态。
+- `ready` 影像直接复用，`validating` 继续查询，`uploading` 仅在用户重新选择原文件后重放同一 prepare-upload 合同；quarantined/deleted/superseded 明确失败。
+- 浏览器出于安全原因不会跨刷新保留 `File` 对象，因此要求用户为未完成 PUT 的影像重新选择原文件是明确产品边界，不通过持久化文件内容或 signed URL 绕过。
+- Task 查询瞬断不应终止业务观察；使用有上限的指数退避和 180 次总轮询门，按 Quality/Diagnose/Localization 独立记录错误，恢复时不清除其他链路错误。
+- 以上改动只增强现有链路恢复，不新建 Service、Worker、Gateway、Repository 或数据库合同；静态验证不能替代真实网络/OSS 故障注入。
+
+## 2026-09-04 — 当前数据集只能用于 ABN/NOR 操作标签一致性 Pilot
+
+- 指定数据集的 `metadata.Disease` 与文件名 `_ABN_/_NOR_` 完全一致，annotations 不提供病种、finding 或报告 Gold；它不是独立临床真值。
+- 候选宠物/检查分组存在大量 ABN/NOR 混合，不能把图像级标签直接提升为病例级单一诊断。
+- 在医学 Gold、Scorer 和 Holdout 建立前，只允许将组内纯标签、2–5 图样本用于操作标签一致性 Pilot；结果必须同时报告严格命中、安全召回、review/non-diagnostic 与工程失败，不能称为临床准确率认证。
+- 工程失败保留在总分母并单独归因；不得失败后替补、过滤非 VD 投照或将 Provider 输出反推为 Gold。
+
+## 2026-09-04 — X-Ray Provider Stage 统一使用 Gemini 3.8 Flash
+
+- 按用户明确授权，当前 X-Ray 7 个 Provider Stage 统一声明 `gemini-3.8-flash/race`，包括独立 Anatomy Localization；Prompt 仍从指定 Nacos namespace 动态 exact 获取，AI 调用仍只经现有 AI Platform/Gateway/AIRequestService。
+- fresh Cat/Dog 主链均完成工程 PASS，Dog ReportGeneration `1.0.4` 未复现 3.5 的字符改写；truth-preserving validator、单 Attempt、无 retry/fallback 合同保持不变。
+- 本轮两例均走 `primary_final`，所以 TargetedReview 的 3.8 Runtime 资格不能由这两次运行推导；Anatomy Localization 也不能由诊断主链 PASS 推导为已通过。
+- 单次病例工程通过不升级为模型稳定性或医学准确率结论；继续保留 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
+
+## 2026-09-04 — ReportGeneration 冻结医学对象不得再由模型回显
+
+- Dog Prompt `1.0.4` 的受控复现仅发生一处字符级改写：“对位和稳定性”变为“对位 and 稳定性”；这足以触发正确的 truth-preserving fail-closed。
+- 因此本问题不是 Schema 缺字段或 JSON 解析失败，继续强化“机械复制”Prompt 也不能提供确定性保证。
+- 后续若实施 v2，`DecisionFinalization.complete_medical_result` 保持唯一医学事实 owner；模型只生成小型报告摘要投影，最终 Report 由程序原样注入冻结对象并做 SHA/深度相等校验。
+- 推荐逻辑拆分为 3 部分：病例摘要 AI、技术质量摘要 AI、冻结医学事实非 AI；前两者可并发，但必须使用独立 Prompt/Schema/Call/Attempt 和同一 source SHA，任一失败不发布 Report。
+- v1 handler/schema/validator/Profile 与已发布 Prompt 必须保留供历史 Task replay；v2 使用新不可变合同与 Prompt 版本。该决策不授权立即实施。
+
 ## 2026-08-30 — 最终开发文档的体位、多图与分割边界
 
 - 当前 projection 权威是调用方在 `prepare-upload` 对每张影像显式声明的值；系统将其冻结到 Image、Series/Study Manifest、Task Snapshot、Prompt context 与 Provider SourceRef。当前没有 DICOM `ViewPosition` 自动回填，也没有 AI 像素体位识别。
@@ -1171,8 +1210,128 @@
 | 决策 | 理由 | 证据 |
 |---|---|---|
 | 新 XRay Stage 直接声明 `MODEL_ROUTE` 和 `PROMPT_KEYS`，不从 AI Config DB 解析模型或 Prompt key | 与用户指定的 `ms-ai-fast` 使用方式一致，接口/Stage 切换模型只需修改局部代码声明，避免控制面配置链过度复杂 | XRay Stage handlers；`core/ai/model_route.py` |
-| Prompt 通过独立 HTTP Render API 获取，且外部 I/O 位于数据库事务之外 | 复用 ms-ai-fast 的 Prompt Runtime 合同，同时保持现有事务/Outbox 可靠性边界 | `prompt_runtime_client.py`；`workers/imaging_worker/stage_execution.py` |
+| Prompt 通过 direct Nacos Client API 获取并在 Worker 事务外渲染 | 完全沿用 `ms-ai-fast` 的 Nacos latest、StrictUndefined 与 `$VARIABLE` 语义，同时保持现有事务/Outbox 可靠性边界；不依赖 `ms-prompt-service` | `prompt_runtime_client.py`；`prompt_source.py`；`workers/imaging_worker/stage_execution.py` |
 | 不创建第二套 AI Gateway 或 Worker；模型请求继续复用 `AIRequestService`、Call/Attempt 和 `GatewayClient` | 保留已有可靠执行、幂等、失败审计和 Provider 边界，避免为“去数据库配置”重写整条运行链 | `ai_request_service.py`；Gateway contracts |
 | 数据库继续保存运行与审计事实，但不作为新 XRay route/prompt 配置源 | 用户要求“不用数据库”针对 AI/Prompt 配置读取；Task/Stage/Call/Attempt 是可靠执行和审计所需事实，不应删除 | Task runtime snapshot；Call/Attempt persistence |
 | 历史 Config Task/replay 继续使用 frozen Config 兼容分支 | 去配置化不应破坏已经冻结的历史任务、结果查询和 replay 语义 | `TaskService._lineage_response_schema()` legacy branch |
 | 本轮不加入 `reasoning_effort` / `xhigh` | 用户明确要求“先不管 xhigh”；模型保持独立标识 `gpt-5.6-sol` | 当前用户范围；Stage `MODEL_ROUTE` |
+
+## 2026-09-03 — code-owned 全链审计与平台失败边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| `run_e2e_local.py` 的 full-chain 审计跟随 code-owned Prompt/route snapshot，不再查询旧 DB Config/Gemini 身份 | 当前生产路径已不从 Config DB 读取 Prompt/model；继续硬编码旧 Config 会让真实成功在审计阶段误失败且无法跑狗 | `scripts/dev/run_e2e_local.py`；Task/Call runtime request snapshot |
+| AI Platform HTTP 500 不触发 Gateway 自动重试，也不直接修改 Prompt | 与 `ms-ai-fast` 的 `raise_for_status` 语义一致；本次无 Provider response 证据，不能做无证据 Prompt 调参 | Cat Task `657496...`；Attempt `f73e03...`；`gateway_client.py` |
+| 当前 Cat/Dog 完成状态保持未关闭 | Cat 在 SystemAnalysis HTTP 500 停止，Dog 未运行；旧 Gemini 证据不能替代当前 `gpt-5.6-sol` code-owned 路由 | 当前 Runtime DB 与 task/current/history 查询 |
+
+## 2026-09-03 — AI Platform 60 秒 timeout 归因与修复边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 当前 Platform 500 按上游 Endpoint timeout 处理，不按 Prompt/Schema 错误处理 | 三次失败均在约 61–64 秒返回 `internal_error`；Platform Endpoint 默认 timeout=60 并传入 AsyncOpenAI；2 图 SystemAnalysis 在约 54 秒成功 | Platform `ai_proxy_service.py` / `openai_adapter.py` / `openai_proxy.py`；当前三次 Call/Attempt |
+| ms-image 不添加自动 retry/fallback，也不为 timeout 改写医学 Prompt | 失败发生在 Platform 内部上游边界；本地重试会偏离 `ms-ai-fast` 的 HTTP 失败语义并污染单 Attempt 审计 | Gateway 对齐测试；三次均单 Attempt |
+| 正确修复单位是 AI Platform Endpoint timeout 配置，建议至少 120 秒、优先 180 秒 | ms-image client 已等待到 Platform 主动返回 500；提高调用方 timeout 无法延长 Platform 内部 60 秒上游期限 | Platform client timeout 实现与运行耗时 |
+
+## 2026-09-03 — Gemini 路由、Report Prompt 与条件拓扑裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 仅将诊断主链 6 个 AI Stage 切到 `gemini-3.5-flash/race` | 用户要求重试诊断全链；Anatomy Localization 是另一条展示链，不应被全局替换 | 6 个 Stage `MODEL_ROUTE`；Localization 断言仍为 `gpt-5.6-sol` |
+| ReportGeneration `medical_result_rewritten` 通过新不可变 Prompt 版本修复，不放宽 validator | Nacos `1.0.1` 只要求语义保留，Runtime 要求深度完全相等；Prompt 责任明确，严格校验是防止医学事实漂移的正确边界 | 首次 Gemini Cat Task `780b6d97...`；Cat/Dog Prompt `1.0.2` |
+| Cat/Dog Prompt 同步升为 `1.0.2` | 同一 Stage 的物种版本应保持相同技术合同，避免只修猫后让狗重复失败 | Nacos governance/latest exact readback；Fresh Cat/Dog ReportGeneration PASS |
+| Full-chain harness 必须接受 TargetedReview 条件分支的两种合法拓扑 | `targeted_review` 只在 FamilyRouting 产生合法 candidate 时物化；固定要求 8 Stage/5 Call 会把 `primary_final` 成功任务误报为失败 | Cat 8 Stage/5 Call targeted；Dog 7 Stage/4 Call primary-final |
+| 不重复调用 Dog Provider来修复 harness 误报 | Dog Task/Report/Call/Attempt 已全部完成；只读 receipt helper 足以验证修改后的审计逻辑，重跑只会增加成本与新事实 | Dog Task `7ec955a6...`；只读 helper PASS |
+| Gemini 猫狗工程 PASS 不升级为医学准确率 PASS | 工程血缘和严格 Schema 不能替代可信标签、Gold、Scorer 与 Holdout | `403 passed` 与两条 Runtime evidence；医学评估资产缺失 |
+
+## 2026-09-04 — Anatomy Localization 独立展示接口边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 展示接口作为 Localization Task 的只读 sidecar 收口，不进入 diagnose Pipeline | 用户正在并行调整主链；展示能力只需要消费既有冻结结果和影像，不应触发 Stage、Provider、Report 或 Task 状态变化 | `anatomy_localizations.py`；`TaskService.prepare_anatomy_localization_view()` |
+| 结果查询继续复用既有完整 lineage 校验 | 该能力已在完成度总账标记 `IMPLEMENTED`，重复实现会扩大冲突面并削弱既有安全合同 | `TaskService.get_anatomy_localization()`；开发合同 §3.4 |
+| 签名 URL 必须在数据库事务外生成，并绑定冻结 object version | 避免网络 I/O 占用事务，同时防止相同 object key 的后续版本替换展示内容 | `get_explicit_transaction_session()`；`OSSObjectStore.sign_download_url()` |
+| 图例从 Anatomy label contract 动态构建，中文名称和颜色仅作为展示映射 | 机器标签事实源保持唯一且不被 UI 文案污染；映射漂移时 fail-closed | `_build_legend()`；`load_anatomy_label_contract()` |
+| 本切片不实现 `source_task_id` 主链关联 | 该能力需要独立 Schema/Model/migration 和多任务 current 语义授权，不属于“不干扰现有业务”的纯展示接口范围 | backlog 的 Localization Slice A |
+
+## 2026-09-04 — Cat Quality projection consistency 继续采用 Prompt-first
+
+- 对 `lateral_indeterminate` 的失败不通过放宽 `_expected_projection_consistency()` 或 Python 后处理解决。
+- 新 Prompt 必须逐项抄清服务端 validator 的 canonical 比较规则；旧 Nacos 版本保持不可变。
+- 被拒 Provider 正文未持久化，具体 observed/consistency pair 记为 UNKNOWN，不从错误码反推伪造。
+
+## 2026-09-04 — Anatomy Localization 显式主链关联裁决
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 新建 `anatomy_localization` 必须提供指向 `diagnose` Task 的 `source_task_id` | 用户要求可从主链精确发现展示链；Study/Revision 可能有多个 Task，不能作为主从键 | `TaskCreate` 校验；`TaskService` source contract；提交 `5c2e1ec` |
+| 数据库 `source_task_id` 保持 nullable，但新请求层必填 | nullable 只服务历史 Task 读取兼容；新数据必须形成完整显式血缘 | migration `20260904_01`；`task_record.source_task_id`；Schema validator |
+| 同一 source Task 最多一个非终态 Localization，终态历史保留 | 避免 current 语义和重复执行 owner 不确定，同时保留可审计历史 | `TaskDal` source 查询；`TaskService` 并发状态校验；current/history API |
+| 主链 Task 只返回关联摘要，bbox 与展示票据继续由 Localization 专用接口提供 | 防止通用 Task/诊断 Report 膨胀或复制展示结果合同 | `TaskResponse.anatomy_localization`；`anatomy_localizations.py` |
+| migration 使用普通列与普通索引，不加 foreign key | 符合项目 MySQL 约束并保持任务历史兼容；业务一致性由 Service fail-closed 校验 | `20260904_01_add_task_source_reference.py` |
+
+## 2026-09-04 — X-Ray 前端 Basic Auth 边界
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 前端 Runtime 认证使用内存态 Basic Auth，不持久化用户名或密码 | 登录模块尚未改动，用户明确要求暂不通过 Token；减少浏览器持久化凭证暴露面 | `apps/frontend/src/lib/api.ts`；`XrayWorkspacePage.tsx` |
+| OSS signed URL PUT 不发送 Runtime Authorization | signed URL 是独立对象存储授权边界，把 Basic header 发往 OSS 会泄露 Runtime 凭证 | `RuntimeApi.uploadObject()` |
+| readiness 后追加受保护只读鉴权探针 | readiness 是公共接口，单独调用无法证明 Basic 凭证有效 | `RuntimeApi.verifyAuthentication()`；连接流程 |
+| workflow localStorage 使用显式白名单而非序列化完整响应 | 真实响应可能携带未声明快照或医学正文；TypeScript 类型不能在运行时剥离额外字段 | `apps/frontend/src/state/workflow.ts` |
+| Quality 依赖 Study `status=ready` | 图片 ready 不等于 Study finalize 成功；必须保留冻结 Study 的服务端事实门 | `WorkflowState.studyStatus`；`TaskBoard.studyReady` |
+| 不在本切片修改后端以支持 Basic Auth | 用户仅要求前端先改认证方式，且明确登录模块尚未改动；认证转换属于独立集成决策 | `apps/backend/core/dependencies.py` 仍为 `HTTPBearer` |
+
+## 2026-09-04 — 前端并行任务编排
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| Quality completed 后先创建 Diagnose，拿到 ID 即立即创建 Localization，不等待 Diagnose completed | Localization 必须引用 Diagnose ID，但后端合同不要求 source 已完成；这是满足因果依赖同时实现执行并行的最早启动点 | `XrayWorkspacePage.createDiagnose()`；`TaskService` source contract；Mock 创建间隔 15ms |
+| “并行”定义为 Task 执行阶段重叠，而不是两个创建 POST 同时发出 | Localization POST 的 `source_task_id` 来自 Diagnose POST 响应，两个创建请求存在不可消除的因果顺序 | Localization request body；Mock event timeline |
+| Localization 单独失败不撤销已启动的 Diagnose | 两条链是独立任务；展示链启动失败不应破坏可继续完成并产出 Report 的诊断主链 | `诊断主链已启动，但展示链启动失败` 分链错误处理 |
+| 手动 Localization 重试只要求 Diagnose 已创建 | 后端不要求 source completed；等待完成会重新引入串行瓶颈 | `createLocalization()`；`TaskBoard.enabled=Boolean(diagnoseTask)` |
+
+## 2026-09-04 — 真实数据集报告页证据语义
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 真实数据集 JSON 的矩形框在 UI 中命名为“数据集标注框”，不命名为器官分割 | JSON 只证明 Bounding Box 与原始标签 `부위표시`，不能证明器官轮廓、病灶范围或 pixel mask | `ReportImagingPanel` 根据 legend `dataset_annotation` 切换文案；浏览器截图 |
+| Mock 最终报告只整理可验证的数据集事实，不生成新的医学诊断 | 数据集没有自然语言报告、疾病 Gold 或 `Ch01–Ch07` 权威字典；擅译会破坏 truth-preserving 边界 | Mock Report R1 的 findings/impression/limitations；`xray-v2-accuracy-governor` 约束 |
+| 报告页使用同屏“左侧影像/定位 + 右侧冻结报告”布局，并保持独立加载 | Localization 可能先于 Diagnose 完成；阅片不应被 Report 阻塞，Report 也不应被 bbox 结果覆盖 | `ReportPanel`、`ReportImagingPanel`；localization-first 中间态截图 |
+| 报告 source refs 只负责选择对应影像，不从 bbox 派生医学结论 | UI 是两条现有链路的消费者，不是第三条 AI 链；联动属于导航证据，不属于诊断推理 | 点击 `VD` 后切换到 `image-real-2` / ventrodorsal 的浏览器证据 |
+
+## 2026-09-05 — 报告页视觉与响应式合同
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 阅片区使用深青黑，冻结报告使用冷灰白纸张，状态色只承担语义 | 降低大面积高饱和颜色冲突，让影像和正式报告形成明确工作区边界；青色用于主操作、绿色只表示完成、黄色只表示风险 | `apps/frontend/src/styles.css`；最终 1200×740 截图 |
+| 桌面端左右栏等高且独立滚动，1100px 以下改为顺序阅读 | 阅片时需要影像和报告并排对照，同时避免整个页面长滚动；窄屏并排会压缩影像与正文，因此移动端优先顺序阅读 | `.report-workspace`、`.report-imaging`、`.clinical-report-document` 与响应式规则 |
+| 双链时间线只展示 Task 已有事实，不生成第三套流程状态 | UI 应忠实消费 Diagnose/Localization 的 created/started/finished/status 与 `source_task_id`，不能用动画或推测制造并行事实 | `ParallelTaskLane`；`CASE-DATASET-CH07-PARALLEL` 浏览器时序证据 |
+
+## 2026-09-07 — 全链回归证据边界确认
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 全链回归 PASS 继续限定为真实数据集 + 真实前端 + Mock Runtime/OSS | 真实 JPEG 与 UI 编排可以验证上传、状态、并行和渲染，但 Mock 任务/报告/签名响应不能替代真实 Runtime、Provider、OSS 或临床验证 | `CASE-DATASET-CH07-E2E-20260907`；`output/playwright/xray-e2e-20260907-*.png`；请求审计 |
+| 并行资格以执行区间重叠和 Localization-first 中间态为准 | 两个创建请求有 `source_task_id` 因果关系；同时发 POST 不是正确门槛，Task 开始/完成时间与页面中间态才是可核验证据 | Diagnose start `01:39:04.729Z`、Localization start `01:39:04.744Z`；Localization finish `01:39:18.813Z`、Diagnose finish `01:39:32.856Z` |
+
+## 2026-09-07 — Localization Prompt 缺 Schema 的修复单位
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 不在 Runtime 中为 Localization 绕过 Nacos Output Schema 门 | Output Schema 是 Prompt 渲染、AI Config 冻结和 Provider 响应校验的共同合同；绕过会破坏 fail-closed 与审计边界 | `PromptRuntimeClient._render_with_nacos()`；只读复现 `has_output_schema=false` |
+| 修复必须创建新的不可变 Nacos Prompt 版本，不能覆盖 `1.0.0` | 当前 `1.0.0` 已是外部历史身份；仓库已有完整 v1 Schema，可作为新版本输入，但外部写入必须单独授权并完成 exact 回读 | `prompts/xray/anatomy_localization.v1.schema.json`；Nacos Cat metadata；开发合同 3.4 |
+
+## 2026-09-07 — Basic Auth 真实全链与报告页证据语义
+
+| 决策 | 理由 | 证据 |
+|---|---|---|
+| 报告页使用“真实工程链路”，不再显示“Mock Runtime 演示” | 本病例来自真实 Runtime、OSS 与 Provider；继续写 Mock 会误导验收，但“真实工程链路”又不会暗示医学准确率已验证 | `apps/frontend/src/components/ReportPanel.tsx`；真实 Task/Report IDs；浏览器截图 |
+| 并行资格继续以 Task 执行区间重叠为准 | Localization 创建必须先拿到 Diagnose ID；两个 POST 有因果顺序，但两 Task 随后独立执行并重叠约 48.47 秒 | Diagnose/Localization `started_at`、`finished_at`；`source_task_id` |
+| 开发环境 OSS 上传代理只做 signed PUT 的同源转发 | 浏览器直连 OSS 被真实 CORS 阻断；代理复用既有 signed URL，不创建第二套后端上传 API，生产和未配置开发代理时仍走原路径 | `apps/frontend/vite.config.ts`；`apps/frontend/src/lib/api.ts`；真实上传回归 |
+| signed view URL 过期是可恢复展示状态 | 短效 URL 不应持久化；页面通过 `prepare-view` 重新申请后原图与 bbox 恢复 | 报告页“影像链接已过期”→“重新申请”浏览器复验 |
+
+## 2026-09-07 — 真实并发证据门修正（取代此前 Task 区间口径）
+
+- Task 生命周期重叠仅证明任务共存；实际并行须核对 AI Stage/Attempt 区间。R3 单槽反例与 R4 双槽真实成功为证据，远端 Provider 内部计算时间保持未知。
+- 保留唯一 launcher/Worker owner，默认两个 prefork 执行槽位；不新建 Worker 服务或队列，参数可显式配置。
+- Runtime 安全摘要需要的 source_task_id 应由 DAL 同次加载，不在序列化中触发异步懒加载。
+- Quality 页面直接消费后端 primary_body_part 与 declared_projection，恢复页面时重读明细，不伪造未知结果或静默覆盖体位。

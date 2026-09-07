@@ -2,9 +2,11 @@
 """Run repeatable local XRay engineering E2E checks via the public Runtime API.
 
 This tool verifies public Image, Study, Task, Report or Anatomy Localization
-contracts. Optional runtime-receipt verification reads the existing audit
-records without mutating them. It does not infer medical facts or print
-credentials, signed URLs, clinical text, Provider responses or report content.
+contracts. Runtime calls use configured Basic Auth by default; Bearer remains
+an explicit compatibility mode. Optional runtime-receipt verification reads
+the existing audit records without mutating them. It does not infer medical
+facts or print credentials, signed URLs, clinical text, Provider responses or
+report content.
 """
 
 from __future__ import annotations
@@ -23,10 +25,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import dotenv_values
 
 
 DEFAULT_API_BASE = "http://127.0.0.1:8010/api/v1"
 DEFAULT_DEV_PYTHON = "/opt/homebrew/anaconda3/bin/python3.12"
+DEFAULT_RUNTIME_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 CLINICAL_CONTEXT_VERSION = "xray-clinical-context.v1"
 SNAPSHOT_VERSION = "task-request-snapshot.v3"
 SERIES_MANIFEST_VERSION = "series-image-manifest.v2"
@@ -106,6 +110,25 @@ def optional_non_empty(value: str) -> str:
     if not normalized:
         raise argparse.ArgumentTypeError("must not be empty")
     return normalized
+
+
+def load_basic_auth_credentials(
+    env_file: Path = DEFAULT_RUNTIME_ENV_FILE,
+) -> tuple[str, str]:
+    """Load Runtime Basic credentials without overriding process values."""
+    file_values = dotenv_values(env_file) if env_file.is_file() else {}
+
+    def resolve(name: str) -> str:
+        if name in os.environ:
+            return os.environ[name]
+        value = file_values.get(name, "")
+        return value if isinstance(value, str) else ""
+
+    username = resolve("BASIC_AUTH_USERNAME").strip()
+    password = resolve("BASIC_AUTH_PASSWORD")
+    require(bool(username), "BASIC_AUTH_USERNAME is missing")
+    require(bool(password), "BASIC_AUTH_PASSWORD is missing")
+    return username, password
 
 
 def utc_iso(value: datetime) -> str:
@@ -341,6 +364,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument(
+        "--auth-mode",
+        choices=("basic", "bearer"),
+        default="basic",
+        help=(
+            "Runtime authentication mode. Basic reads BASIC_AUTH_USERNAME and "
+            "BASIC_AUTH_PASSWORD from the process environment first, then the "
+            "repository .env file."
+        ),
+    )
+    parser.add_argument(
         "--task-type",
         choices=("diagnose", FULL_CHAIN_HARNESS_TASK_TYPE, "anatomy_localization"),
         default="diagnose",
@@ -482,12 +515,29 @@ def issue_dev_token() -> str:
 
 
 class RuntimeClient:
-    def __init__(self, *, api_base: str, token: str) -> None:
+    def __init__(
+        self,
+        *,
+        api_base: str,
+        basic_credentials: tuple[str, str] | None = None,
+        bearer_token: str | None = None,
+    ) -> None:
         self.api_base = api_base
-        self.client = httpx.Client(
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
+        require(
+            (basic_credentials is None) != (bearer_token is None),
+            "exactly one Runtime authentication mode must be configured",
         )
+        if basic_credentials is not None:
+            username, password = basic_credentials
+            self.client = httpx.Client(
+                auth=httpx.BasicAuth(username=username, password=password),
+                timeout=30,
+            )
+        else:
+            self.client = httpx.Client(
+                headers={"Authorization": f"Bearer {bearer_token}"},
+                timeout=30,
+            )
 
     def close(self) -> None:
         self.client.close()
@@ -2271,8 +2321,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.case_manifest is not None
         else build_legacy_single_image_case(args)
     )
-    token = issue_dev_token()
-    client = RuntimeClient(api_base=args.api_base, token=token)
+    if args.auth_mode == "basic":
+        basic_username, basic_password = load_basic_auth_credentials()
+        client = RuntimeClient(
+            api_base=args.api_base,
+            basic_credentials=(basic_username, basic_password),
+        )
+    else:
+        client = RuntimeClient(
+            api_base=args.api_base,
+            bearer_token=issue_dev_token(),
+        )
     evidence: list[dict[str, Any]] = []
     try:
         for run_number in range(1, args.repeat + 1):
