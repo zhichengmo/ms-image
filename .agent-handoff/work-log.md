@@ -1,14 +1,5 @@
 # 当前工作日志
 
-## 2026-09-03 — 当前工作区 Git 收口
-
-- 按用户明确授权开始提交和推送当前有用代码；提交前复核合同第 3 节能力总账，限定为 Git 外部写，不运行 Runtime/Provider/Nacos/DB。
-- 审计 45 个 tracked 修改和 151 个未跟踪文件；排除 ignored `.env`、IDE、缓存和依赖目录，确认 Prompt/Postman/测试中无真实凭据。
-- 对功能源码、Prompt、Schema、迁移、测试、Postman 和 `scripts/dev/run_e2e_local.py` 使用精确路径暂存，未使用 `git add -A`。
-- 创建提交 `ee2fa3a feat: complete xray runtime and pet profile workflows`：86 files，19729 insertions，291 deletions。
-- 发现 full-chain harness 仍有一组未进入首个暂存快照的按物种 Config 校验改动；复核后作为有用代码单独提交为 `2b7d66b fix(dev): validate species-specific full-chain configs`。
-- 当前正在整理已有文档和 `.agent-handoff/` 历史；下一步运行 handoff maintenance、创建文档提交、推送当前分支，再创建 `codex/per-flow-model-routing`。
-
 ## 2026-09-03 — 模型路由分支交接完成
 
 - 创建文档/handoff 提交 `adbd2b1 docs(handoff): preserve xray qualification history`，共 122 files；包含 108 个本次新增 archive 文件与两份架构文档。
@@ -306,3 +297,12 @@
 - staged diff 首次发现 6 个新前端文件 EOF 多余空行，已修正并使 `git diff --cached --check` 通过；该项是本轮最后一个 actionable finding。
 - `git switch codex/per-flow-model-routing` 因该分支被 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 占用而拒绝；只读核对确认其 HEAD 与远端同为 `5c2e1ec` 且存在独立未提交改动，本轮不触碰该工作树。
 - 下一步在当前相同父提交的 detached HEAD 创建提交，使用显式 `HEAD:codex/per-flow-model-routing` 普通 fast-forward push 并确认远端 SHA；禁止 `git add -A` 与 force push。
+
+## 2026-09-07 — Basic Auth X-Ray 前端工作流交付
+
+- 完成全部未提交改动审查并修复 Postman Bearer-only Runtime 阻断、E2E/launcher Basic 凭证加载边界、Worker 默认双槽和前端暂存边界；审查结束无剩余 actionable finding。
+- 后端完整测试 `413 passed, 48 warnings`，Basic Auth 定向测试 `7 passed`；Ruff、compileall、launcher shell syntax、Postman 认证合同、前端 lint/build、whitespace 与敏感信息门全部通过。
+- 使用精确路径暂存，确认 `.env`、真实密码/Token/Private/API Key、signed URL、浏览器证据、`node_modules`、`dist`、`.playwright-cli` 和 `output` 均未进入提交。
+- 创建功能提交 `6521a1ed6b017548ad2e25aa8103e3f0d6bcdebf feat(xray): add basic-auth frontend workflow`，以显式非强制 refspec 普通推送到 `origin/codex/per-flow-model-routing`，推送后远端 SHA 与功能提交一致。
+- 当前工作树继续保持 detached HEAD，因为目标本地分支由 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 的脏工作树占用；全程未修改、清理或暂存该工作树。
+- 本轮没有重新调用真实 AI、OSS、Nacos、数据库或 Runtime；沿用的真实证据仍仅覆盖既有 Cat 双图 Basic Auth 全链和 AI Stage 重叠，医学状态保持 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。

@@ -1,12 +1,12 @@
 # 风险、阻断与未知项
 
-## 2026-09-07 — Basic Auth 前端提交的剩余证据边界
+## 2026-09-07 — Basic Auth 前端交付后的剩余证据边界
 
 - **本轮没有重跑真实外部全链**：413 个后端测试、前端 build/lint、Postman 与 launcher 检查只证明离线工程合同；新的真实 AI/OSS/Nacos/DB/Runtime 运行证据为 NOT RUN。
 - **并行不是无因果同时创建**：Localization 必须引用 Diagnose `source_task_id`，两个 POST 存在短暂顺序；并行资格来自 Task 创建后的独立 Worker slot 与 AI Stage 实际执行重叠，默认 launcher concurrency=2。若部署覆盖为 1，运行时仍会串行。
 - **凭证必须由部署环境管理**：仓库只保留变量名和 `.env.example` 占位；任何真实 Basic 密码、Bearer token、Private/API Key 或 signed URL 出现在 staged diff 都是提交停止条件。
 - **真实证据边界不扩张**：既有 Cat 双图 Basic Auth 全链不覆盖猫狗 2–5 图矩阵、医学 Gold/准确率、Localization 医学正确性或生产 HTTPS/CORS；继续 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。
-- **目标本地分支被另一工作树占用**：`/Users/mozhicheng/workspace/code/cy-code/ms-image` 当前有独立未提交改动，禁止切换、清理、暂存或合并它们；本轮只从相同父提交 detached commit 并 fast-forward 远端。推送后该工作树的本地分支会落后远端，后续所有者需在保留其改动的前提下自行同步。
+- **目标本地分支被另一工作树占用**：功能提交 `6521a1e` 已从当前 detached 工作树普通推送，但 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 仍有独立未提交改动且其本地分支停在旧提交；禁止切换、清理、暂存或合并它们，后续所有者需在保留其改动的前提下自行同步远端。
 
 ## 2026-09-07 — 前端故障恢复优化后的证据边界
 

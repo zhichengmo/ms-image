@@ -41,8 +41,8 @@
 - 最后更新：2026-09-07
 - 工作区：当前 worktree `/Users/mozhicheng/.codex/worktrees/cbd9/ms-image`（上游仓库 `/Users/mozhicheng/workspace/code/cy-code/ms-image`）
 - 当前开发合同：`docs/ms-image-current-development-contract.md`（项目级执行规则；每次任务开始前核对完成度总账，并声明单一目标、write set、外部权限和停止条件）
-- 当前状态：`.agent-handoff/snapshot.md`（2026-09-07 前端交付与故障恢复优化完成；`src/lib` 可提交、Task 轮询可恢复、上传可按远端状态续传；真实故障注入未运行，医学准确率 UNKNOWN/NO-GO）
-- 下一动作：当前优化可交付；若需真实续传证据，单独授权受控网络/OSS 故障注入且不自动追加 AI 调用；医学 Gold/准确率和 production CORS/HTTPS 继续作为独立范围。
+- 当前状态：`.agent-handoff/snapshot.md`（Basic Auth X-Ray 前端工作流已由功能提交 `6521a1e` 普通推送；代码审查、后端全量测试、前端 lint/build、静态门和敏感信息门均通过；本轮未新增真实外部运行证据）
+- 下一动作：当前交付无必需代码动作；若需扩展证据，分别授权猫狗 2–5 图工程矩阵、受控网络/OSS 故障注入或医学 Gold/Scorer/Holdout，production 跨域部署仍需同源网关/CORS 与 HTTPS。
 - 风险来源：`.agent-handoff/risks.md`
 - 重构入口：`docs/refactor/README.md`
 - 当前 post-C1 XRay 实施权威：`docs/refactor/29-xray-post-c1-development-guide.md`（C1/C1.1、P1-A、P1-B、D1/E1-MV、C2 已实施；P1-C 经用户确认延期）

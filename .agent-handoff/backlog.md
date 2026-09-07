@@ -14,7 +14,7 @@
 - [x] 审查全部当前未提交更改并修复 Postman Bearer-only 阻断。
 - [x] 统一 E2E 与本地 launcher 的 Basic 凭证加载优先级和 fail-closed 行为。
 - [x] 完成后端 413 全量测试、前端 lint/build、静态门与 Postman 认证合同验证。
-- [ ] 完成敏感信息扫描、精确暂存、staged diff 复核、普通 commit/push 和远端 SHA 核对。
+- [x] 完成敏感信息扫描、精确暂存、staged diff 复核；功能提交 `6521a1e` 已普通推送且远端 SHA 核对一致。
 - [ ] 后续如需扩展工程证据，另行授权真实猫狗 2–5 图矩阵；医学 Gold/Scorer/Holdout 建立前不得开展准确率发布结论。
 
 ## 2026-09-07 — Basic Auth 真实全链工程验收

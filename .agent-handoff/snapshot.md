@@ -2,15 +2,16 @@
 
 ## Current Objective
 
-- Last updated: 2026-09-07，当前未提交改动的审查、修复和离线验证已完成，正在执行安全提交/推送门禁。
-- Active objective: 在无剩余 actionable finding、无敏感信息、远端未前进且 staged 清单准确的前提下，将 Basic Auth X-Ray 前端工作流及相关连续性记录提交并普通推送到 `origin/codex/per-flow-model-routing`。
-- Evidence level: SOURCE_REVIEW_PASS / BACKEND_FULL_SUITE_PASS / FRONTEND_BUILD_PASS / FRONTEND_LINT_PASS / STATIC_GATES_PASS；本轮真实 AI、OSS、Nacos、数据库和 Runtime NOT RUN。
-- Active branch: detached HEAD at `5c2e1ec`；本地 `codex/per-flow-model-routing` 与远端基线同 SHA，但该分支正由另一个含未提交改动的工作树占用。当前工作树将保持 detached，在父提交精确一致的前提下创建提交，并以显式 `HEAD:codex/per-flow-model-routing` 普通推送；禁止修改、reset 或清理另一个工作树。
+- Last updated: 2026-09-07，Basic Auth X-Ray 前端工作流已完成审查、修复、离线验证、功能提交和普通推送。
+- Active objective: 当前交付已完成，无必需代码动作；下一轮只在用户另行授权后扩展 Runtime、医学或 production 部署证据。
+- Evidence level: SOURCE_REVIEW_PASS / BACKEND_FULL_SUITE_PASS / FRONTEND_BUILD_PASS / FRONTEND_LINT_PASS / STATIC_GATES_PASS / FUNCTIONAL_COMMIT_PUSHED；本轮真实 AI、OSS、Nacos、数据库和 Runtime NOT RUN。
+- Delivery: 功能提交 `6521a1ed6b017548ad2e25aa8103e3f0d6bcdebf`（`feat(xray): add basic-auth frontend workflow`）已普通推送到 `origin/codex/per-flow-model-routing`，推送后远端 SHA 核对一致。
+- Active branch: 当前工作树保持 detached HEAD；本地 `codex/per-flow-model-routing` 被 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 的脏工作树占用且仍停在旧提交，禁止修改、reset、restore、暂存或合并该工作树内容。后续如继续从当前工作树交付，仍需使用显式非强制 refspec 并先 fetch 核对远端。
 - Completed capabilities not reimplemented: Session/Study/Series/Image、Revision/finalize、Task/Outbox/Relay/Worker/Gateway、Quality、Diagnose、Localization、Report，以及既有 Prompt/Schema/模型路由。
-- This run write set: 当前已审查的 Basic Auth 后端/测试/启动器、`apps/frontend/`、Postman collection/guide、相关 Prompt 快照、`.env.example`、`.gitignore`、开发合同与最小 handoff 状态文件；排除 `.env`、`.playwright-cli/`、`output/`、`node_modules/`、`dist/` 和运行证据缓存。
-- External permissions: 仅普通 Git commit/push；不调用 Provider、Nacos、外部数据库、真实 OSS 或 Runtime，不向日志/文件写入 Basic 密码。
-- Completion gate: 敏感信息扫描、精确暂存、`git diff --cached --check`、staged name/status/stat 复核已通过；剩余目标分支/远端最终核对、普通推送和远端 SHA 确认。
-- Stop gate: 发现真实凭证/签名 URL、未解决缺陷、远端前进、非 fast-forward 或需要 force push 时立即停止；另一工作树占用本地分支已通过 detached HEAD + 显式非强制 refspec 隔离，不触碰其工作区。
+- Delivered write set: Basic Auth 后端/测试/启动器、`apps/frontend/`、Postman collection/guide、相关 Prompt 快照、`.env.example`、`.gitignore`、开发合同与连续性记录；未提交 `.env`、`.playwright-cli/`、`output/`、`node_modules/`、`dist/` 或运行证据缓存。
+- External permissions used: 仅普通 Git commit/push；未调用 Provider、Nacos、外部数据库、真实 OSS 或 Runtime，未向日志/文件写入 Basic 密码。
+- Completion gate: 无剩余 actionable finding；敏感信息扫描、精确暂存、staged whitespace/name/status/stat、功能提交、普通推送和远端 SHA 核对均通过。
+- Stop gate: 后续若发现真实凭证/签名 URL、远端前进、非 fast-forward、需 force push 或必须触碰另一脏工作树，立即停止并请求用户处理。
 
 ## Completed Review And Fixes
 
@@ -33,11 +34,12 @@
 - PASS: handoff maintenance `changed=2 warnings=1 unresolved=0`；仅轮转旧 work-log。
 - PASS: 80 个 staged blob 敏感信息扫描；`.env`、`.playwright-cli/`、`output/`、`node_modules/`、`dist/` 未进入提交。
 - PASS: 首次 staged check 发现并修复 6 个新前端文件 EOF 多余空行，最终 `git diff --cached --check` 通过。
+- PASS: 功能提交 `6521a1e` 已创建并普通推送；`HEAD` 与 `origin/codex/per-flow-model-routing` 均为 `6521a1ed6b017548ad2e25aa8103e3f0d6bcdebf`。
 - WARN: npm 11.5.2 对 Node 18.20.8 有支持范围警告；后端仍有现存 Pydantic Config 和 `datetime.utcnow()` 弃用警告，均未导致验证失败。
 - NOT RUN: 本轮未再次调用真实 AI/OSS/Nacos/数据库/Runtime；沿用的真实工程证据仅是既有 Cat 双图 Basic Auth 全链与 AI Stage 重叠验证。
 
 ## Next Action And Boundaries
 
-- Next action: 重新暂存本次 handoff 结果，最终核对远端后在 detached HEAD 创建功能提交，并以显式非强制 refspec 普通推送到 `codex/per-flow-model-routing`。
+- Next action: 无必需代码动作；按用户授权可分别补猫狗 2–5 图工程矩阵、真实续传故障注入、医学 Gold/Scorer/Holdout 或 production CORS/HTTPS。
 - Blockers: 当前无已知代码阻断。
 - Open questions: 猫狗 2–5 图矩阵、医学 Gold/准确率、Localization 医学正确性和生产部署 CORS/HTTPS 仍未验证；继续 `MEDICAL_ACCURACY_UNKNOWN / MEDICAL_RELEASE_NO_GO`。

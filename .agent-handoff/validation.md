@@ -6,7 +6,7 @@
 - 截至 2026-09-03 Gemini 收口前的完整验证历史已原样归档至 `archive/validation-20260903T225200-full-history.md`；更早历史见 `archive.md`。
 - 工程通过、Provider 医学输出和医学准确率分开报告；文件名、目录名、单病例模型结果不得当作 Gold。
 
-## 2026-09-07 — Basic Auth 前端工作流提交门禁
+## 2026-09-07 — Basic Auth 前端工作流提交与推送
 
 | 检查 | 结果 | 说明 |
 |---|---|---|
@@ -22,8 +22,10 @@
 | staged whitespace | PASS | 首次发现 6 个新前端文件 EOF 多余空行并已修正；随后 `git diff --cached --check` 通过。 |
 | 敏感信息扫描 | PASS | 扫描全部 80 个 staged blob；`.env` 未暂存，示例凭证为空或惯用占位，Postman 凭证为变量引用，未发现私钥、真实 Token、API Key、签名 URL 或硬编码 Authorization。 |
 | handoff maintenance | PASS WITH ROTATION | `changed=2 warnings=1 unresolved=0`；仅轮转 1 段旧 work-log 并更新 archive 索引。 |
-| 远端基线 | PASS | fetch 后 HEAD、本地 `codex/per-flow-model-routing`、远端同为 `5c2e1ec`。 |
+| 提交前远端基线 | PASS | fetch 后父提交、目标本地分支与远端均为 `5c2e1ec`；远端未前进。 |
 | 本地分支占用核对 | PASS WITH ISOLATION | 分支由 `/Users/mozhicheng/workspace/code/cy-code/ms-image` 占用且该工作树有未提交改动；不触碰其文件或 index，改用同父提交 detached commit + 显式非强制远端 refspec。 |
+| 功能提交 | PASS | `6521a1ed6b017548ad2e25aa8103e3f0d6bcdebf feat(xray): add basic-auth frontend workflow`。 |
+| 普通推送与远端 SHA | PASS | `git push origin HEAD:refs/heads/codex/per-flow-model-routing` 成功；fetch 后 `HEAD` 与远端跟踪分支均为 `6521a1ed6b017548ad2e25aa8103e3f0d6bcdebf`，未使用 force push。 |
 | 真实外部全链重跑 | NOT RUN | 本轮未调用 AI、OSS、Nacos、数据库或 Runtime；不得将离线门升级为新的真实病例证据。 |
 | 医学发布资格 | NO-GO | 既有 Cat 双图工程证据不覆盖猫狗 2–5 图矩阵、医学 Gold/准确率或 Localization 医学正确性。 |
 
